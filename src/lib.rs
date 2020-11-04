@@ -6,3 +6,5 @@ pub type Result<T> = result::Result<T, Error>;
 
 pub mod cpu_set;
 pub mod linux_ptrace_dumper;
+pub mod minidump_cpu;
+pub mod thread_info;
