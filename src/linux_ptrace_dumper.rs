@@ -1,16 +1,16 @@
 // use libc::c_void;
+use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
 use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
 use std::ffi::c_void;
 use std::path;
 
-type Pid = u32;
 #[derive(Debug)]
 struct LinuxPtraceDumper {
     pid: Pid,
     threads_suspended: bool,
-    threads: Vec<usize>,
+    threads: Vec<Pid>,
 }
 
 impl LinuxPtraceDumper {
@@ -68,13 +68,14 @@ impl LinuxPtraceDumper {
             // generally completely meaningless and just pollutes the minidumps.
             // We thus test the stack pointer and exclude any threads that are part of
             // the seccomp sandbox's trusted code.
-            let mut skip_thread = false;
+            let skip_thread;
             let regs = ptrace::getregs(child);
             if regs.is_err() {
                 skip_thread = true;
             } else {
                 let regs = regs.unwrap(); // Always save to unwrap here
-                if cfg!(target_arch = "x86_64") {
+                #[cfg(target_arch = "x86_64")]
+                {
                     skip_thread = regs.rsp == 0;
                 }
                 #[cfg(target_arch = "x86")]
@@ -106,7 +107,7 @@ impl LinuxPtraceDumper {
                     .file_name()
                     .to_str()
                     .ok_or("Unparsable filename")?
-                    .parse::<usize>();
+                    .parse::<Pid>();
                 if let Ok(tid) = name {
                     self.threads.push(tid);
                 }
@@ -114,31 +115,22 @@ impl LinuxPtraceDumper {
         }
         Ok(())
     }
+
+    /// Read thread info from /proc/$pid/status.
+    /// Fill out the |tgid|, |ppid| and |pid| members of |info|. If unavailable,
+    /// these members are set to -1. Returns true if all three members are
+    /// available.
+    pub fn get_thread_info_by_index(&self, index: usize) -> Result<ThreadInfo> {
+        if index > self.threads.len() {
+            return Err(format!(
+                "Index out of bounds! Got {}, only have {}\n",
+                index,
+                self.threads.len()
+            )
+            .into());
+        }
+
+        let tid = self.threads[index];
+        ThreadInfo::create(self.pid, tid)
+    }
 }
-/*
-class LinuxPtraceDumper : public LinuxDumper {
- public:
-  // Implements LinuxDumper::BuildProcPath().
-  // Builds a proc path for a certain pid for a node (/proc/<pid>/<node>).
-  // |path| is a character array of at least NAME_MAX bytes to return the
-  // result. |node| is the final node without any slashes. Returns true on
-  // success.
-  virtual bool BuildProcPath(char* path, pid_t pid, const char* node) const;
-
-  // Implements LinuxDumper::GetThreadInfoByIndex().
-  // Reads information about the |index|-th thread of |threads_|.
-  // Returns true on success. One must have called |ThreadsSuspend| first.
-  virtual bool GetThreadInfoByIndex(size_t index, ThreadInfo* info);
-
- private:
-
-  // Read the tracee's registers on kernel with PTRACE_GETREGSET support.
-  // Returns false if PTRACE_GETREGSET is not defined.
-  // Returns true on success.
-  bool ReadRegisterSet(ThreadInfo* info, pid_t tid);
-
-  // Read the tracee's registers on kernel with PTRACE_GETREGS support.
-  // Returns true on success.
-  bool ReadRegisters(ThreadInfo* info, pid_t tid);
-};
-*/
