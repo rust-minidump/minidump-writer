@@ -7,23 +7,31 @@ use std::ffi::c_void;
 use std::path;
 
 #[derive(Debug)]
-struct LinuxPtraceDumper {
+pub struct LinuxPtraceDumper {
     pid: Pid,
     threads_suspended: bool,
-    threads: Vec<Pid>,
+    pub threads: Vec<Pid>,
 }
 
 impl LinuxPtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
-    pub fn new(pid: Pid) -> Self {
-        LinuxPtraceDumper {
+    pub fn new(pid: Pid) -> Result<Self> {
+        let mut dumper = LinuxPtraceDumper {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
-        }
+        };
+        dumper.init()?;
+        Ok(dumper)
     }
 
+    pub fn init(&mut self) -> Result<()> {
+        self.read_auxv()?;
+        self.enumerate_threads()?;
+        self.enumerate_mappings()?;
+        Ok(())
+    }
     /// Copies content of |length| bytes from a given process |child|,
     /// starting from |src|, into |dest|. This method uses ptrace to extract
     /// the content from the target process. Always returns true.
@@ -114,6 +122,14 @@ impl LinuxPtraceDumper {
             }
         }
         Ok(())
+    }
+
+    fn read_auxv(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn enumerate_mappings(&mut self) -> Result<()> {
+        unimplemented!()
     }
 
     /// Read thread info from /proc/$pid/status.
