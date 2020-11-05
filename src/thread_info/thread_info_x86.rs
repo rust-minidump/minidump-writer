@@ -1,41 +1,33 @@
-use super::{CommonThreadInfo, Pid};
+use super::{CommonThreadInfo, NT_Elf, Pid};
 use crate::minidump_cpu::RawContextCPU;
 use crate::Result;
+use core::mem::size_of_val;
 use libc;
-use nix::errno::Errno;
+use libc::user;
+use memoffset;
 use nix::sys::ptrace;
 use nix::unistd;
 
+const NUM_DEBUG_REGISTERS: usize = 8;
+
 #[derive(Debug)]
 pub struct ThreadInfoX86 {
-    pub stack_pointer: libc::c_ulonglong,
+    pub stack_pointer: libc::uintptr_t,
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
     pub regs: libc::user_regs_struct,
     pub fpregs: libc::user_fpregs_struct,
     #[cfg(target_arch = "x86_64")]
-    pub dregs: [libc::c_ulonglong; 8],
+    pub dregs: [libc::c_ulonglong; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
-    pub dregs: [libc::c_int; 8],
+    pub dregs: [libc::c_int; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
     pub fpxregs: libc::user_fpxregs_struct,
 }
 
 impl CommonThreadInfo for ThreadInfoX86 {}
 
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-enum NT_Elf {
-    NT_NONE = 0,
-    NT_PRSTATUS = 1,
-    NT_PRFPREG = 2,
-    NT_PRPSINFO = 3,
-    NT_TASKSTRUCT = 4,
-    NT_AUXV = 6,
-}
-
 impl ThreadInfoX86 {
-    pub const NUM_DEBUG_REGISTERS: u32 = 8;
     // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
     fn getregset(pid: Pid) -> Result<libc::user_regs_struct> {
         Self::ptrace_get_data::<libc::user_regs_struct>(
@@ -54,7 +46,7 @@ impl ThreadInfoX86 {
         )
     }
 
-    // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
+    // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
     fn getfpregs(pid: Pid) -> Result<libc::user_fpregs_struct> {
         Self::ptrace_get_data::<libc::user_fpregs_struct>(
             ptrace::Request::PTRACE_GETFPREGS,
@@ -62,49 +54,15 @@ impl ThreadInfoX86 {
             nix::unistd::Pid::from_raw(pid),
         )
     }
-    /// SLIGHTLY MODIFIED COPY FROM CRATE nix
-    /// Function for ptrace requests that return values from the data field.
-    /// Some ptrace get requests populate structs or larger elements than `c_long`
-    /// and therefore use the data field to return values. This function handles these
-    /// requests.
-    fn ptrace_get_data<T>(
-        request: ptrace::Request,
-        flag: Option<NT_Elf>,
-        pid: nix::unistd::Pid,
-    ) -> Result<T> {
-        let mut data = std::mem::MaybeUninit::uninit();
-        let res = unsafe {
-            libc::ptrace(
-                request as ptrace::RequestType,
-                libc::pid_t::from(pid),
-                flag.unwrap_or(NT_Elf::NT_NONE),
-                data.as_mut_ptr() as *const _ as *const libc::c_void,
-            )
-        };
-        Errno::result(res)?;
-        Ok(unsafe { data.assume_init() })
-    }
 
-    /// COPY FROM CRATE nix BECAUSE ITS NOT PUBLIC
-    fn ptrace_peek(
-        request: ptrace::Request,
-        pid: unistd::Pid,
-        addr: ptrace::AddressType,
-        data: *mut libc::c_void,
-    ) -> nix::Result<libc::c_long> {
-        let ret = unsafe {
-            Errno::clear();
-            libc::ptrace(
-                request as ptrace::RequestType,
-                libc::pid_t::from(pid),
-                addr,
-                data,
-            )
-        };
-        match Errno::result(ret) {
-            Ok(..) | Err(nix::Error::Sys(Errno::UnknownErrno)) => Ok(ret),
-            err @ Err(..) => err,
-        }
+    // nix currently doesn't support PTRACE_GETFPXREGS, so we have to do it ourselves
+    #[cfg(target_arch = "x86")]
+    fn getfpxregs(pid: Pid) -> Result<libc::user_fpxregs_struct> {
+        Self::ptrace_get_data::<libc::user_fpxregs_struct>(
+            ptrace::Request::PTRACE_GETFPXREGS,
+            None,
+            nix::unistd::Pid::from_raw(pid),
+        )
     }
 
     fn peek_user(pid: Pid, addr: ptrace::AddressType) -> nix::Result<libc::c_long> {
@@ -121,42 +79,36 @@ impl ThreadInfoX86 {
         let regs = Self::getregset(tid).or_else(|_| ptrace::getregs(unistd::Pid::from_raw(tid)))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
 
-        // #if defined(__i386)
-        // #if !defined(bit_FXSAVE)  // e.g. Clang
-        // #define bit_FXSAVE bit_FXSR
-        // #endif
-        //   // Detect if the CPU supports the FXSAVE/FXRSTOR instructions
-        //   int eax, ebx, ecx, edx;
-        //   __cpuid(1, eax, ebx, ecx, edx);
-        //   if (edx & bit_FXSAVE) {
-        //     if (sys_ptrace(PTRACE_GETFPXREGS, tid, NULL, &info->fpxregs) == -1) {
-        //       return false;
-        //     }
-        //   } else {
-        //     memset(&info->fpxregs, 0, sizeof(info->fpxregs));
-        //   }
-        // #endif  // defined(__i386)
-        #[cfg(target_arch = "x86_64")]
-        let dregs: [libc::c_ulonglong; 8] = [0; 8];
         #[cfg(target_arch = "x86")]
-        let dregs: [libc::c_int; 8] = [0; 8];
-
-        // for idx in 0..Self::NUM_DEBUG_REGISTERS {}
-        // for (unsigned i = 0; i < ThreadInfo::kNumDebugRegisters; ++i) {
-        //     if (sys_ptrace(
-        //         PTRACE_PEEKUSER, tid,
-        //         reinterpret_cast<void*> (offsetof(struct user,
-        //           u_debugreg[0]) + i *
-        //         sizeof(debugreg_t)),
-        //         &info->dregs[i]) == -1) {
-        //       return false;
-        //   }
-        // }
+        let fpxregs: libc::user_fpxregs_struct;
+        #[cfg(target_arch = "x86")]
+        {
+            if cfg!(target_feature = "fxsr") {
+                fpxregs = Self::getfpxregs(tid)?;
+            } else {
+                fpxregs = unsafe { mem::zeroed() };
+            }
+        }
 
         #[cfg(target_arch = "x86_64")]
-        let stack_pointer = regs.rsp;
+        let mut dregs: [libc::c_ulonglong; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
         #[cfg(target_arch = "x86")]
-        let stack_pointer = regs.esp;
+        let mut dregs: [libc::c_int; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
+
+        let debug_offset = memoffset::offset_of!(user, u_debugreg);
+        let elem_offset = size_of_val(&dregs[0]);
+        for idx in 0..NUM_DEBUG_REGISTERS {
+            let chunk = Self::peek_user(
+                tid,
+                (debug_offset + idx * elem_offset) as ptrace::AddressType,
+            )?;
+            dregs[idx] = chunk as u64; // libc / ptrace is very messy wrt int types used...
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        let stack_pointer = regs.rsp as libc::uintptr_t;
+        #[cfg(target_arch = "x86")]
+        let stack_pointer = regs.esp as libc::uintptr_t;
 
         Ok(ThreadInfoX86 {
             stack_pointer,
@@ -165,6 +117,8 @@ impl ThreadInfoX86 {
             regs,
             fpregs,
             dregs,
+            #[cfg(target_arch = "x86")]
+            fpxregs,
         })
     }
 
@@ -178,6 +132,7 @@ impl ThreadInfoX86 {
         self.regs.eip
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
         // out.context_flags = self.MD_CONTEXT_AMD64_FULL |
         //                      MD_CONTEXT_AMD64_SEGMENTS;
@@ -232,13 +187,13 @@ impl ThreadInfoX86 {
         out.flt_save.data_selector = 0; // We don't have this.
         out.flt_save.mx_csr = self.fpregs.mxcsr;
         out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
-        // unsafe {
-        //     std::ptr::copy(
-        //         &self.fpregs.st_space,
-        //         &mut out.flt_save.float_registers as &mut [u32; 32],
-        //         8 * 16,
-        //     );
-        // }
+
+        out.flt_save.float_registers[0] =
+            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.st_space[0..4]) };
+        out.flt_save.xmm_registers[0] =
+            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.xmm_space[0..4]) };
+        out.flt_save.xmm_registers[1] =
+            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.xmm_space[4..8]) };
         // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
         // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
     }

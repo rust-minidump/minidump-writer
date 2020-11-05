@@ -1,4 +1,7 @@
 use crate::Result;
+use nix::errno::Errno;
+use nix::sys::ptrace;
+use nix::unistd;
 use std::io::{self, BufRead};
 use std::path;
 pub type Pid = i32;
@@ -25,6 +28,17 @@ pub type ThreadInfo = imp::ThreadInfoAarch64;
 #[cfg(target_arch = "mips")]
 pub type ThreadInfo = imp::ThreadInfoMips;
 
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+enum NT_Elf {
+    NT_NONE = 0,
+    NT_PRSTATUS = 1,
+    NT_PRFPREG = 2,
+    //NT_PRPSINFO = 3,
+    //NT_TASKSTRUCT = 4,
+    //NT_AUXV = 6,
+}
+
 trait CommonThreadInfo {
     fn get_ppid_and_tgid(tid: Pid) -> Result<(Pid, Pid)> {
         let mut ppid = -1;
@@ -45,52 +59,54 @@ trait CommonThreadInfo {
         }
         Ok((ppid, tgid))
     }
+
+    /// SLIGHTLY MODIFIED COPY FROM CRATE nix
+    /// Function for ptrace requests that return values from the data field.
+    /// Some ptrace get requests populate structs or larger elements than `c_long`
+    /// and therefore use the data field to return values. This function handles these
+    /// requests.
+    fn ptrace_get_data<T>(
+        request: ptrace::Request,
+        flag: Option<NT_Elf>,
+        pid: nix::unistd::Pid,
+    ) -> Result<T> {
+        let mut data = std::mem::MaybeUninit::uninit();
+        let res = unsafe {
+            libc::ptrace(
+                request as ptrace::RequestType,
+                libc::pid_t::from(pid),
+                flag.unwrap_or(NT_Elf::NT_NONE),
+                data.as_mut_ptr() as *const _ as *const libc::c_void,
+            )
+        };
+        Errno::result(res)?;
+        Ok(unsafe { data.assume_init() })
+    }
+
+    /// COPY FROM CRATE nix BECAUSE ITS NOT PUBLIC
+    fn ptrace_peek(
+        request: ptrace::Request,
+        pid: unistd::Pid,
+        addr: ptrace::AddressType,
+        data: *mut libc::c_void,
+    ) -> nix::Result<libc::c_long> {
+        let ret = unsafe {
+            Errno::clear();
+            libc::ptrace(
+                request as ptrace::RequestType,
+                libc::pid_t::from(pid),
+                addr,
+                data,
+            )
+        };
+        match Errno::result(ret) {
+            Ok(..) | Err(nix::Error::Sys(Errno::UnknownErrno)) => Ok(ret),
+            err @ Err(..) => err,
+        }
+    }
 }
 impl ThreadInfo {
     pub fn create(pid: Pid, tid: Pid) -> Result<Self> {
         Self::create_impl(pid, tid)
     }
-    // bool LinuxPtraceDumper::ReadRegisterSet(ThreadInfo* info, pid_t tid)
-    // {
-    // #ifdef PTRACE_GETREGSET
-    //   struct iovec io;
-    //   info->GetGeneralPurposeRegisters(&io.iov_base, &io.iov_len);
-    //   if (sys_ptrace(PTRACE_GETREGSET, tid, (void*)NT_PRSTATUS, (void*)&io) == -1) {
-    //     return false;
-    //   }
-
-    //   info->GetFloatingPointRegisters(&io.iov_base, &io.iov_len);
-    //   if (sys_ptrace(PTRACE_GETREGSET, tid, (void*)NT_FPREGSET, (void*)&io) == -1) {
-    //     return false;
-    //   }
-    //   return true;
-    // #else
-    //   return false;
-    // #endif
-    // }
-
-    // bool LinuxPtraceDumper::ReadRegisters(ThreadInfo* info, pid_t tid) {
-    // #ifdef PTRACE_GETREGS
-    //   void* gp_addr;
-    //   info->GetGeneralPurposeRegisters(&gp_addr, NULL);
-    //   if (sys_ptrace(PTRACE_GETREGS, tid, NULL, gp_addr) == -1) {
-    //     return false;
-    //   }
-
-    // #if !(defined(__ANDROID__) && defined(__ARM_EABI__))
-    //   // When running an arm build on an arm64 device, attempting to get the
-    //   // floating point registers fails. On Android, the floating point registers
-    //   // aren't written to the cpu context anyway, so just don't get them here.
-    //   // See http://crbug.com/508324
-    //   void* fp_addr;
-    //   info->GetFloatingPointRegisters(&fp_addr, NULL);
-    //   if (sys_ptrace(PTRACE_GETFPREGS, tid, NULL, fp_addr) == -1) {
-    //     return false;
-    //   }
-    // #endif  // !(defined(__ANDROID__) && defined(__ARM_EABI__))
-    //   return true;
-    // #else  // PTRACE_GETREGS
-    //   return false;
-    // #endif
-    // }
 }
