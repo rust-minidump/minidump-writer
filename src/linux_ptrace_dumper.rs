@@ -37,33 +37,34 @@ impl LinuxPtraceDumper {
     /// the content from the target process. Always returns true.
     pub fn copy_from_process(
         &self,
-        dest: &mut Vec<i64>,
-        child: nix::unistd::Pid,
+        child: Pid,
         src: *mut c_void,
-        length: usize,
-    ) -> bool {
-        let done = 0 as usize;
-        while done < length {
-            match ptrace::read(child, src) {
-                Ok(word) => dest.push(word),
-                Err(_) => {
-                    return false;
+        num_of_words: isize,
+    ) -> Result<Vec<libc::c_long>> {
+        let pid = nix::unistd::Pid::from_raw(child);
+        let mut res = Vec::new();
+        for idx in 0isize..num_of_words {
+            match ptrace::read(pid, unsafe { src.offset(idx) }) {
+                Ok(word) => res.push(word),
+                Err(e) => {
+                    return Err(format!("Failed in ptrace::reach: {:?}", e).into());
                 }
             }
         }
-        true
+        Ok(res)
     }
 
     /// Suspends a thread by attaching to it.
-    fn suspend_thread(&self, child: nix::unistd::Pid) -> Result<()> {
+    pub fn suspend_thread(&self, child: Pid) -> Result<()> {
+        let pid = nix::unistd::Pid::from_raw(child);
         // This may fail if the thread has just died or debugged.
-        ptrace::attach(child)?;
+        ptrace::attach(pid)?;
         loop {
-            match wait::waitpid(child, Some(wait::WaitPidFlag::__WALL)) {
+            match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
                 Err(nix::Error::Sys(Errno::EINTR)) => {
-                    ptrace::detach(child, None)?;
-                    return Err(format!("Failed to attach to: {:?}. Got EINTR.", child).into());
+                    ptrace::detach(pid, None)?;
+                    return Err(format!("Failed to attach to: {:?}. Got EINTR.", pid).into());
                 }
                 Err(_) => continue,
             }
@@ -77,7 +78,7 @@ impl LinuxPtraceDumper {
             // We thus test the stack pointer and exclude any threads that are part of
             // the seccomp sandbox's trusted code.
             let skip_thread;
-            let regs = ptrace::getregs(child);
+            let regs = ptrace::getregs(pid);
             if regs.is_err() {
                 skip_thread = true;
             } else {
@@ -92,7 +93,7 @@ impl LinuxPtraceDumper {
                 }
             }
             if skip_thread {
-                ptrace::detach(child, None)?;
+                ptrace::detach(pid, None)?;
                 return Err(format!("Skipped thread {:?} due to it being part of the seccomp sandbox's trusted code", child).into());
             }
         }
@@ -100,8 +101,9 @@ impl LinuxPtraceDumper {
     }
 
     /// Resumes a thread by detaching from it.
-    pub fn resume_thread(&self, child: nix::unistd::Pid) -> Result<()> {
-        ptrace::detach(child, None)?;
+    pub fn resume_thread(&self, child: Pid) -> Result<()> {
+        let pid = nix::unistd::Pid::from_raw(child);
+        ptrace::detach(pid, None)?;
         Ok(())
     }
 
@@ -125,11 +127,13 @@ impl LinuxPtraceDumper {
     }
 
     fn read_auxv(&mut self) -> Result<()> {
-        unimplemented!()
+        // unimplemented!()
+        Ok(())
     }
 
     fn enumerate_mappings(&mut self) -> Result<()> {
-        unimplemented!()
+        // unimplemented!()
+        Ok(())
     }
 
     /// Read thread info from /proc/$pid/status.

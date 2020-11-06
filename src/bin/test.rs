@@ -1,4 +1,8 @@
+// This binary shouldn't be under /src, but under /tests, but that is
+// currently not possible (https://github.com/rust-lang/cargo/issues/4356)
+
 use minidump_writer_linux::{linux_ptrace_dumper, Result};
+use nix::sys::ptrace;
 use nix::unistd::getppid;
 use std::env;
 
@@ -34,10 +38,39 @@ fn test_thread_list() -> Result<()> {
     Ok(())
 }
 
+fn spawn_and_wait(num: usize) -> Result<()> {
+    // One less than the requested amount, as the main thread counts as well
+    for _ in 1..num {
+        std::thread::spawn(|| {
+            println!("1");
+            loop {
+                std::thread::park();
+            }
+        });
+    }
+    println!("1");
+    loop {
+        std::thread::park();
+    }
+}
+
 fn main() -> Result<()> {
-    match env::args().last().unwrap().as_str() {
-        "setup" => test_setup(),
-        "thread_list" => test_thread_list(),
-        x => Err(format!("Unknown test option: {}", x).into()),
+    let args: Vec<_> = env::args().skip(1).collect();
+    // ptrace::traceme().expect("Couldn't set traceme()");
+    match args.len() {
+        1 => match args[0].as_ref() {
+            "setup" => test_setup(),
+            "thread_list" => test_thread_list(),
+            _ => Err("Len 1: Unknown test option".into()),
+        },
+        2 => {
+            if args[0] == "spawn_and_wait" {
+                let num_of_threads: usize = args[1].parse().unwrap();
+                spawn_and_wait(num_of_threads)
+            } else {
+                Err(format!("Len 2: Unknown test option: {}", args[0]).into())
+            }
+        }
+        _ => Err("Unknown test option".into()),
     }
 }
