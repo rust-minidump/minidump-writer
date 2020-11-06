@@ -1,16 +1,19 @@
 // use libc::c_void;
+use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
 use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
+use std::collections::HashMap;
 use std::ffi::c_void;
+use std::io::BufReader;
 use std::path;
-
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
     pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Pid>,
+    pub auxv: HashMap<AuxvType, AuxvType>,
 }
 
 impl LinuxPtraceDumper {
@@ -21,6 +24,7 @@ impl LinuxPtraceDumper {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
+            auxv: HashMap::new(),
         };
         dumper.init()?;
         Ok(dumper)
@@ -127,7 +131,14 @@ impl LinuxPtraceDumper {
     }
 
     fn read_auxv(&mut self) -> Result<()> {
-        // unimplemented!()
+        let auxv_path = path::PathBuf::from(format!("/proc/{}/auxv", self.pid));
+        let auxv_file = std::fs::File::open(auxv_path)?;
+        let input = BufReader::new(auxv_file);
+        let reader = ProcfsAuxvIter::new(input);
+        for item in reader {
+            let item = item?;
+            self.auxv.insert(item.key, item.value);
+        }
         Ok(())
     }
 

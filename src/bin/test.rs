@@ -2,7 +2,6 @@
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
 
 use minidump_writer_linux::{linux_ptrace_dumper, Result};
-use nix::sys::ptrace;
 use nix::unistd::getppid;
 use std::env;
 
@@ -56,7 +55,6 @@ fn spawn_and_wait(num: usize) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
-    // ptrace::traceme().expect("Couldn't set traceme()");
     match args.len() {
         1 => match args[0].as_ref() {
             "setup" => test_setup(),
