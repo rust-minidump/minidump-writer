@@ -12,3 +12,5 @@ nix = "*"
 libc = "*"
 memoffset = "*"
 byteorder = "*"
+# This should be [dev-dependencies], but the test-binary currently has to live in src/
+goblin = "*"

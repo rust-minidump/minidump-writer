@@ -1,20 +1,26 @@
 // use libc::c_void;
 use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
+use crate::maps_reader::{MappingInfo, MappingInfoParsingResult};
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
 use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ffi::c_void;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader};
 use std::path;
+
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
     pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Pid>,
     pub auxv: HashMap<AuxvType, AuxvType>,
+    pub mappings: Vec<MappingInfo>,
 }
+
+pub const AT_SYSINFO_EHDR: u64 = 33;
 
 impl LinuxPtraceDumper {
     /// Constructs a dumper for extracting information of a given process
@@ -25,6 +31,7 @@ impl LinuxPtraceDumper {
             threads_suspended: false,
             threads: Vec::new(),
             auxv: HashMap::new(),
+            mappings: Vec::new(),
         };
         dumper.init()?;
         Ok(dumper)
@@ -143,7 +150,52 @@ impl LinuxPtraceDumper {
     }
 
     fn enumerate_mappings(&mut self) -> Result<()> {
-        // unimplemented!()
+        // linux_gate_loc is the beginning of the kernel's mapping of
+        // linux-gate.so in the process.  It doesn't actually show up in the
+        // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
+        // aux vector entry, which gives the information necessary to special
+        // case its entry when creating the list of mappings.
+        // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
+        // information.
+        let linux_gate_loc = *self.auxv.get(&AT_SYSINFO_EHDR).unwrap_or(&0);
+        // Although the initial executable is usually the first mapping, it's not
+        // guaranteed (see http://crosbug.com/25355); therefore, try to use the
+        // actual entry point to find the mapping.
+        let entry_point_loc = *self.auxv.get(&libc::AT_ENTRY).unwrap_or(&0);
+
+        let auxv_path = path::PathBuf::from(format!("/proc/{}/maps", self.pid));
+        let auxv_file = std::fs::File::open(auxv_path)?;
+
+        for line in BufReader::new(auxv_file).lines() {
+            // /proc/<pid>/maps looks like this
+            // 7fe34a863000-7fe34a864000 rw-p 00009000 00:31 4746408                    /usr/lib64/libogg.so.0.8.4
+            let line = line?;
+            match MappingInfo::parse_from_line(&line, linux_gate_loc, self.mappings.last_mut()) {
+                Ok(MappingInfoParsingResult::Success(map)) => self.mappings.push(map),
+                Ok(MappingInfoParsingResult::SkipLine) => continue,
+                Err(_) => continue,
+            }
+        }
+
+        if entry_point_loc != 0 {
+            let mut swap_idx = None;
+            for (idx, module) in self.mappings.iter().enumerate() {
+                // If this module contains the entry-point, and it's not already the first
+                // one, then we need to make it be first.  This is because the minidump
+                // format assumes the first module is the one that corresponds to the main
+                // executable (as codified in
+                // processor/minidump.cc:MinidumpModuleList::GetMainModule()).
+                if entry_point_loc >= module.start_address.try_into().unwrap()
+                    && entry_point_loc < (module.start_address + module.size).try_into().unwrap()
+                {
+                    swap_idx = Some(idx);
+                    break;
+                }
+            }
+            if let Some(idx) = swap_idx {
+                self.mappings.swap(0, idx);
+            }
+        }
         Ok(())
     }
 

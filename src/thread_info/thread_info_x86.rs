@@ -198,18 +198,10 @@ impl ThreadInfoX86 {
         // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
 
         // Possible safe way
-        // fn main() {
-        //     let mut a = 0u128;
-        //     let b = [0xDEADBEEFu32; 4];
-        //     for i in 0..4 {
-        //         let partial = (b[i] as u128) << i*8*std::mem::size_of::<u32>();
-        //         println!("{:#x}", partial);
-        //         assert_eq!(a & partial, 0);
-        //         a = a | partial;
-        //     }
-        //     println!("{:#x}", a);
-        //     assert_eq!(b[0].count_ones()*4, a.count_ones());
-        //     assert_eq!(b[0].count_zeros()*4, a.count_zeros());
+        // let mut a = 0u128;
+        // let b = [0xDEADBEEFu32, 0xCAFEBABEu32, 0xABADBABEu32, 0xDEADC0DEu32];
+        // for i in &b {
+        //     a = a << 32 | *i as u128;
         // }
     }
 }

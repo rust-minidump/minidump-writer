@@ -122,3 +122,11 @@ fn test_thread_list_from_parent() {
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
 }
+
+// #[cfg(not(any(target_arch = "mips", target_arch = "arm-eabi"))]
+#[cfg(not(target_arch = "mips"))]
+#[test]
+// Ensure that the linux-gate VDSO is included in the mapping list.
+fn test_mappings_include_linux_gate() {
+    spawn_child!("mappings_include_linux_gate");
+}

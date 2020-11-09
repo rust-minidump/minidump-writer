@@ -1,8 +1,10 @@
 // This binary shouldn't be under /src, but under /tests, but that is
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
-
-use minidump_writer_linux::{linux_ptrace_dumper, Result};
+use goblin::elf::header;
+use minidump_writer_linux::linux_ptrace_dumper::AT_SYSINFO_EHDR;
+use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME};
 use nix::unistd::getppid;
+use std::convert::TryInto;
 use std::env;
 
 macro_rules! test {
@@ -37,6 +39,41 @@ fn test_thread_list() -> Result<()> {
     Ok(())
 }
 
+fn test_mappings_include_linux_gate() -> Result<()> {
+    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
+    test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
+
+    let mut found_linux_gate = false;
+    for mapping in dumper.mappings {
+        if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
+            found_linux_gate = true;
+            test!(
+                linux_gate_loc == mapping.start_address.try_into().unwrap(),
+                "linux_gate_loc != start_address"
+            )?;
+            println!("linux_gate_loc: 0x{:x}", linux_gate_loc);
+            let ll = mapping.start_address as *const u8;
+            for idx in 0..header::SELFMAG {
+                unsafe {
+                    test!(
+                        std::ptr::read(ll.offset(idx as isize)) == header::ELFMAG[idx],
+                        format!(
+                            "ll: {} != ELFMAG: {} at {}",
+                            std::ptr::read(ll.offset(idx as isize)),
+                            header::ELFMAG[idx],
+                            idx
+                        )
+                    )?;
+                }
+            }
+            break;
+        }
+    }
+    test!(found_linux_gate == true, "found no linux_gate")?;
+    Ok(())
+}
+
 fn spawn_and_wait(num: usize) -> Result<()> {
     // One less than the requested amount, as the main thread counts as well
     for _ in 1..num {
@@ -59,6 +96,7 @@ fn main() -> Result<()> {
         1 => match args[0].as_ref() {
             "setup" => test_setup(),
             "thread_list" => test_thread_list(),
+            "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
             _ => Err("Len 1: Unknown test option".into()),
         },
         2 => {
