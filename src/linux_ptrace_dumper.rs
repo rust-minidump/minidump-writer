@@ -216,4 +216,28 @@ impl LinuxPtraceDumper {
         let tid = self.threads[index];
         ThreadInfo::create(self.pid, tid)
     }
+
+    // Find the mapping which the given memory address falls in.
+    fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+        for map in &self.mappings {
+            if address >= map.start_address && address - map.start_address < map.size {
+                return Some(&map);
+            }
+        }
+        None
+    }
+
+    // Find the mapping which the given memory address falls in. Uses the
+    // unadjusted mapping address range from the kernel, rather than the
+    // biased range.
+    fn find_mapping_no_bias<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+        for map in &self.mappings {
+            if address >= map.system_mapping_info.start_address
+                && address < map.system_mapping_info.end_address
+            {
+                return Some(&map);
+            }
+        }
+        None
+    }
 }

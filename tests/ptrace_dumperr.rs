@@ -130,3 +130,9 @@ fn test_thread_list_from_parent() {
 fn test_mappings_include_linux_gate() {
     spawn_child!("mappings_include_linux_gate");
 }
+
+#[test]
+// Ensure that the linux-gate VDSO is included in the mapping list.
+fn test_merged_mappings() {
+    spawn_child!("merged_mappings");
+}

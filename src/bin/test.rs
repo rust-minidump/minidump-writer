@@ -39,6 +39,35 @@ fn test_thread_list() -> Result<()> {
     Ok(())
 }
 
+fn test_merged_mappings() -> Result<()> {
+    // Now check that LinuxPtraceDumper interpreted the mappings properly.
+    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let _mapping_count = 0;
+    for map in dumper.mappings {
+        println!(
+            "{:?} => {:x} - {:x}",
+            map.name.unwrap_or("[Not set]".to_string()),
+            map.system_mapping_info.start_address,
+            map.system_mapping_info.end_address
+        );
+    }
+    test!(false, "blubb")?;
+    Ok(())
+    //    for (unsigned i = 0; i < dumper.mappings().size(); ++i) {
+    //      const MappingInfo& mapping = *dumper.mappings()[i];
+    //      if (strcmp(mapping.name, this->helper_path_.c_str()) == 0) {
+    //        // This mapping should encompass the entire original mapped
+    //        // range.
+    //        EXPECT_EQ(reinterpret_cast<uintptr_t>(this->helper_.mapping()),
+    //                  mapping.start_addr);
+    //        EXPECT_EQ(this->helper_.size(), mapping.size);
+    //        EXPECT_EQ(0U, mapping.offset);
+    //        mapping_count++;
+    //      }
+    //    }
+    //    EXPECT_EQ(1, mapping_count);
+}
+
 fn test_mappings_include_linux_gate() -> Result<()> {
     let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
     let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
@@ -97,6 +126,7 @@ fn main() -> Result<()> {
             "setup" => test_setup(),
             "thread_list" => test_thread_list(),
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
+            "merged_mappings" => test_merged_mappings(),
             _ => Err("Len 1: Unknown test option".into()),
         },
         2 => {
