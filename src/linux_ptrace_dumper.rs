@@ -217,6 +217,30 @@ impl LinuxPtraceDumper {
         ThreadInfo::create(self.pid, tid)
     }
 
+    // Get information about the stack, given the stack pointer. We don't try to
+    // walk the stack since we might not have all the information needed to do
+    // unwind. So we just grab, up to, 32k of stack.
+    fn get_stack_info(&self, int_stack_pointer: usize) -> Result<(usize, usize)> {
+        // Move the stack pointer to the bottom of the page that it's in.
+        // NOTE: original code uses getpagesize(), which a) isn't there in Rust and
+        //       b) shouldn't be used, as its not portable (see man getpagesize)
+        let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
+            .expect("page size apparently unlimited: doesn't make sense.");
+        let stack_pointer = int_stack_pointer & !(page_size as usize - 1);
+
+        // The number of bytes of stack which we try to capture.
+        let stack_to_capture = 32 * 1024;
+
+        let mapping = self
+            .find_mapping(stack_pointer)
+            .ok_or("No mapping for stack pointer found")?;
+        let offset = stack_pointer - mapping.start_address;
+        let distance_to_end = mapping.size - offset;
+        let stack_len = std::cmp::min(distance_to_end, stack_to_capture);
+
+        Ok((stack_pointer, stack_len))
+    }
+
     // Find the mapping which the given memory address falls in.
     fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
         for map in &self.mappings {

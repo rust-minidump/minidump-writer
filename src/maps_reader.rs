@@ -2,7 +2,10 @@ use crate::auxv_reader::AuxvType;
 use crate::thread_info::Pid;
 use crate::Result;
 use byteorder::{NativeEndian, ReadBytesExt};
+use goblin::elf;
+use memmap::MmapOptions;
 use std::convert::TryInto;
+use std::fs::File;
 use std::mem::size_of;
 use std::path::PathBuf;
 
@@ -218,6 +221,82 @@ impl MappingInfo {
             }
         }
         false
+    }
+
+    fn elf_file_so_name(&self) -> Result<String> {
+        // Find the shared object name (SONAME) by examining the ELF information
+        // for |mapping|. If the SONAME is found copy it into the passed buffer
+        // |soname| and return true. The size of the buffer is |soname_size|.
+
+        // It is unsafe to attempt to open a mapped file that lives under /dev,
+        // because the semantics of the open may be driver-specific so we'd risk
+        // hanging the crash dumper. And a file in /dev/ almost certainly has no
+        // ELF file identifier anyways.
+        if let Some(name) = &self.name {
+            if name.starts_with("/dev/") {
+                return Err("Not safe to open mapping".into());
+            }
+        }
+
+        // Not doing this as root_prefix is always "" at the moment
+        //   if (!dumper.GetMappingAbsolutePath(mapping, filename))
+        let filename = self.name.clone().unwrap_or(String::new());
+        let mapped_file = unsafe {
+            MmapOptions::new()
+                .offset(self.offset.try_into()?)
+                .map(&File::open(filename)?)?
+        };
+
+        if mapped_file.is_empty() || mapped_file.len() < elf::header::SELFMAG {
+            return Err("mmap failed".into());
+        }
+
+        let elf_obj = elf::Elf::parse(&mapped_file)?;
+
+        let soname = elf_obj.soname.ok_or("No soname found")?;
+        Ok(soname.to_string())
+    }
+
+    pub fn get_mapping_effective_name_and_path(&self) -> Result<(String, String)> {
+        let mut file_path = self.name.clone().unwrap_or(String::new());
+        let file_name;
+
+        // Tools such as minidump_stackwalk use the name of the module to look up
+        // symbols produced by dump_syms. dump_syms will prefer to use a module's
+        // DT_SONAME as the module name, if one exists, and will fall back to the
+        // filesystem name of the module.
+
+        // Just use the filesystem name if no SONAME is present.
+        let file_name = match self.elf_file_so_name() {
+            Ok(name) => name,
+            Err(_) => {
+                //   file_path := /path/to/libname.so
+                //   file_name := libname.so
+                let split: Vec<_> = file_path.rsplitn(1, "/").collect();
+                file_name = split.last().unwrap().to_string();
+                return Ok((file_path, file_name));
+            }
+        };
+
+        if self.executable && self.offset != 0 {
+            // If an executable is mapped from a non-zero offset, this is likely because
+            // the executable was loaded directly from inside an archive file (e.g., an
+            // apk on Android).
+            // In this case, we append the file_name to the mapped archive path:
+            //   file_name := libname.so
+            //   file_path := /path/to/ARCHIVE.APK/libname.so
+            file_path = format!("{}/{}", file_path, file_name);
+        } else {
+            // Otherwise, replace the basename with the SONAME.
+            let split: Vec<_> = file_path.rsplitn(1, "/").collect();
+            if split.len() == 2 {
+                file_path = format!("{}/{}", split[0], file_name);
+            } else {
+                file_path = file_name.clone();
+            }
+        }
+
+        Ok((file_path, file_name))
     }
 }
 
