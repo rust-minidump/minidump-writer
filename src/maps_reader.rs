@@ -3,7 +3,7 @@ use crate::thread_info::Pid;
 use crate::Result;
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
-use memmap::MmapOptions;
+use memmap::{Mmap, MmapOptions};
 use std::convert::TryInto;
 use std::fs::File;
 use std::mem::size_of;
@@ -39,6 +39,7 @@ pub struct MappingInfo {
     pub offset: usize,    // offset into the backed file.
     pub executable: bool, // true if the mapping has the execute bit set.
     pub name: Option<String>,
+    // pub elf_obj: Option<elf::Elf>,
 }
 
 #[derive(Debug)]
@@ -140,6 +141,8 @@ impl MappingInfo {
             _ => (),
         }
 
+        let name = pathname.map(ToOwned::to_owned);
+
         let info = MappingInfo {
             start_address,
             size: end_address - start_address,
@@ -149,13 +152,35 @@ impl MappingInfo {
             },
             offset,
             executable,
-            name: pathname.map(ToOwned::to_owned),
+            name,
+            // elf_obj,
         };
 
         Ok(MappingInfoParsingResult::Success(info))
     }
 
-    fn handle_deleted_file_in_mapping(path: &str, pid: Pid) -> Result<String> {
+    pub fn get_mmap(name: &Option<String>, offset: usize) -> Result<Mmap> {
+        if !MappingInfo::is_mapped_file_safe_to_open(&name) {
+            return Err("Not safe to open mapping".into());
+        }
+
+        // Not doing this as root_prefix is always "" at the moment
+        //   if (!dumper.GetMappingAbsolutePath(mapping, filename))
+        let filename = name.clone().unwrap_or(String::new());
+        let mapped_file = unsafe {
+            MmapOptions::new()
+                .offset(offset.try_into()?)
+                .map(&File::open(filename)?)?
+        };
+
+        if mapped_file.is_empty() || mapped_file.len() < elf::header::SELFMAG {
+            return Err("mmap failed".into());
+        }
+
+        Ok(mapped_file)
+    }
+
+    pub fn handle_deleted_file_in_mapping(path: &str, pid: Pid) -> Result<String> {
         // Check for ' (deleted)' in |path|.
         // |path| has to be at least as long as "/x (deleted)".
         if !path.ends_with(DELETED_SUFFIX) {
@@ -223,33 +248,24 @@ impl MappingInfo {
         false
     }
 
-    fn elf_file_so_name(&self) -> Result<String> {
-        // Find the shared object name (SONAME) by examining the ELF information
-        // for |mapping|. If the SONAME is found copy it into the passed buffer
-        // |soname| and return true. The size of the buffer is |soname_size|.
-
+    pub fn is_mapped_file_safe_to_open(name: &Option<String>) -> bool {
         // It is unsafe to attempt to open a mapped file that lives under /dev,
         // because the semantics of the open may be driver-specific so we'd risk
         // hanging the crash dumper. And a file in /dev/ almost certainly has no
         // ELF file identifier anyways.
-        if let Some(name) = &self.name {
+        if let Some(name) = name {
             if name.starts_with("/dev/") {
-                return Err("Not safe to open mapping".into());
+                return false;
             }
         }
+        true
+    }
 
-        // Not doing this as root_prefix is always "" at the moment
-        //   if (!dumper.GetMappingAbsolutePath(mapping, filename))
-        let filename = self.name.clone().unwrap_or(String::new());
-        let mapped_file = unsafe {
-            MmapOptions::new()
-                .offset(self.offset.try_into()?)
-                .map(&File::open(filename)?)?
-        };
-
-        if mapped_file.is_empty() || mapped_file.len() < elf::header::SELFMAG {
-            return Err("mmap failed".into());
-        }
+    fn elf_file_so_name(&self) -> Result<String> {
+        // Find the shared object name (SONAME) by examining the ELF information
+        // for |mapping|. If the SONAME is found copy it into the passed buffer
+        // |soname| and return true. The size of the buffer is |soname_size|.
+        let mapped_file = MappingInfo::get_mmap(&self.name, self.offset)?;
 
         let elf_obj = elf::Elf::parse(&mapped_file)?;
 

@@ -3,6 +3,8 @@ use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
 use crate::maps_reader::{MappingInfo, MappingInfoParsingResult};
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
+use crate::LINUX_GATE_LIBRARY_NAME;
+use goblin::elf;
 use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
 use std::collections::HashMap;
@@ -37,6 +39,7 @@ impl LinuxPtraceDumper {
         Ok(dumper)
     }
 
+    // TODO: late_init for chromeos and android
     pub fn init(&mut self) -> Result<()> {
         self.read_auxv()?;
         self.enumerate_threads()?;
@@ -263,5 +266,80 @@ impl LinuxPtraceDumper {
             }
         }
         None
+    }
+
+    fn parse_build_id<'data>(
+        elf_obj: &elf::Elf<'data>,
+        mem_slice: &'data [u8],
+    ) -> Option<&'data [u8]> {
+        if let Some(mut notes) = elf_obj.iter_note_headers(mem_slice) {
+            while let Some(Ok(note)) = notes.next() {
+                if note.n_type == elf::note::NT_GNU_BUILD_ID {
+                    return Some(note.desc);
+                }
+            }
+        }
+        if let Some(mut notes) = elf_obj.iter_note_sections(mem_slice, Some(".note.gnu.build-id")) {
+            while let Some(Ok(note)) = notes.next() {
+                if note.n_type == elf::note::NT_GNU_BUILD_ID {
+                    return Some(note.desc);
+                }
+            }
+        }
+        None
+    }
+
+    fn elf_identifier_for_mapping(
+        &mut self,
+        mapping: &MappingInfo,
+        member: bool,
+        mapping_id: usize,
+    ) -> Result<Vec<u8>> {
+        assert!(!member || mapping_id < self.mappings.len());
+
+        if !MappingInfo::is_mapped_file_safe_to_open(&mapping.name) {
+            return Err("Not safe to open mapping".into());
+        }
+        // Special-case linux-gate because it's not a real file.
+        if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
+            let elf_obj;
+            let mem_slice;
+            if self.pid == std::process::id().try_into()? {
+                mem_slice = unsafe {
+                    std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
+                };
+                elf_obj = elf::Elf::parse(mem_slice)?;
+            } else {
+                let linux_gate = self.copy_from_process(
+                    self.pid,
+                    mapping.start_address as *mut libc::c_void,
+                    mapping.size.try_into()?,
+                )?;
+                mem_slice = unsafe {
+                    std::slice::from_raw_parts(
+                        linux_gate.as_ptr() as *const u8,
+                        linux_gate.len() * std::mem::size_of::<libc::c_long>(),
+                    )
+                };
+                elf_obj = elf::Elf::parse(mem_slice)?;
+            }
+            let build_id =
+                Self::parse_build_id(&elf_obj, mem_slice).ok_or("Could not parse build-id")?;
+            return Ok(build_id.to_vec());
+        }
+
+        let new_name = MappingInfo::handle_deleted_file_in_mapping(
+            &mapping.name.as_ref().unwrap_or(&String::new()),
+            self.pid,
+        )?;
+
+        let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
+        let elf_obj = elf::Elf::parse(&mem_slice)?;
+        let build_id =
+            Self::parse_build_id(&elf_obj, &mem_slice).ok_or("Could not parse build-id")?;
+        if member && Some(&new_name) != mapping.name.as_ref() {
+            self.mappings[mapping_id].name = Some(new_name);
+        }
+        return Ok(build_id.to_vec());
     }
 }
