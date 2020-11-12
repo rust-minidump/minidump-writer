@@ -22,6 +22,15 @@ pub struct LinuxPtraceDumper {
     pub mappings: Vec<MappingInfo>,
 }
 
+#[repr(C)]
+#[derive(Debug)]
+struct MDGUID {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
 impl LinuxPtraceDumper {
@@ -289,6 +298,49 @@ impl LinuxPtraceDumper {
         None
     }
 
+    fn elf_file_identifier_from_mapped_file(mem_slice: &[u8]) -> Result<Vec<u8>> {
+        let elf_obj = elf::Elf::parse(mem_slice)?;
+        match Self::parse_build_id(&elf_obj, mem_slice) {
+            // Look for a build id note first.
+            Some(build_id) => {
+                return Ok(build_id.to_vec());
+            }
+            // Fall back on hashing the first page of the text section.
+            None => {
+                // Attempt to locate the .text section of an ELF binary and generate
+                // a simple hash by XORing the first page worth of bytes into |result|.
+                for section in elf_obj.section_headers {
+                    if section.sh_type != elf::section_header::SHT_PROGBITS {
+                        continue;
+                    }
+                    if section.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0 {
+                        if section.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0 {
+                            unsafe {
+                                let ptr = mem_slice.as_ptr().offset(section.sh_offset.try_into()?);
+                                let text_section = std::slice::from_raw_parts(
+                                    ptr as *const u8,
+                                    section.sh_size.try_into()?,
+                                );
+                                // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
+                                // function backwards-compatible.
+                                let mut result = vec![0u8; std::mem::size_of::<MDGUID>()];
+                                let mut offset = 0;
+                                while offset < 4096 {
+                                    for idx in 0..std::mem::size_of::<MDGUID>() {
+                                        result[idx] ^= text_section[offset + idx];
+                                    }
+                                    offset += std::mem::size_of::<MDGUID>();
+                                }
+                                return Ok(result);
+                            }
+                        }
+                    }
+                }
+                Err("No build-id found".into())
+            }
+        }
+    }
+
     fn elf_identifier_for_mapping(
         &mut self,
         mapping: &MappingInfo,
@@ -302,13 +354,11 @@ impl LinuxPtraceDumper {
         }
         // Special-case linux-gate because it's not a real file.
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
-            let elf_obj;
             let mem_slice;
             if self.pid == std::process::id().try_into()? {
                 mem_slice = unsafe {
                     std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
                 };
-                elf_obj = elf::Elf::parse(mem_slice)?;
             } else {
                 let linux_gate = self.copy_from_process(
                     self.pid,
@@ -321,11 +371,8 @@ impl LinuxPtraceDumper {
                         linux_gate.len() * std::mem::size_of::<libc::c_long>(),
                     )
                 };
-                elf_obj = elf::Elf::parse(mem_slice)?;
             }
-            let build_id =
-                Self::parse_build_id(&elf_obj, mem_slice).ok_or("Could not parse build-id")?;
-            return Ok(build_id.to_vec());
+            return Self::elf_file_identifier_from_mapped_file(mem_slice);
         }
 
         let new_name = MappingInfo::handle_deleted_file_in_mapping(
@@ -334,12 +381,10 @@ impl LinuxPtraceDumper {
         )?;
 
         let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
-        let elf_obj = elf::Elf::parse(&mem_slice)?;
-        let build_id =
-            Self::parse_build_id(&elf_obj, &mem_slice).ok_or("Could not parse build-id")?;
+        let build_id = Self::elf_file_identifier_from_mapped_file(&mem_slice)?;
         if member && Some(&new_name) != mapping.name.as_ref() {
             self.mappings[mapping_id].name = Some(new_name);
         }
-        return Ok(build_id.to_vec());
+        return Ok(build_id);
     }
 }
