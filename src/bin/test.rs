@@ -6,6 +6,7 @@ use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME
 use nix::unistd::getppid;
 use std::convert::TryInto;
 use std::env;
+use std::process::id;
 
 macro_rules! test {
     ($x:expr, $errmsg:expr) => {
@@ -36,6 +37,23 @@ fn test_thread_list() -> Result<()> {
             == 1,
         "Thread found multiple times"
     )?;
+    Ok(())
+}
+
+fn test_file_id() -> Result<()> {
+    let exe_link = format!("/proc/self/exe");
+    let exe_name = std::fs::read_link(&exe_link)?.into_os_string();
+    // let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(id().try_into()?)?;
+    let mut found_exe = None;
+    for (idx, mapping) in dumper.mappings.iter().enumerate() {
+        println!("{:?} vs. {:?}", mapping.name, exe_name);
+        if mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name) {
+            found_exe = Some(idx);
+        }
+    }
+    let idx = found_exe.unwrap();
+    dumper.elf_identifier_for_mapping_index(idx)?;
     Ok(())
 }
 
@@ -123,6 +141,7 @@ fn main() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
     match args.len() {
         1 => match args[0].as_ref() {
+            "file_id" => test_file_id(),
             "setup" => test_setup(),
             "thread_list" => test_thread_list(),
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),

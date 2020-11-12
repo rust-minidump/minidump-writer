@@ -1,5 +1,6 @@
 use libc;
 use minidump_writer_linux::linux_ptrace_dumper;
+use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use nix::sys::signal::Signal;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::ExitStatusExt;
@@ -103,9 +104,12 @@ fn test_thread_list_from_parent() {
         let process_tid_location = info.mcontext.gregs[1];
 
         println!("src = 0x{:x}", process_tid_location);
-        let found_thread_id = dumper
-            .copy_from_process(*curr_thread, process_tid_location as *mut libc::c_void, 1)
-            .expect("Could not copy from process");
+        let found_thread_id = LinuxPtraceDumper::copy_from_process(
+            *curr_thread,
+            process_tid_location as *mut libc::c_void,
+            1,
+        )
+        .expect("Could not copy from process");
         matching_threads += if *curr_thread as i64 == found_thread_id[0] {
             1
         } else {
@@ -135,4 +139,10 @@ fn test_mappings_include_linux_gate() {
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_merged_mappings() {
     spawn_child!("merged_mappings");
+}
+
+#[test]
+// Ensure that the linux-gate VDSO is included in the mapping list.
+fn test_file_id() {
+    spawn_child!("file_id");
 }

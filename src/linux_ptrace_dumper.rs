@@ -59,7 +59,6 @@ impl LinuxPtraceDumper {
     /// starting from |src|, into |dest|. This method uses ptrace to extract
     /// the content from the target process. Always returns true.
     pub fn copy_from_process(
-        &self,
         child: Pid,
         src: *mut c_void,
         num_of_words: isize,
@@ -341,27 +340,27 @@ impl LinuxPtraceDumper {
         }
     }
 
-    fn elf_identifier_for_mapping(
-        &mut self,
-        mapping: &MappingInfo,
-        member: bool,
-        mapping_id: usize,
-    ) -> Result<Vec<u8>> {
-        assert!(!member || mapping_id < self.mappings.len());
+    pub fn elf_identifier_for_mapping_index(&mut self, idx: usize) -> Result<Vec<u8>> {
+        assert!(idx < self.mappings.len());
 
+        return Self::elf_identifier_for_mapping(&mut self.mappings[idx], self.pid);
+    }
+
+    pub fn elf_identifier_for_mapping(mapping: &mut MappingInfo, pid: Pid) -> Result<Vec<u8>> {
         if !MappingInfo::is_mapped_file_safe_to_open(&mapping.name) {
             return Err("Not safe to open mapping".into());
         }
+
         // Special-case linux-gate because it's not a real file.
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
             let mem_slice;
-            if self.pid == std::process::id().try_into()? {
+            if pid == std::process::id().try_into()? {
                 mem_slice = unsafe {
                     std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
                 };
             } else {
-                let linux_gate = self.copy_from_process(
-                    self.pid,
+                let linux_gate = Self::copy_from_process(
+                    pid,
                     mapping.start_address as *mut libc::c_void,
                     mapping.size.try_into()?,
                 )?;
@@ -374,16 +373,19 @@ impl LinuxPtraceDumper {
             }
             return Self::elf_file_identifier_from_mapped_file(mem_slice);
         }
-
         let new_name = MappingInfo::handle_deleted_file_in_mapping(
             &mapping.name.as_ref().unwrap_or(&String::new()),
-            self.pid,
+            pid,
         )?;
 
+        // TODO: Why on Earth is this sleep needed?!
+        // mapping.offset is a weird value without it.
+        std::thread::sleep(std::time::Duration::from_millis(100));
         let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
         let build_id = Self::elf_file_identifier_from_mapped_file(&mem_slice)?;
-        if member && Some(&new_name) != mapping.name.as_ref() {
-            self.mappings[mapping_id].name = Some(new_name);
+
+        if Some(&new_name) != mapping.name.as_ref() {
+            mapping.name = Some(new_name);
         }
         return Ok(build_id);
     }

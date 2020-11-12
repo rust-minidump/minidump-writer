@@ -184,7 +184,7 @@ impl MappingInfo {
         // Check for ' (deleted)' in |path|.
         // |path| has to be at least as long as "/x (deleted)".
         if !path.ends_with(DELETED_SUFFIX) {
-            return Err("not deleted".into());
+            return Ok(path.to_string());
         }
 
         // Check |path| against the /proc/pid/exe 'symlink'.
