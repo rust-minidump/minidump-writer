@@ -118,7 +118,6 @@ fn test_thread_list_from_parent() {
             0
         };
     }
-    assert_eq!(matching_threads, num_of_threads);
     dumper.resume_threads().expect("Failed to resume threads");
     child.kill().expect("Failed to kill process");
 
@@ -127,6 +126,9 @@ fn test_thread_list_from_parent() {
     let status = waitres.signal().expect("Child did not die due to signal");
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
+
+    // We clean up the child process before checking the final result
+    assert_eq!(matching_threads, num_of_threads);
 }
 
 // #[cfg(not(any(target_arch = "mips", target_arch = "arm-eabi"))]
