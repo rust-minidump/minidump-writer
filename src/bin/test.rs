@@ -41,15 +41,15 @@ fn test_thread_list() -> Result<()> {
 }
 
 fn test_file_id() -> Result<()> {
-    let exe_link = format!("/proc/self/exe");
+    let ppid = getppid().as_raw();
+    let exe_link = format!("/proc/{}/exe", ppid);
     let exe_name = std::fs::read_link(&exe_link)?.into_os_string();
-    // let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
-    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(id().try_into()?)?;
+    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
     let mut found_exe = None;
     for (idx, mapping) in dumper.mappings.iter().enumerate() {
-        println!("{:?} vs. {:?}", mapping.name, exe_name);
         if mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name) {
             found_exe = Some(idx);
+            break;
         }
     }
     let idx = found_exe.unwrap();

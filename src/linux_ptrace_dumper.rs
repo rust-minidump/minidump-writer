@@ -378,9 +378,6 @@ impl LinuxPtraceDumper {
             pid,
         )?;
 
-        // TODO: Why on Earth is this sleep needed?!
-        // mapping.offset is a weird value without it.
-        std::thread::sleep(std::time::Duration::from_millis(100));
         let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
         let build_id = Self::elf_file_identifier_from_mapped_file(&mem_slice)?;
 
