@@ -138,6 +138,11 @@ fn test_mappings_include_linux_gate() {
 }
 
 #[test]
+fn test_linux_gate_mapping_id() {
+    spawn_child!("linux_gate_mapping_id");
+}
+
+#[test]
 fn test_merged_mappings() {
     spawn_child!("merged_mappings");
 }

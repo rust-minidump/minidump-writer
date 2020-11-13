@@ -1,6 +1,6 @@
 // This binary shouldn't be under /src, but under /tests, but that is
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
-
+use goblin::elf::header;
 use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_EHDR};
 use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME};
 use nix::unistd::getppid;
@@ -86,25 +86,47 @@ fn test_merged_mappings() -> Result<()> {
     //    EXPECT_EQ(1, mapping_count);
 }
 
-fn test_mappings_include_linux_gate() -> Result<()> {
+fn test_linux_gate_mapping_id() -> Result<()> {
     let ppid = getppid().as_raw();
     let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
-    let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
-    test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
     let mut found_linux_gate = false;
     for mut mapping in dumper.mappings.clone() {
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
             found_linux_gate = true;
-            test!(
-                linux_gate_loc == mapping.start_address.try_into().unwrap(),
-                "linux_gate_loc != start_address"
-            )?;
-            println!("linux_gate_loc: 0x{:x}", linux_gate_loc);
             dumper.suspend_threads()?;
             let id = LinuxPtraceDumper::elf_identifier_for_mapping(&mut mapping, ppid)?;
             test!(!id.is_empty(), "id-vec is empty")?;
             test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
             dumper.resume_threads()?;
+            break;
+        }
+    }
+    test!(found_linux_gate == true, "found no linux_gate")?;
+    Ok(())
+}
+
+fn test_mappings_include_linux_gate() -> Result<()> {
+    let ppid = getppid().as_raw();
+    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
+    let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
+    test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
+    let mut found_linux_gate = false;
+    for mapping in dumper.mappings {
+        if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
+            found_linux_gate = true;
+            test!(
+                linux_gate_loc == mapping.start_address.try_into()?,
+                "linux_gate_loc != start_address"
+            )?;
+
+            let ll = mapping.start_address as *const u8;
+            for idx in 0..header::SELFMAG {
+                let mag = unsafe { std::ptr::read(ll.offset(idx as isize)) == header::ELFMAG[idx] };
+                test!(
+                    mag,
+                    format!("ll: {} != ELFMAG: {} at {}", mag, header::ELFMAG[idx], idx)
+                )?;
+            }
             break;
         }
     }
@@ -136,6 +158,7 @@ fn main() -> Result<()> {
             "setup" => test_setup(),
             "thread_list" => test_thread_list(),
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
+            "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
             "merged_mappings" => test_merged_mappings(),
             _ => Err("Len 1: Unknown test option".into()),
         },
