@@ -72,11 +72,10 @@ fn test_thread_list_from_parent() {
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
+    let mut dumper =
+        linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
-    dumper
-        .suspend_thread(pid)
-        .expect("Could not suspend threads");
+    dumper.suspend_threads().expect("Could not suspend threads");
 
     let mut matching_threads = 0;
     for (idx, curr_thread) in dumper.threads.iter().enumerate() {
@@ -84,11 +83,10 @@ fn test_thread_list_from_parent() {
         let info = dumper
             .get_thread_info_by_index(idx)
             .expect("Could not get thread info by index");
-        // dumper.get_stack_info(info.stack_pointer);
-        //     const void* stack;
-        //     size_t stack_len;
-        //     EXPECT_TRUE(dumper.GetStackInfo(&stack, &stack_len,
-        //         one_thread.stack_pointer));
+        let (_stack_ptr, stack_len) = dumper
+            .get_stack_info(info.stack_pointer)
+            .expect("Could not get stack_pointer");
+        assert!(stack_len > 0);
 
         // In the helper program, we stored a pointer to the thread id in a
         // specific register. Check that we can recover its value.
@@ -110,6 +108,10 @@ fn test_thread_list_from_parent() {
             1,
         )
         .expect("Could not copy from process");
+        println!(
+            "------> curr_thread: {:b}, found_thread: {:b}",
+            curr_thread, found_thread_id[0] as usize
+        );
         matching_threads += if *curr_thread as i64 == found_thread_id[0] {
             1
         } else {
@@ -117,7 +119,7 @@ fn test_thread_list_from_parent() {
         };
     }
     assert_eq!(matching_threads, num_of_threads);
-    dumper.resume_thread(pid).expect("Failed to resume threads");
+    dumper.resume_threads().expect("Failed to resume threads");
     child.kill().expect("Failed to kill process");
 
     // Reap child
@@ -136,7 +138,6 @@ fn test_mappings_include_linux_gate() {
 }
 
 #[test]
-// Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_merged_mappings() {
     spawn_child!("merged_mappings");
 }

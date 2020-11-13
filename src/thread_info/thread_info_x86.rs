@@ -12,7 +12,7 @@ const NUM_DEBUG_REGISTERS: usize = 8;
 
 #[derive(Debug)]
 pub struct ThreadInfoX86 {
-    pub stack_pointer: libc::uintptr_t,
+    pub stack_pointer: usize,
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
     pub regs: libc::user_regs_struct,
@@ -30,7 +30,7 @@ impl CommonThreadInfo for ThreadInfoX86 {}
 impl ThreadInfoX86 {
     // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
     fn getregset(pid: Pid) -> Result<libc::user_regs_struct> {
-        Self::ptrace_get_data::<libc::user_regs_struct>(
+        Self::ptrace_get_data_via_io::<libc::user_regs_struct>(
             ptrace::Request::PTRACE_GETREGSET,
             Some(NT_Elf::NT_PRSTATUS),
             nix::unistd::Pid::from_raw(pid),
@@ -39,7 +39,7 @@ impl ThreadInfoX86 {
 
     // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
     fn getfpregset(pid: Pid) -> Result<libc::user_fpregs_struct> {
-        Self::ptrace_get_data::<libc::user_fpregs_struct>(
+        Self::ptrace_get_data_via_io::<libc::user_fpregs_struct>(
             ptrace::Request::PTRACE_GETREGSET,
             Some(NT_Elf::NT_PRFPREG),
             nix::unistd::Pid::from_raw(pid),
@@ -78,7 +78,6 @@ impl ThreadInfoX86 {
         let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
         let regs = Self::getregset(tid).or_else(|_| ptrace::getregs(unistd::Pid::from_raw(tid)))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
-
         #[cfg(target_arch = "x86")]
         let fpxregs: libc::user_fpxregs_struct;
         #[cfg(target_arch = "x86")]
@@ -106,9 +105,9 @@ impl ThreadInfoX86 {
         }
 
         #[cfg(target_arch = "x86_64")]
-        let stack_pointer = regs.rsp as libc::uintptr_t;
+        let stack_pointer = regs.rsp as usize;
         #[cfg(target_arch = "x86")]
-        let stack_pointer = regs.esp as libc::uintptr_t;
+        let stack_pointer = regs.esp as usize;
 
         Ok(ThreadInfoX86 {
             stack_pointer,

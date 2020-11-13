@@ -1,12 +1,11 @@
 // This binary shouldn't be under /src, but under /tests, but that is
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
-use goblin::elf::header;
-use minidump_writer_linux::linux_ptrace_dumper::AT_SYSINFO_EHDR;
+
+use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_EHDR};
 use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME};
 use nix::unistd::getppid;
 use std::convert::TryInto;
 use std::env;
-use std::process::id;
 
 macro_rules! test {
     ($x:expr, $errmsg:expr) => {
@@ -53,7 +52,9 @@ fn test_file_id() -> Result<()> {
         }
     }
     let idx = found_exe.unwrap();
-    dumper.elf_identifier_for_mapping_index(idx)?;
+    let id = dumper.elf_identifier_for_mapping_index(idx)?;
+    assert!(!id.is_empty());
+    assert!(id.iter().any(|&x| x > 0));
     Ok(())
 }
 
@@ -69,7 +70,6 @@ fn test_merged_mappings() -> Result<()> {
             map.system_mapping_info.end_address
         );
     }
-    test!(false, "blubb")?;
     Ok(())
     //    for (unsigned i = 0; i < dumper.mappings().size(); ++i) {
     //      const MappingInfo& mapping = *dumper.mappings()[i];
@@ -87,12 +87,12 @@ fn test_merged_mappings() -> Result<()> {
 }
 
 fn test_mappings_include_linux_gate() -> Result<()> {
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let ppid = getppid().as_raw();
+    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
     let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
     test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
-
     let mut found_linux_gate = false;
-    for mapping in dumper.mappings {
+    for mut mapping in dumper.mappings.clone() {
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
             found_linux_gate = true;
             test!(
@@ -100,20 +100,11 @@ fn test_mappings_include_linux_gate() -> Result<()> {
                 "linux_gate_loc != start_address"
             )?;
             println!("linux_gate_loc: 0x{:x}", linux_gate_loc);
-            let ll = mapping.start_address as *const u8;
-            for idx in 0..header::SELFMAG {
-                unsafe {
-                    test!(
-                        std::ptr::read(ll.offset(idx as isize)) == header::ELFMAG[idx],
-                        format!(
-                            "ll: {} != ELFMAG: {} at {}",
-                            std::ptr::read(ll.offset(idx as isize)),
-                            header::ELFMAG[idx],
-                            idx
-                        )
-                    )?;
-                }
-            }
+            dumper.suspend_threads()?;
+            let id = LinuxPtraceDumper::elf_identifier_for_mapping(&mut mapping, ppid)?;
+            test!(!id.is_empty(), "id-vec is empty")?;
+            test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
+            dumper.resume_threads()?;
             break;
         }
     }

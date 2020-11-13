@@ -77,7 +77,7 @@ impl LinuxPtraceDumper {
     }
 
     /// Suspends a thread by attaching to it.
-    pub fn suspend_thread(&self, child: Pid) -> Result<()> {
+    pub fn suspend_thread(child: Pid) -> Result<()> {
         let pid = nix::unistd::Pid::from_raw(child);
         // This may fail if the thread has just died or debugged.
         ptrace::attach(pid)?;
@@ -123,10 +123,37 @@ impl LinuxPtraceDumper {
     }
 
     /// Resumes a thread by detaching from it.
-    pub fn resume_thread(&self, child: Pid) -> Result<()> {
+    pub fn resume_thread(child: Pid) -> Result<()> {
         let pid = nix::unistd::Pid::from_raw(child);
         ptrace::detach(pid, None)?;
         Ok(())
+    }
+
+    pub fn suspend_threads(&mut self) -> Result<()> {
+        // Iterate over all threads and try to suspend them.
+        // If the thread either disappeared before we could attach to it, or if
+        // it was part of the seccomp sandbox's trusted code, it is OK to
+        // silently drop it from the minidump.
+        self.threads.retain(|&x| Self::suspend_thread(x).is_ok());
+
+        if self.threads.is_empty() {
+            Err("No threads left".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn resume_threads(&self) -> Result<()> {
+        let mut result = Ok(());
+        for thread in &self.threads {
+            match Self::resume_thread(*thread) {
+                Ok(_) => {}
+                x => {
+                    result = x;
+                }
+            }
+        }
+        return result;
     }
 
     /// Parse /proc/$pid/task to list all the threads of the process identified by
@@ -231,7 +258,7 @@ impl LinuxPtraceDumper {
     // Get information about the stack, given the stack pointer. We don't try to
     // walk the stack since we might not have all the information needed to do
     // unwind. So we just grab, up to, 32k of stack.
-    fn get_stack_info(&self, int_stack_pointer: usize) -> Result<(usize, usize)> {
+    pub fn get_stack_info(&self, int_stack_pointer: usize) -> Result<(usize, usize)> {
         // Move the stack pointer to the bottom of the page that it's in.
         // NOTE: original code uses getpagesize(), which a) isn't there in Rust and
         //       b) shouldn't be used, as its not portable (see man getpagesize)
@@ -253,7 +280,7 @@ impl LinuxPtraceDumper {
     }
 
     // Find the mapping which the given memory address falls in.
-    fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+    pub fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
         for map in &self.mappings {
             if address >= map.start_address && address - map.start_address < map.size {
                 return Some(&map);
@@ -265,7 +292,7 @@ impl LinuxPtraceDumper {
     // Find the mapping which the given memory address falls in. Uses the
     // unadjusted mapping address range from the kernel, rather than the
     // biased range.
-    fn find_mapping_no_bias<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+    pub fn find_mapping_no_bias<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
         for map in &self.mappings {
             if address >= map.system_mapping_info.start_address
                 && address < map.system_mapping_info.end_address

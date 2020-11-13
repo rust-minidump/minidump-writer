@@ -14,7 +14,7 @@ pub const DELETED_SUFFIX: &'static str = " (deleted)";
 pub const MOZILLA_IPC_PREFIX: &'static str = "org.mozilla.ipc.";
 pub const RESERVED_FLAGS: &'static str = " ---p";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SystemMappingInfo {
     pub start_address: usize,
     pub end_address: usize,
@@ -22,7 +22,7 @@ pub struct SystemMappingInfo {
 
 // One of these is produced for each mapping in the process (i.e. line in
 // /proc/$x/maps).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct MappingInfo {
     // On Android, relocation packing can mean that the reported start
     // address of the mapping must be adjusted by a bias in order to

@@ -83,6 +83,33 @@ trait CommonThreadInfo {
         Ok(unsafe { data.assume_init() })
     }
 
+    /// SLIGHTLY MODIFIED COPY FROM CRATE nix
+    /// Function for ptrace requests that return values from the data field.
+    /// Some ptrace get requests populate structs or larger elements than `c_long`
+    /// and therefore use the data field to return values. This function handles these
+    /// requests.
+    fn ptrace_get_data_via_io<T>(
+        request: ptrace::Request,
+        flag: Option<NT_Elf>,
+        pid: nix::unistd::Pid,
+    ) -> Result<T> {
+        let mut data = std::mem::MaybeUninit::uninit();
+        let io = libc::iovec {
+            iov_base: data.as_mut_ptr() as *mut libc::c_void,
+            iov_len: std::mem::size_of::<T>(),
+        };
+        let res = unsafe {
+            libc::ptrace(
+                request as ptrace::RequestType,
+                libc::pid_t::from(pid),
+                flag.unwrap_or(NT_Elf::NT_NONE),
+                &io as *const _ as *const libc::c_void,
+            )
+        };
+        Errno::result(res)?;
+        Ok(unsafe { data.assume_init() })
+    }
+
     /// COPY FROM CRATE nix BECAUSE ITS NOT PUBLIC
     fn ptrace_peek(
         request: ptrace::Request,
