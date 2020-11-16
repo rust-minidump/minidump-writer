@@ -1,4 +1,4 @@
-const MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE: usize = 80;
+pub const MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE: usize = 80;
 
 pub struct MDFloatingSaveAreaX86 {
     pub control_word: u32,
