@@ -1,5 +1,7 @@
 pub const MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE: usize = 80;
 
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MDFloatingSaveAreaX86 {
     pub control_word: u32,
     pub status_word: u32,
@@ -18,6 +20,8 @@ pub struct MDFloatingSaveAreaX86 {
 const MD_CONTEXT_X86_EXTENDED_REGISTERS_SIZE: usize = 512;
 /* MAXIMUM_SUPPORTED_EXTENSION */
 
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MDRawContextX86 {
     /* The next field determines the layout of the structure, and which parts
      * of it are populated */

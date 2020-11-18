@@ -247,6 +247,7 @@ impl ThreadInfoX86 {
         out.float_save.data_selector = self.fpregs.fos;
 
         // 8 registers * 10 bytes per register.
+        // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
         unsafe {
             std::ptr::copy(
                 &std::mem::transmute::<&[u32], [u8; MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE]>(
@@ -256,7 +257,6 @@ impl ThreadInfoX86 {
                 10 * 8,
             )
         }
-        // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
 
         // This matches the Intel fpsave format.
         let values = (

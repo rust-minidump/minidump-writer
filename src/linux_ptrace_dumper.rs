@@ -1,6 +1,7 @@
 // use libc::c_void;
 use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
 use crate::maps_reader::{MappingInfo, MappingInfoParsingResult};
+use crate::minidump_format::MDGUID;
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
 use crate::LINUX_GATE_LIBRARY_NAME;
@@ -20,15 +21,6 @@ pub struct LinuxPtraceDumper {
     pub threads: Vec<Pid>,
     pub auxv: HashMap<AuxvType, AuxvType>,
     pub mappings: Vec<MappingInfo>,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-struct MDGUID {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
 }
 
 pub const AT_SYSINFO_EHDR: u64 = 33;

@@ -9,6 +9,8 @@ pub mod cpu_set;
 pub mod linux_ptrace_dumper;
 mod maps_reader;
 pub mod minidump_cpu;
+pub mod minidump_format;
+pub mod minidump_writer;
 pub mod thread_info;
 
 pub use maps_reader::LINUX_GATE_LIBRARY_NAME;

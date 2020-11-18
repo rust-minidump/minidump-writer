@@ -1,3 +1,5 @@
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MDXmmSaveArea32AMD64 {
     pub control_word: u16,
     pub status_word: u16,
@@ -19,6 +21,8 @@ pub struct MDXmmSaveArea32AMD64 {
 
 const MD_CONTEXT_AMD64_VR_COUNT: usize = 26;
 
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MDRawContextAMD64 {
     /*
      * Register parameter home addresses.
