@@ -16,7 +16,7 @@ use std::path;
 
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
-    pid: Pid,
+    pub pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Pid>,
     pub auxv: HashMap<AuxvType, AuxvType>,

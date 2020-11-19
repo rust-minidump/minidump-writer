@@ -44,14 +44,12 @@ pub struct MappingInfo {
 
 #[derive(Debug)]
 pub struct MappingEntry {
-    first: MappingInfo,
-    second: Vec<u8>,
+    pub mapping: MappingInfo,
+    pub identifier: Vec<u8>,
 }
 
 // A list of <MappingInfo, GUID>
-// type MappingList = Vec<MappingEntry>;
-// Not sure if we need to use a linked list
-//typedef std::list<MappingEntry> MappingList;
+pub type MappingList = Vec<MappingEntry>;
 
 #[derive(Debug)]
 pub enum MappingInfoParsingResult {
@@ -210,12 +208,7 @@ impl MappingInfo {
         return Ok(exe_link);
     }
 
-    pub fn stack_has_pointer_to_mapping(
-        &self,
-        stack_copy: &[u8],
-        stack_len: usize,
-        sp_offset: usize,
-    ) -> bool {
+    pub fn stack_has_pointer_to_mapping(&self, stack_copy: &[u8], sp_offset: usize) -> bool {
         // Loop over all stack words that would have been on the stack in
         // the target process (i.e. are word aligned, and at addresses >=
         // the stack pointer).  Regardless of the alignment of |stack_copy|,
@@ -224,7 +217,7 @@ impl MappingInfo {
         let low_addr = self.system_mapping_info.start_address;
         let high_addr = self.system_mapping_info.end_address;
         let mut offset = (sp_offset + size_of::<usize>() - 1) & !(size_of::<usize>() - 1);
-        while offset <= stack_len - size_of::<usize>() {
+        while offset <= stack_copy.len() - size_of::<usize>() {
             let addr = match std::mem::size_of::<usize>() {
                 4 => stack_copy[offset..]
                     .as_ref()
@@ -313,6 +306,30 @@ impl MappingInfo {
         }
 
         Ok((file_path, file_name))
+    }
+
+    pub fn is_contained_in(&self, user_mapping_list: &MappingList) -> bool {
+        for user in user_mapping_list {
+            // Ignore any mappings that are wholly contained within
+            // mappings in the mapping_info_ list.
+            if self.start_address >= user.mapping.start_address
+                && (self.start_address + self.size)
+                    <= (user.mapping.start_address + user.mapping.size)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_interesting(&self) -> bool {
+        // only want modules with filenames.
+        self.name.is_some() &&
+        // Only want to include one mapping per shared lib.
+        // Avoid filtering executable mappings.
+        (self.offset == 0 || self.executable) &&
+        // big enough to get a signature for.
+        self.size >= 4096
     }
 }
 

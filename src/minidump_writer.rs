@@ -1,11 +1,12 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
+use crate::maps_reader::{MappingInfo, MappingList};
 use crate::minidump_cpu::RawContextCPU;
 use crate::minidump_format::*;
 use crate::thread_info::Pid;
 use crate::thread_info::ThreadInfo;
 use crate::Result;
 use std::convert::TryInto;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
@@ -28,6 +29,9 @@ struct MinidumpWriter {
     dumper: LinuxPtraceDumper,
     minidump_path: String,
     minidump_size_limit: i64,
+    skip_stacks_if_mapping_unreferenced: bool,
+    principal_mapping: Option<MappingInfo>,
+    user_mapping_list: MappingList,
 }
 
 // This doesn't work yet:
@@ -45,6 +49,9 @@ impl MinidumpWriter {
             dumper,
             minidump_path: minidump_path.to_string(),
             minidump_size_limit: -1,
+            skip_stacks_if_mapping_unreferenced: false,
+            principal_mapping: None,
+            user_mapping_list: Vec::new(),
         }
     }
 
@@ -56,7 +63,7 @@ impl MinidumpWriter {
         Ok(())
     }
 
-    fn dump(&self) -> Result<()> {
+    fn dump(&mut self) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
         // of stream which we write.
         let num_writers = 13u32;
@@ -90,20 +97,16 @@ impl MinidumpWriter {
         // we should have a mostly-intact dump
         // TODO: Write header_section to file here
 
-        self.write_thread_list_stream(&mut buffer)?;
+        let mut dir_idx = 0;
+        let mut dirent = self.write_thread_list_stream(&mut buffer)?;
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
+
+        dirent = self.write_mappings(&mut buffer)?;
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
         Ok(())
-
-        // unsigned dir_index = 0;
-        // MDRawDirectory dirent;
-
-        // if (!WriteThreadListStream(&dirent))
-        //   return false;
-        // dir.CopyIndex(dir_index++, &dirent);
-
-        // if (!WriteMappings(&dirent))
-        //   return false;
-        // dir.CopyIndex(dir_index++, &dirent);
 
         // if (!WriteAppMemory())
         //   return false;
@@ -169,23 +172,19 @@ impl MinidumpWriter {
         // return true;
     }
 
-    fn write_thread_list_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<()> {
+    fn write_thread_list_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
         let num_threads = self.dumper.threads.len();
         // Memory looks like this:
         // <num_threads><thread_1><thread_2>...
 
-        let mut list_header = SectionWriter::<u32>::alloc(buffer)?;
-        list_header.set_value(buffer, num_threads as u32)?;
+        let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
 
-        //     dirent.stream_type = MD_THREAD_LIST_STREAM;
-        //     dirent.location = list.location();
+        let dirent = MDRawDirectory {
+            stream_type: MDStreamType::ThreadListStream as u32,
+            location: list_header.location(), // TODO: WRONG, because location includes size, which should contain mapping_list as well!
+        };
 
         let mut thread_list = SectionArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
-
-        // dirent->stream_type = MD_THREAD_LIST_STREAM;
-        // dirent->location = list.location();
-
-        // *list.get() = num_threads;
 
         // If there's a minidump size limit, check if it might be exceeded.  Since
         // most of the space is filled with stack data, just check against that.
@@ -216,7 +215,7 @@ impl MinidumpWriter {
                 // Currently, no support for ucontext yet, so this is always false:
                 //       if (static_cast<pid_t>(thread.thread_id) == GetCrashThread() &&
                 //           ucontext_ &&
-                //           !dumper_->IsPostMortem()) {
+                //           !dumper_->IsPostMortem())
             } else {
                 let info = self.dumper.get_thread_info_by_index(idx)?;
                 let max_stack_len =
@@ -226,11 +225,10 @@ impl MinidumpWriter {
                         -1 // default to no maximum for this thread
                     };
 
-                let stack_copy =
-                    self.fill_thread_stack(buffer, &mut thread, &info, max_stack_len)?;
+                self.fill_thread_stack(buffer, &mut thread, &info, max_stack_len)?;
 
                 // let cpu = SectionWriter::<RawContextCPU>::alloc(&mut buffer)?;
-                let cpu = RawContextCPU::default();
+                let mut cpu = RawContextCPU::default();
                 info.fill_cpu_context(&mut cpu);
                 let cpu_section = SectionWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
                 thread.thread_context = cpu_section.location();
@@ -247,7 +245,7 @@ impl MinidumpWriter {
             }
             thread_list.set_value_at(buffer, thread, idx)?;
         }
-        Ok(())
+        Ok(dirent)
     }
 
     fn fill_thread_stack(
@@ -256,172 +254,180 @@ impl MinidumpWriter {
         thread: &mut MDRawThread,
         info: &ThreadInfo,
         max_stack_len: i32,
-    ) -> Result<Vec<u8>> {
-        let pc = info.get_instruction_pointer();
+    ) -> Result<()> {
+        let pc = info.get_instruction_pointer() as usize;
 
         thread.stack.start_of_memory_range = info.stack_pointer.try_into()?;
         thread.stack.memory.data_size = 0;
         thread.stack.memory.rva = buffer.position() as u32;
 
-        if let Ok(stack) = self.dumper.get_stack_info(info.stack_pointer) {
-            //     if (max_stack_len >= 0 &&
-            //         stack_len > static_cast<unsigned int>(max_stack_len)) {
-            //       stack_len = max_stack_len;
-            //       // Skip empty chunks of length max_stack_len.
-            //       uintptr_t int_stack = reinterpret_cast<uintptr_t>(stack);
-            //       if (max_stack_len > 0) {
-            //         while (int_stack + max_stack_len < stack_pointer) {
-            //           int_stack += max_stack_len;
-            //         }
-            //       }
-            //       stack = reinterpret_cast<const void*>(int_stack);
-            //     }
-            //     *stack_copy = reinterpret_cast<uint8_t*>(Alloc(stack_len));
-            //     dumper_->CopyFromProcess(*stack_copy, thread->thread_id, stack,
-            //                              stack_len);
+        if let Ok((mut stack, mut stack_len)) = self.dumper.get_stack_info(info.stack_pointer) {
+            if max_stack_len >= 0 && stack_len > max_stack_len as usize {
+                stack_len = max_stack_len as usize; // Casting is ok, as we checked that its positive
 
-            //     uintptr_t stack_pointer_offset =
-            //         stack_pointer - reinterpret_cast<uintptr_t>(stack);
-            //     if (skip_stacks_if_mapping_unreferenced_) {
-            //       if (!principal_mapping_) {
-            //         return true;
-            //       }
-            //       uintptr_t low_addr = principal_mapping_->system_mapping_info.start_addr;
-            //       uintptr_t high_addr = principal_mapping_->system_mapping_info.end_addr;
-            //       if ((pc < low_addr || pc > high_addr) &&
-            //           !dumper_->StackHasPointerToMapping(*stack_copy, stack_len,
-            //                                              stack_pointer_offset,
-            //                                              *principal_mapping_)) {
-            //         return true;
-            //       }
-            //     }
+                // Skip empty chunks of length max_stack_len.
+                // Meaning != 0
+                if stack_len > 0 {
+                    while stack + stack_len < info.stack_pointer {
+                        stack += stack_len;
+                    }
+                }
+            }
+            let stack_copy = LinuxPtraceDumper::copy_from_process(
+                thread.thread_id.try_into()?,
+                stack as *mut libc::c_void,
+                stack_len.try_into()?,
+            )?;
+            let stack_pointer_offset = info.stack_pointer - stack;
+            let stack_bytes = stack_copy
+                .iter()
+                .map(|x| x.to_ne_bytes().to_vec())
+                .flatten()
+                .collect::<Vec<u8>>();
+            if self.skip_stacks_if_mapping_unreferenced {
+                if let Some(principal_mapping) = &self.principal_mapping {
+                    let low_addr = principal_mapping.system_mapping_info.start_address;
+                    let high_addr = principal_mapping.system_mapping_info.end_address;
+                    if (pc < low_addr || pc > high_addr)
+                        && !principal_mapping
+                            .stack_has_pointer_to_mapping(&stack_bytes, stack_pointer_offset)
+                    {
+                        return Ok(());
+                    }
+                } else {
+                    return Ok(());
+                }
+            }
 
-            //     if (sanitize_stacks_) {
-            //       dumper_->SanitizeStackCopy(*stack_copy, stack_len, stack_pointer,
+            //     if self.sanitize_stacks {
+            //       self.dumper.SanitizeStackCopy(&stack_bytes, stack_pointer,
             //                                  stack_pointer_offset);
             //     }
-
-            //     UntypedMDRVA memory(&minidump_writer_);
-            //     if (!memory.Allocate(stack_len))
-            //       return false;
-            //     memory.Copy(*stack_copy, stack_len);
-            //     thread->stack.start_of_memory_range = reinterpret_cast<uintptr_t>(stack);
-            //     thread->stack.memory = memory.location();
+            let stack_location = MDLocationDescriptor {
+                data_size: stack_bytes.len() as u32,
+                rva: buffer.position() as u32,
+            };
+            buffer.write_all(&stack_bytes)?;
+            thread.stack.start_of_memory_range = stack as u64;
+            thread.stack.memory = stack_location;
             //     memory_blocks_.push_back(thread->stack);
         }
-        let res = Vec::new();
-        Ok(res)
+        Ok(())
     }
 
-    pub fn set_minidump_size_limit(&mut self, limit: i64) {
-        self.minidump_size_limit = limit;
+    /// Write information about the mappings in effect. Because we are using the
+    /// minidump format, the information about the mappings is pretty limited.
+    /// Because of this, we also include the full, unparsed, /proc/$x/maps file in
+    /// another stream in the file.
+    fn write_mappings(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+        let mut num_output_mappings = self.user_mapping_list.len();
+
+        for mapping in &self.dumper.mappings {
+            // If the mapping is uninteresting, or if
+            // there is caller-provided information about this mapping
+            // in the user_mapping_list list, skip it
+            if mapping.is_interesting() && !mapping.is_contained_in(&self.user_mapping_list) {
+                num_output_mappings += 1;
+            }
+        }
+
+        let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
+
+        let dirent = MDRawDirectory {
+            stream_type: MDStreamType::ModuleListStream as u32,
+            location: list_header.location(), // TODO: WRONG, because location includes size, which should contain mapping_list as well!
+        };
+
+        // TODO: We currently ignore this and use size_of<MDRawModule>
+        /* The inclusion of a 64-bit type in MINIDUMP_MODULE forces the struct to
+         * be tail-padded out to a multiple of 64 bits under some ABIs (such as PPC).
+         * This doesn't occur on systems that don't tail-pad in this manner.  Define
+         * this macro to be the usable size of the MDRawModule struct, and use it in
+         * place of sizeof(MDRawModule). */
+        // #define MD_MODULE_SIZE 108
+        // In case of num_output_mappings == 0, this call doesn't allocate any memory in the buffer
+        let mut mapping_list =
+            SectionArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
+
+        // First write all the mappings from the dumper
+        let mut idx = 0;
+        for map_idx in 0..self.dumper.mappings.len() {
+            if !self.dumper.mappings[map_idx].is_interesting()
+                || self.dumper.mappings[map_idx].is_contained_in(&self.user_mapping_list)
+            {
+                continue;
+            }
+            // Note: elf_identifier_for_mapping_index() can manipulate the |mapping.name|.
+            let identifier = self.dumper.elf_identifier_for_mapping_index(idx)?;
+            let module = self.fill_raw_module(buffer, &self.dumper.mappings[idx], &identifier)?;
+            mapping_list.set_value_at(buffer, module, idx)?;
+            idx += 1;
+        }
+
+        // Next write all the mappings provided by the caller
+        for user in &self.user_mapping_list {
+            // GUID was provided by caller.
+            let module = self.fill_raw_module(buffer, &user.mapping, &user.identifier)?;
+            mapping_list.set_value_at(buffer, module, idx)?;
+            idx += 1;
+        }
+        Ok(dirent)
     }
+
+    fn fill_raw_module(
+        &self,
+        buffer: &mut Cursor<Vec<u8>>,
+        mapping: &MappingInfo,
+        identifier: &[u8],
+    ) -> Result<MDRawModule> {
+        let cv_record: MDLocationDescriptor;
+        if identifier.is_empty() {
+            // Just zeroes
+            cv_record = Default::default();
+        } else {
+            let cv_signature = MD_CVINFOELF_SIGNATURE;
+            let array_size = std::mem::size_of_val(&cv_signature) + identifier.len();
+
+            let mut sig_section = SectionArrayWriter::<u8>::alloc_array(buffer, array_size)?;
+            for (index, val) in cv_signature
+                .to_ne_bytes()
+                .iter()
+                .chain(identifier.iter())
+                .enumerate()
+            {
+                sig_section.set_value_at(buffer, *val, index)?;
+            }
+            cv_record = sig_section.location();
+        }
+
+        let (file_path, _) = mapping.get_mapping_effective_name_and_path()?;
+        let letters: Vec<u16> = file_path.encode_utf16().collect();
+
+        // First write size of the string (x letters in u16, times the size of u16)
+        let name_header = SectionWriter::<u32>::alloc_with_val(
+            buffer,
+            (letters.len() * std::mem::size_of::<u16>()).try_into()?,
+        )?;
+
+        // Then write utf-16 letters after that
+        let mut name_section = SectionArrayWriter::<u16>::alloc_array(buffer, letters.len())?;
+        for (index, letter) in letters.iter().enumerate() {
+            name_section.set_value_at(buffer, *letter, index)?;
+        }
+
+        Ok(MDRawModule {
+            base_of_image: mapping.start_address as u64,
+            size_of_image: mapping.size as u32,
+            cv_record,
+            module_name_rva: name_header.location().rva,
+            ..Default::default()
+        })
+    }
+
+    // pub fn set_minidump_size_limit(&mut self, limit: i64) {
+    //     self.minidump_size_limit = limit;
+    // }
 }
-
-//   // Write information about the threads.
-
-//     for (unsigned i = 0; i < num_threads; ++i) {
-
-//       if (static_cast<pid_t>(thread.thread_id) == GetCrashThread() &&
-//           ucontext_ &&
-//           !dumper_->IsPostMortem()) {
-//         uint8_t* stack_copy;
-//         const uintptr_t stack_ptr = UContextReader::GetStackPointer(ucontext_);
-//         if (!FillThreadStack(&thread, stack_ptr,
-//                              UContextReader::GetInstructionPointer(ucontext_),
-//                              -1, &stack_copy))
-//           return false;
-
-//         // Copy 256 bytes around crashing instruction pointer to minidump.
-//         const size_t kIPMemorySize = 256;
-//         uint64_t ip = UContextReader::GetInstructionPointer(ucontext_);
-//         // Bound it to the upper and lower bounds of the memory map
-//         // it's contained within. If it's not in mapped memory,
-//         // don't bother trying to write it.
-//         bool ip_is_mapped = false;
-//         MDMemoryDescriptor ip_memory_d;
-//         for (unsigned j = 0; j < dumper_->mappings().size(); ++j) {
-//           const MappingInfo& mapping = *dumper_->mappings()[j];
-//           if (ip >= mapping.start_addr &&
-//               ip < mapping.start_addr + mapping.size) {
-//             ip_is_mapped = true;
-//             // Try to get 128 bytes before and after the IP, but
-//             // settle for whatever's available.
-//             ip_memory_d.start_of_memory_range =
-//               std::max(mapping.start_addr,
-//                        uintptr_t(ip - (kIPMemorySize / 2)));
-//             uintptr_t end_of_range =
-//               std::min(uintptr_t(ip + (kIPMemorySize / 2)),
-//                        uintptr_t(mapping.start_addr + mapping.size));
-//             ip_memory_d.memory.data_size =
-//               end_of_range - ip_memory_d.start_of_memory_range;
-//             break;
-//           }
-//         }
-
-//         if (ip_is_mapped) {
-//           UntypedMDRVA ip_memory(&minidump_writer_);
-//           if (!ip_memory.Allocate(ip_memory_d.memory.data_size))
-//             return false;
-//           uint8_t* memory_copy =
-//               reinterpret_cast<uint8_t*>(Alloc(ip_memory_d.memory.data_size));
-//           dumper_->CopyFromProcess(
-//               memory_copy,
-//               thread.thread_id,
-//               reinterpret_cast<void*>(ip_memory_d.start_of_memory_range),
-//               ip_memory_d.memory.data_size);
-//           ip_memory.Copy(memory_copy, ip_memory_d.memory.data_size);
-//           ip_memory_d.memory = ip_memory.location();
-//           memory_blocks_.push_back(ip_memory_d);
-//         }
-
-//         TypedMDRVA<RawContextCPU> cpu(&minidump_writer_);
-//         if (!cpu.Allocate())
-//           return false;
-//         my_memset(cpu.get(), 0, sizeof(RawContextCPU));
-// #if !defined(__ARM_EABI__) && !defined(__mips__)
-//         UContextReader::FillCPUContext(cpu.get(), ucontext_, float_state_);
-// #else
-//         UContextReader::FillCPUContext(cpu.get(), ucontext_);
-// #endif
-//         thread.thread_context = cpu.location();
-//         crashing_thread_context_ = cpu.location();
-//       } else {
-//         ThreadInfo info;
-//         if (!dumper_->GetThreadInfoByIndex(i, &info))
-//           return false;
-
-//         uint8_t* stack_copy;
-//         int max_stack_len = -1;  // default to no maximum for this thread
-//         if (minidump_size_limit_ >= 0 && i >= kLimitBaseThreadCount)
-//           max_stack_len = extra_thread_stack_len;
-//         if (!FillThreadStack(&thread, info.stack_pointer,
-//                              info.GetInstructionPointer(), max_stack_len,
-//                              &stack_copy))
-//           return false;
-
-//         TypedMDRVA<RawContextCPU> cpu(&minidump_writer_);
-//         if (!cpu.Allocate())
-//           return false;
-//         my_memset(cpu.get(), 0, sizeof(RawContextCPU));
-//         info.FillCPUContext(cpu.get());
-//         thread.thread_context = cpu.location();
-//         if (dumper_->threads()[i] == GetCrashThread()) {
-//           crashing_thread_context_ = cpu.location();
-//           if (!dumper_->IsPostMortem()) {
-//             // This is the crashing thread of a live process, but
-//             // no context was provided, so set the crash address
-//             // while the instruction pointer is already here.
-//             dumper_->set_crash_address(info.GetInstructionPointer());
-//           }
-//         }
-//       }
-
-//       list.CopyIndexAfterObject(i, &thread, sizeof(thread));
-//     }
-
-//     return true;
-//   }
 
 pub fn write_minidump(
     minidump_path: &str,

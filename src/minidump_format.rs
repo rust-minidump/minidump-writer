@@ -132,6 +132,20 @@ pub const MD_HEADER_SIGNATURE: u32 = 0x504d444d; /* 'PMDM' */
 pub const MD_HEADER_VERSION: u32 = 0x0000a793; /* 42899 */
 /* MINIDUMP_VERSION */
 
+/*
+ * Modern ELF toolchains insert a "build id" into the ELF headers that
+ * usually contains a hash of some ELF headers + sections to uniquely
+ * identify a binary.
+ *
+ * https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Developer_Guide/compiling-build-id.html
+ * https://sourceware.org/binutils/docs-2.26/ld/Options.html#index-g_t_002d_002dbuild_002did-292
+ */
+pub const MD_CVINFOELF_SIGNATURE: u32 = 0x4270454c; /* cvSignature = 'BpEL' */
+/* Signature is followed by the bytes of the
+ * build id from GNU_BUILD_ID ELF note.
+ * This is variable-length, but usually 20 bytes
+ * as the binutils ld default is a SHA-1 hash. */
+
 /* For (MDRawHeader).flags: */
 pub enum MDType {
     /* MD_NORMAL is the standard type of minidump.  It includes full
@@ -330,5 +344,12 @@ where
 
         res?;
         Ok(())
+    }
+
+    pub fn location(&self) -> MDLocationDescriptor {
+        MDLocationDescriptor {
+            data_size: (self.array_size * std::mem::size_of::<T>()) as u32,
+            rva: self.position,
+        }
     }
 }

@@ -1,5 +1,4 @@
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
 pub struct MDXmmSaveArea32AMD64 {
     pub control_word: u16,
     pub status_word: u16,
@@ -19,10 +18,37 @@ pub struct MDXmmSaveArea32AMD64 {
     pub reserved4: [u8; 96],
 }
 
+// The std library doesn't provide "Default" for all
+// array-lengths. Only up to 32. So we have to implement
+// our own default, because of `reserved4: [u8; 96]`
+impl Default for MDXmmSaveArea32AMD64 {
+    #[inline]
+    fn default() -> Self {
+        MDXmmSaveArea32AMD64 {
+            control_word: 0,
+            status_word: 0,
+            tag_word: 0,
+            reserved1: 0,
+            error_opcode: 0,
+            error_offset: 0,
+            error_selector: 0,
+            reserved2: 0,
+            data_offset: 0,
+            data_selector: 0,
+            reserved3: 0,
+            mx_csr: 0,
+            mx_csr_mask: 0,
+            float_registers: [0; 8],
+            xmm_registers: [0; 16],
+            reserved4: [0; 96],
+        }
+    }
+}
+
 const MD_CONTEXT_AMD64_VR_COUNT: usize = 26;
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Default)]
 pub struct MDRawContextAMD64 {
     /*
      * Register parameter home addresses.
