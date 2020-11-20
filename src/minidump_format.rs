@@ -62,6 +62,14 @@ pub struct MDRawHeader {
     pub flags: u64,
 }
 
+/* For (MDRawHeader).signature and (MDRawHeader).version.  Note that only the
+ * low 16 bits of (MDRawHeader).version are MD_HEADER_VERSION.  Per the
+ * documentation, the high 16 bits are implementation-specific. */
+pub const MD_HEADER_SIGNATURE: u32 = 0x504d444d; /* 'PMDM' */
+/* MINIDUMP_SIGNATURE */
+pub const MD_HEADER_VERSION: u32 = 0x0000a793; /* 42899 */
+/* MINIDUMP_VERSION */
+
 #[repr(C)]
 #[derive(Debug, Default, PartialEq)]
 pub struct MDRawThread {
@@ -124,13 +132,162 @@ pub struct MDRawDirectory {
     pub location: MDLocationDescriptor,
 }
 
-/* For (MDRawHeader).signature and (MDRawHeader).version.  Note that only the
- * low 16 bits of (MDRawHeader).version are MD_HEADER_VERSION.  Per the
- * documentation, the high 16 bits are implementation-specific. */
-pub const MD_HEADER_SIGNATURE: u32 = 0x504d444d; /* 'PMDM' */
-/* MINIDUMP_SIGNATURE */
-pub const MD_HEADER_VERSION: u32 = 0x0000a793; /* 42899 */
-/* MINIDUMP_VERSION */
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDException {
+    exception_code: u32, /* Windows: MDExceptionCodeWin,
+                          * Mac OS X: MDExceptionMac,
+                          * Linux: MDExceptionCodeLinux. */
+    exception_flags: u32, /* Windows: 1 if noncontinuable,
+                          Mac OS X: MDExceptionCodeMac. */
+    exception_record: u64, /* Address (in the minidump-producing host's
+                            * memory) of another MDException, for
+                            * nested exceptions. */
+    exception_address: u64, /* The address that caused the exception.
+                             * Mac OS X: exception subcode (which is
+                             *           typically the address). */
+    number_parameters: u32, /* Number of valid elements in
+                             * exception_information. */
+    __align: u32,
+    exception_information: [u64; 15],
+}
+
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawExceptionStream {
+    pub thread_id: u32, /* Thread in which the exception
+                         * occurred.  Corresponds to
+                         * (MDRawThread).thread_id. */
+    pub __align: u32,
+    pub exception_record: MDException,
+    pub thread_context: MDLocationDescriptor, /* MDRawContext[CPU] */
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDCPUInformation {
+    pub vendor_id: [u32; 3],            /* cpuid 0: ebx, edx, ecx */
+    pub version_information: u32,       /* cpuid 1: eax */
+    pub feature_information: u32,       /* cpuid 1: edx */
+    pub amd_extended_cpu_features: u32, /* cpuid 0x80000001, ebx */
+}
+
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDCPUInformation {
+    pub cpuid: u32,
+    pub elf_hwcaps: u32, /* linux specific, 0 otherwise */
+}
+
+#[cfg(target_arch = "mips")]
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDCPUInformation {
+    pub cpuid: [u64; 2],
+}
+
+/* For (MDCPUInformation).arm_cpu_info.elf_hwcaps.
+ * This matches the Linux kernel definitions from <asm/hwcaps.h> */
+enum MDCPUInformationARMElfHwCaps {
+    Swp = 1 << 0,
+    Half = 1 << 1,
+    Thumb = 1 << 2,
+    Bit26 = 1 << 3,
+    FastMult = 1 << 4,
+    Fpa = 1 << 5,
+    Vfp = 1 << 6,
+    Edsp = 1 << 7,
+    Java = 1 << 8,
+    Iwmmxt = 1 << 9,
+    Crunch = 1 << 10,
+    Thumbee = 1 << 11,
+    Neon = 1 << 12,
+    Vfpv3 = 1 << 13,
+    Vfpv3d16 = 1 << 14,
+    Tls = 1 << 15,
+    Vfpv4 = 1 << 16,
+    Idiva = 1 << 17,
+    Idivt = 1 << 18,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawSystemInfo {
+    /* The next 3 fields and numberOfProcessors are from the SYSTEM_INFO
+     * structure as returned by GetSystemInfo */
+    pub processor_architecture: u16,
+    pub processor_level: u16, /* x86: 5 = 586, 6 = 686, ... */
+    /* ARM: 6 = ARMv6, 7 = ARMv7 ... */
+    pub processor_revision: u16, /* x86: 0xMMSS, where MM=model,
+                                  *      SS=stepping */
+    /* ARM: 0 */
+    pub number_of_processors: u8,
+    pub product_type: u8, /* Windows: VER_NT_* from WinNT.h */
+
+    /* The next 5 fields are from the OSVERSIONINFO structure as returned
+     * by GetVersionEx */
+    pub major_version: u32,
+    pub minor_version: u32,
+    pub build_number: u32,
+    pub platform_id: u32,
+    pub csd_version_rva: MDRVA, /* MDString further identifying the
+                                 * host OS.
+                                 * Windows: name of the installed OS
+                                 *          service pack.
+                                 * Mac OS X: the Apple OS build number
+                                 *           (sw_vers -buildVersion).
+                                 * Linux: uname -srvmo */
+
+    pub suite_mask: u16, /* Windows: VER_SUITE_* from WinNT.h */
+    pub reserved2: u16,
+
+    pub cpu: MDCPUInformation,
+}
+
+/* For (MDRawSystemInfo).processor_architecture: */
+pub enum MDCPUArchitecture {
+    X86 = 0,   /* PROCESSOR_ARCHITECTURE_INTEL */
+    Mips = 1,  /* PROCESSOR_ARCHITECTURE_MIPS */
+    Alpha = 2, /* PROCESSOR_ARCHITECTURE_ALPHA */
+    Ppc = 3,   /* PROCESSOR_ARCHITECTURE_PPC */
+    Shx = 4,   /* PROCESSOR_ARCHITECTURE_SHX
+                * (Super-H) */
+    Arm = 5,     /* PROCESSOR_ARCHITECTURE_ARM */
+    Ia64 = 6,    /* PROCESSOR_ARCHITECTURE_IA64 */
+    Alpha64 = 7, /* PROCESSOR_ARCHITECTURE_ALPHA64 */
+    Msil = 8,    /* PROCESSOR_ARCHITECTURE_MSIL
+                  * (Microsoft Intermediate Language) */
+    Amd64 = 9, /* PROCESSOR_ARCHITECTURE_AMD64 */
+    X86Win64 = 10,
+    /* PROCESSOR_ARCHITECTURE_IA32_ON_WIN64 (WoW64) */
+    Arm64 = 12,        /* PROCESSOR_ARCHITECTURE_ARM64 */
+    Sparc = 0x8001,    /* Breakpad-defined value for SPARC */
+    Ppc64 = 0x8002,    /* Breakpad-defined value for PPC64 */
+    Arm64Old = 0x8003, /* Breakpad-defined value for ARM64 */
+    Mips64 = 0x8004,   /* Breakpad-defined value for MIPS64 */
+    Unknown = 0xffff,  /* PROCESSOR_ARCHITECTURE_UNKNOWN */
+}
+
+/* For (MDRawSystemInfo).platform_id: */
+pub enum MDOSPlatform {
+    Win32s = 0,       /* VER_PLATFORM_WIN32s (Windows 3.1) */
+    Win32Windows = 1, /* VER_PLATFORM_WIN32_WINDOWS (Windows 95-98-Me) */
+    Win32Nt = 2,      /* VER_PLATFORM_WIN32_NT (Windows NT, 2000+) */
+    Win32Ce = 3,      /* VER_PLATFORM_WIN32_CE, VER_PLATFORM_WIN32_HH
+                       * (Windows CE, Windows Mobile, "Handheld") */
+    /* The following values are Breakpad-defined. */
+    Unix = 0x8000,    /* Generic Unix-ish */
+    MacOsX = 0x8101,  /* Mac OS X/Darwin */
+    Ios = 0x8102,     /* iOS */
+    Linux = 0x8201,   /* Linux */
+    Solaris = 0x8202, /* Solaris */
+    Android = 0x8203, /* Android */
+    Ps3 = 0x8204,     /* PS3 */
+    Nacl = 0x8205,    /* Native Client (NaCl) */
+    Fuchsia = 0x8206, /* Fuchsia */
+}
 
 /*
  * Modern ELF toolchains insert a "build id" into the ELF headers that

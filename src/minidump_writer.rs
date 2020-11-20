@@ -119,15 +119,16 @@ impl MinidumpWriter {
         dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
+        // Currently unused
+        dirent = self.write_exception_stream(&mut buffer)?;
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
+
+        dirent = self.write_system_info_stream(&mut buffer)?;
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
+
         Ok(())
-
-        // if (!WriteExceptionStream(&dirent))
-        //   return false;
-        // dir.CopyIndex(dir_index++, &dirent);
-
-        // if (!WriteSystemInfoStream(&dirent))
-        //   return false;
-        // dir.CopyIndex(dir_index++, &dirent);
 
         // dirent.stream_type = MD_LINUX_CPU_INFO;
         // if (!WriteFile(&dirent.location, "/proc/cpuinfo"))
@@ -463,6 +464,40 @@ impl MinidumpWriter {
 
         dirent.location.data_size += block_list.location().data_size;
 
+        Ok(dirent)
+    }
+
+    fn write_exception_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+        let exc = SectionWriter::<MDRawExceptionStream>::alloc(buffer)?;
+        let dirent = MDRawDirectory {
+            stream_type: MDStreamType::ExceptionStream as u32,
+            location: exc.location(),
+        };
+        // TODO: Not implemented yet
+        // stream->thread_id = GetCrashThread();
+        // stream->exception_record.exception_code = dumper_->crash_signal();
+        // stream->exception_record.exception_flags = dumper_->crash_signal_code();
+        // stream->exception_record.exception_address = dumper_->crash_address();
+        // const std::vector<uint64_t> crash_exception_info =
+        //     dumper_->crash_exception_info();
+        // stream->exception_record.number_parameters = crash_exception_info.size();
+        // memcpy(stream->exception_record.exception_information,
+        //        crash_exception_info.data(),
+        //        sizeof(uint64_t) * crash_exception_info.size());
+        // stream->thread_context = crashing_thread_context_;
+        Ok(dirent)
+    }
+
+    fn write_system_info_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+        let info_section = SectionWriter::<MDRawSystemInfo>::alloc(buffer)?;
+        let dirent = MDRawDirectory {
+            stream_type: MDStreamType::SystemInfoStream as u32,
+            location: info_section.location(),
+        };
+        let mut info: MDRawSystemInfo = Default::default();
+
+        //WriteCPUInformation(&mut info);
+        //WriteOSInformation(&mut info);
         Ok(dirent)
     }
 

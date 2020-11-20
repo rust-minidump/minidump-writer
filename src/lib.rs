@@ -7,6 +7,7 @@ pub type Result<T> = result::Result<T, Error>;
 mod app_memory;
 mod auxv_reader;
 pub mod cpu_set;
+mod dumper_cpu_info;
 pub mod linux_ptrace_dumper;
 mod maps_reader;
 pub mod minidump_cpu;
