@@ -33,14 +33,14 @@ pub struct MDVSFixedFileInfo {
 type MDRVA = u32;
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct MDLocationDescriptor {
     pub data_size: u32,
     pub rva: MDRVA,
 }
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct MDMemoryDescriptor {
     /* The base address of the memory range on the host that produced the
      * minidump. */
@@ -298,6 +298,24 @@ impl<T> SectionArrayWriter<T>
 where
     T: Default + Sized,
 {
+    /// Create a slot for a type T in the buffer, we can fill in the values in one go.
+    pub fn alloc_from_array(buffer: &mut Cursor<Vec<u8>>, array: &[T]) -> Result<Self> {
+        // Get position of this value (e.g. before we add ourselves there)
+        let position = buffer.position();
+        for val in array {
+            let bytes = unsafe {
+                std::slice::from_raw_parts(val as *const T as *const u8, std::mem::size_of::<T>())
+            };
+            buffer.write_all(bytes)?;
+        }
+
+        Ok(SectionArrayWriter {
+            position: position as u32,
+            array_size: array.len(),
+            phantom: std::marker::PhantomData::<T> {},
+        })
+    }
+
     /// Create a slot for a type T in the buffer, we can fill later with real values.
     /// This function fills it with `Default::default()`, which is less performant than
     /// using uninitialized memory, but safe.

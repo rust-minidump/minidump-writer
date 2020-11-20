@@ -1,3 +1,4 @@
+use crate::app_memory::AppMemoryList;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
 use crate::minidump_cpu::RawContextCPU;
@@ -32,6 +33,9 @@ struct MinidumpWriter {
     skip_stacks_if_mapping_unreferenced: bool,
     principal_mapping: Option<MappingInfo>,
     user_mapping_list: MappingList,
+    blamed_thread: Pid,
+    app_memory: AppMemoryList,
+    memory_blocks: Vec<MDMemoryDescriptor>,
 }
 
 // This doesn't work yet:
@@ -44,7 +48,7 @@ struct MinidumpWriter {
 // }
 
 impl MinidumpWriter {
-    fn new(minidump_path: &str, dumper: LinuxPtraceDumper) -> Self {
+    fn new(minidump_path: &str, dumper: LinuxPtraceDumper, blamed_thread: Pid) -> Self {
         MinidumpWriter {
             dumper,
             minidump_path: minidump_path.to_string(),
@@ -52,6 +56,9 @@ impl MinidumpWriter {
             skip_stacks_if_mapping_unreferenced: false,
             principal_mapping: None,
             user_mapping_list: Vec::new(),
+            blamed_thread,
+            app_memory: Vec::new(),
+            memory_blocks: Vec::new(),
         }
     }
 
@@ -106,14 +113,13 @@ impl MinidumpWriter {
         dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
+        let _ = self.write_app_memory(&mut buffer)?;
+
+        dirent = self.write_memory_list_stream(&mut buffer)?;
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
+
         Ok(())
-
-        // if (!WriteAppMemory())
-        //   return false;
-
-        // if (!WriteMemoryListStream(&dirent))
-        //   return false;
-        // dir.CopyIndex(dir_index++, &dirent);
 
         // if (!WriteExceptionStream(&dirent))
         //   return false;
@@ -172,7 +178,7 @@ impl MinidumpWriter {
         // return true;
     }
 
-    fn write_thread_list_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+    fn write_thread_list_stream(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
         let num_threads = self.dumper.threads.len();
         // Memory looks like this:
         // <num_threads><thread_1><thread_2>...
@@ -232,16 +238,14 @@ impl MinidumpWriter {
                 info.fill_cpu_context(&mut cpu);
                 let cpu_section = SectionWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
                 thread.thread_context = cpu_section.location();
-                //         if (dumper_->threads()[i] == GetCrashThread()) {
-                //           crashing_thread_context_ = cpu.location();
-                //           if (!dumper_->IsPostMortem()) {
-                //             // This is the crashing thread of a live process, but
-                //             // no context was provided, so set the crash address
-                //             // while the instruction pointer is already here.
-                //             dumper_->set_crash_address(info.GetInstructionPointer());
-                //           }
-                //         }
-                //       }
+                // if item == &self.blamed_thread {
+                //     // This is the crashing thread of a live process, but
+                //     // no context was provided, so set the crash address
+                //     // while the instruction pointer is already here.
+                //     self.crashing_thread_context = cpu_section.location();
+                //     self.dumper
+                //         .set_crash_address(info.get_instruction_pointer());
+                // }
             }
             thread_list.set_value_at(buffer, thread, idx)?;
         }
@@ -249,7 +253,7 @@ impl MinidumpWriter {
     }
 
     fn fill_thread_stack(
-        &self,
+        &mut self,
         buffer: &mut Cursor<Vec<u8>>,
         thread: &mut MDRawThread,
         info: &ThreadInfo,
@@ -310,7 +314,7 @@ impl MinidumpWriter {
             buffer.write_all(&stack_bytes)?;
             thread.stack.start_of_memory_range = stack as u64;
             thread.stack.memory = stack_location;
-            //     memory_blocks_.push_back(thread->stack);
+            self.memory_blocks.push(thread.stack.clone());
         }
         Ok(())
     }
@@ -424,20 +428,54 @@ impl MinidumpWriter {
         })
     }
 
+    /// Write application-provided memory regions.
+    fn write_app_memory(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<()> {
+        for app_memory in &self.app_memory {
+            let data_copy = LinuxPtraceDumper::copy_from_process(
+                self.blamed_thread,
+                app_memory.ptr as *mut libc::c_void,
+                app_memory.length.try_into()?,
+            )?;
+
+            let section = SectionArrayWriter::<libc::c_long>::alloc_from_array(buffer, &data_copy)?;
+            let desc = MDMemoryDescriptor {
+                start_of_memory_range: app_memory.ptr as u64,
+                memory: section.location(),
+            };
+            self.memory_blocks.push(desc);
+        }
+        Ok(())
+    }
+
+    fn write_memory_list_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+        let list_header =
+            SectionWriter::<u32>::alloc_with_val(buffer, self.memory_blocks.len() as u32)?;
+
+        let mut dirent = MDRawDirectory {
+            stream_type: MDStreamType::MemoryListStream as u32,
+            location: list_header.location(),
+        };
+
+        let block_list = SectionArrayWriter::<MDMemoryDescriptor>::alloc_from_array(
+            buffer,
+            &self.memory_blocks,
+        )?;
+
+        dirent.location.data_size += block_list.location().data_size;
+
+        Ok(dirent)
+    }
+
     // pub fn set_minidump_size_limit(&mut self, limit: i64) {
     //     self.minidump_size_limit = limit;
     // }
 }
 
-pub fn write_minidump(
-    minidump_path: &str,
-    process: Pid,
-    _process_blamed_thread: Pid,
-) -> Result<()> {
+pub fn write_minidump(minidump_path: &str, process: Pid, process_blamed_thread: Pid) -> Result<()> {
     let dumper = LinuxPtraceDumper::new(process)?;
     //   dumper.set_crash_signal(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED);
     //   dumper.set_crash_thread(process_blamed_thread);
-    let mut writer = MinidumpWriter::new(minidump_path, dumper);
+    let mut writer = MinidumpWriter::new(minidump_path, dumper, process_blamed_thread);
     writer.init()?;
     writer.dump()
 }
