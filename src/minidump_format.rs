@@ -127,7 +127,7 @@ pub struct MDRawModule {
 pub const MD_MODULE_SIZE: usize = 108;
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct MDRawDirectory {
     pub stream_type: u32,
     pub location: MDLocationDescriptor,

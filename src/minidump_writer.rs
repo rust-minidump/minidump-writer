@@ -8,7 +8,7 @@ use crate::thread_info::Pid;
 use crate::thread_info::ThreadInfo;
 use crate::Result;
 use std::convert::TryInto;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
@@ -129,55 +129,94 @@ impl MinidumpWriter {
         dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        Ok(())
+        dirent = match self.write_file(&mut buffer, "/proc/cpuinfo") {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxCpuInfo as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_CPU_INFO;
-        // if (!WriteFile(&dirent.location, "/proc/cpuinfo"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
+        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/status", self.blamed_thread))
+        {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxProcStatus as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_PROC_STATUS;
-        // if (!WriteProcFile(&dirent.location, GetCrashThread(), "status"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
+        dirent = match self
+            .write_file(&mut buffer, "/etc/lsb-release")
+            .or_else(|_| self.write_file(&mut buffer, "/etc/os-release"))
+        {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxLsbRelease as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_LSB_RELEASE;
-        // if (!WriteFile(&dirent.location, "/etc/lsb-release") &&
-        //     !WriteFile(&dirent.location, "/etc/os-release")) {
-        //   NullifyDirectoryEntry(&dirent);
-        // }
-        // dir.CopyIndex(dir_index++, &dirent);
+        dirent = match self.write_file(
+            &mut buffer,
+            &format!("/proc/{}/cmdline", self.blamed_thread),
+        ) {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxCmdLine as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_CMD_LINE;
-        // if (!WriteProcFile(&dirent.location, GetCrashThread(), "cmdline"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
+        dirent = match self.write_file(
+            &mut buffer,
+            &format!("/proc/{}/environ", self.blamed_thread),
+        ) {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxEnviron as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_ENVIRON;
-        // if (!WriteProcFile(&dirent.location, GetCrashThread(), "environ"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
+        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxAuxv as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_idx += 1;
 
-        // dirent.stream_type = MD_LINUX_AUXV;
-        // if (!WriteProcFile(&dirent.location, GetCrashThread(), "auxv"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
-
-        // dirent.stream_type = MD_LINUX_MAPS;
-        // if (!WriteProcFile(&dirent.location, GetCrashThread(), "maps"))
-        //   NullifyDirectoryEntry(&dirent);
-        // dir.CopyIndex(dir_index++, &dirent);
-
+        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::LinuxMaps as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        // dir_idx += 1;
         // dirent.stream_type = MD_LINUX_DSO_DEBUG;
         // if (!WriteDSODebugStream(&dirent))
         //   NullifyDirectoryEntry(&dirent);
         // dir.CopyIndex(dir_index++, &dirent);
 
-        // // If you add more directory entries, don't forget to update kNumWriters,
-        // // above.
-
-        // dumper_->ThreadsResume();
-        // return true;
+        // If you add more directory entries, don't forget to update kNumWriters,
+        // above.
+        self.dumper.resume_threads()?;
+        Ok(())
     }
 
     fn write_thread_list_stream(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
@@ -488,6 +527,166 @@ impl MinidumpWriter {
         write_os_information(buffer, &mut info)?;
         Ok(dirent)
     }
+
+    fn write_file(
+        &self,
+        buffer: &mut Cursor<Vec<u8>>,
+        filename: &str,
+    ) -> Result<MDLocationDescriptor> {
+        // TODO: Is this buffer-limitation really needed? Or could we read&write all?
+        // We can't stat the files because several of the files that we want to
+        // read are kernel seqfiles, which always have a length of zero. So we have
+        // to read as much as we can into a buffer.
+        let buf_size = 1024 - 2 * std::mem::size_of::<usize>() as u64;
+
+        let mut file = std::fs::File::open(std::path::PathBuf::from(filename))?.take(buf_size);
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)?;
+
+        let section = SectionArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
+        Ok(section.location())
+    }
+
+    //   bool WriteDSODebugStream(MDRawDirectory* dirent) {
+    //     ElfW(Phdr)* phdr = reinterpret_cast<ElfW(Phdr) *>(dumper_->auxv()[AT_PHDR]);
+    //     char* base;
+    //     int phnum = dumper_->auxv()[AT_PHNUM];
+    //     if (!phnum || !phdr)
+    //       return false;
+
+    //     // Assume the program base is at the beginning of the same page as the PHDR
+    //     base = reinterpret_cast<char *>(reinterpret_cast<uintptr_t>(phdr) & ~0xfff);
+
+    //     // Search for the program PT_DYNAMIC segment
+    //     ElfW(Addr) dyn_addr = 0;
+    //     for (; phnum >= 0; phnum--, phdr++) {
+    //       ElfW(Phdr) ph;
+    //       if (!dumper_->CopyFromProcess(&ph, GetCrashThread(), phdr, sizeof(ph)))
+    //         return false;
+
+    //       // Adjust base address with the virtual address of the PT_LOAD segment
+    //       // corresponding to offset 0
+    //       if (ph.p_type == PT_LOAD && ph.p_offset == 0) {
+    //         base -= ph.p_vaddr;
+    //       }
+    //       if (ph.p_type == PT_DYNAMIC) {
+    //         dyn_addr = ph.p_vaddr;
+    //       }
+    //     }
+    //     if (!dyn_addr)
+    //       return false;
+
+    //     ElfW(Dyn) *dynamic = reinterpret_cast<ElfW(Dyn) *>(dyn_addr + base);
+
+    //     // The dynamic linker makes information available that helps gdb find all
+    //     // DSOs loaded into the program. If this information is indeed available,
+    //     // dump it to a MD_LINUX_DSO_DEBUG stream.
+    //     struct r_debug* r_debug = NULL;
+    //     uint32_t dynamic_length = 0;
+
+    //     for (int i = 0; ; ++i) {
+    //       ElfW(Dyn) dyn;
+    //       dynamic_length += sizeof(dyn);
+    //       if (!dumper_->CopyFromProcess(&dyn, GetCrashThread(), dynamic + i,
+    //                                     sizeof(dyn))) {
+    //         return false;
+    //       }
+
+    // #ifdef __mips__
+    //       const int32_t debug_tag = DT_MIPS_RLD_MAP;
+    // #else
+    //       const int32_t debug_tag = DT_DEBUG;
+    // #endif
+    //       if (dyn.d_tag == debug_tag) {
+    //         r_debug = reinterpret_cast<struct r_debug*>(dyn.d_un.d_ptr);
+    //         continue;
+    //       } else if (dyn.d_tag == DT_NULL) {
+    //         break;
+    //       }
+    //     }
+
+    //     // The "r_map" field of that r_debug struct contains a linked list of all
+    //     // loaded DSOs.
+    //     // Our list of DSOs potentially is different from the ones in the crashing
+    //     // process. So, we have to be careful to never dereference pointers
+    //     // directly. Instead, we use CopyFromProcess() everywhere.
+    //     // See <link.h> for a more detailed discussion of the how the dynamic
+    //     // loader communicates with debuggers.
+
+    //     // Count the number of loaded DSOs
+    //     int dso_count = 0;
+    //     struct r_debug debug_entry;
+    //     if (!dumper_->CopyFromProcess(&debug_entry, GetCrashThread(), r_debug,
+    //                                   sizeof(debug_entry))) {
+    //       return false;
+    //     }
+    //     for (struct link_map* ptr = debug_entry.r_map; ptr; ) {
+    //       struct link_map map;
+    //       if (!dumper_->CopyFromProcess(&map, GetCrashThread(), ptr, sizeof(map)))
+    //         return false;
+
+    //       ptr = map.l_next;
+    //       dso_count++;
+    //     }
+
+    //     MDRVA linkmap_rva = MinidumpFileWriter::kInvalidMDRVA;
+    //     if (dso_count > 0) {
+    //       // If we have at least one DSO, create an array of MDRawLinkMap
+    //       // entries in the minidump file.
+    //       TypedMDRVA<MDRawLinkMap> linkmap(&minidump_writer_);
+    //       if (!linkmap.AllocateArray(dso_count))
+    //         return false;
+    //       linkmap_rva = linkmap.location().rva;
+    //       int idx = 0;
+
+    //       // Iterate over DSOs and write their information to mini dump
+    //       for (struct link_map* ptr = debug_entry.r_map; ptr; ) {
+    //         struct link_map map;
+    //         if (!dumper_->CopyFromProcess(&map, GetCrashThread(), ptr, sizeof(map)))
+    //           return  false;
+
+    //         ptr = map.l_next;
+    //         char filename[257] = { 0 };
+    //         if (map.l_name) {
+    //           dumper_->CopyFromProcess(filename, GetCrashThread(), map.l_name,
+    //                                    sizeof(filename) - 1);
+    //         }
+    //         MDLocationDescriptor location;
+    //         if (!minidump_writer_.WriteString(filename, 0, &location))
+    //           return false;
+    //         MDRawLinkMap entry;
+    //         entry.name = location.rva;
+    //         entry.addr = map.l_addr;
+    //         entry.ld = reinterpret_cast<uintptr_t>(map.l_ld);
+    //         linkmap.CopyIndex(idx++, &entry);
+    //       }
+    //     }
+
+    //     // Write MD_LINUX_DSO_DEBUG record
+    //     TypedMDRVA<MDRawDebug> debug(&minidump_writer_);
+    //     if (!debug.AllocateObjectAndArray(1, dynamic_length))
+    //       return false;
+    //     my_memset(debug.get(), 0, sizeof(MDRawDebug));
+    //     dirent->stream_type = MD_LINUX_DSO_DEBUG;
+    //     dirent->location = debug.location();
+
+    //     debug.get()->version = debug_entry.r_version;
+    //     debug.get()->map = linkmap_rva;
+    //     debug.get()->dso_count = dso_count;
+    //     debug.get()->brk = debug_entry.r_brk;
+    //     debug.get()->ldbase = debug_entry.r_ldbase;
+    //     debug.get()->dynamic = reinterpret_cast<uintptr_t>(dynamic);
+
+    //     wasteful_vector<char> dso_debug_data(dumper_->allocator(), dynamic_length);
+    //     // The passed-in size to the constructor (above) is only a hint.
+    //     // Must call .resize() to do actual initialization of the elements.
+    //     dso_debug_data.resize(dynamic_length);
+    //     dumper_->CopyFromProcess(&dso_debug_data[0], GetCrashThread(), dynamic,
+    //                              dynamic_length);
+    //     debug.CopyIndexAfterObject(0, &dso_debug_data[0], dynamic_length);
+
+    //     return true;
+    //   }
 
     // pub fn set_minidump_size_limit(&mut self, limit: i64) {
     //     self.minidump_size_limit = limit;
