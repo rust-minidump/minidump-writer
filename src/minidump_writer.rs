@@ -1,4 +1,5 @@
 use crate::app_memory::AppMemoryList;
+use crate::dumper_cpu_info::{write_cpu_information, write_os_information};
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
 use crate::minidump_cpu::RawContextCPU;
@@ -210,7 +211,7 @@ impl MinidumpWriter {
             }
         }
 
-        for (idx, item) in self.dumper.threads.iter().enumerate() {
+        for (idx, item) in self.dumper.threads.clone().iter().enumerate() {
             let mut thread = MDRawThread::default();
             thread.thread_id = (*item).try_into()?;
 
@@ -406,25 +407,13 @@ impl MinidumpWriter {
         }
 
         let (file_path, _) = mapping.get_mapping_effective_name_and_path()?;
-        let letters: Vec<u16> = file_path.encode_utf16().collect();
-
-        // First write size of the string (x letters in u16, times the size of u16)
-        let name_header = SectionWriter::<u32>::alloc_with_val(
-            buffer,
-            (letters.len() * std::mem::size_of::<u16>()).try_into()?,
-        )?;
-
-        // Then write utf-16 letters after that
-        let mut name_section = SectionArrayWriter::<u16>::alloc_array(buffer, letters.len())?;
-        for (index, letter) in letters.iter().enumerate() {
-            name_section.set_value_at(buffer, *letter, index)?;
-        }
+        let name_header = write_string_to_location(buffer, &file_path)?;
 
         Ok(MDRawModule {
             base_of_image: mapping.start_address as u64,
             size_of_image: mapping.size as u32,
             cv_record,
-            module_name_rva: name_header.location().rva,
+            module_name_rva: name_header.rva,
             ..Default::default()
         })
     }
@@ -495,9 +484,8 @@ impl MinidumpWriter {
             location: info_section.location(),
         };
         let mut info: MDRawSystemInfo = Default::default();
-
-        //WriteCPUInformation(&mut info);
-        //WriteOSInformation(&mut info);
+        write_cpu_information(&mut info)?;
+        write_os_information(buffer, &mut info)?;
         Ok(dirent)
     }
 

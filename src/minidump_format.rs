@@ -1,4 +1,5 @@
 use crate::Result;
+use std::convert::TryInto;
 use std::io::{Cursor, Write};
 
 #[repr(C)]
@@ -190,6 +191,7 @@ pub struct MDCPUInformation {
 
 /* For (MDCPUInformation).arm_cpu_info.elf_hwcaps.
  * This matches the Linux kernel definitions from <asm/hwcaps.h> */
+#[repr(u32)]
 enum MDCPUInformationARMElfHwCaps {
     Swp = 1 << 0,
     Half = 1 << 1,
@@ -247,6 +249,7 @@ pub struct MDRawSystemInfo {
 }
 
 /* For (MDRawSystemInfo).processor_architecture: */
+#[repr(u16)]
 pub enum MDCPUArchitecture {
     X86 = 0,   /* PROCESSOR_ARCHITECTURE_INTEL */
     Mips = 1,  /* PROCESSOR_ARCHITECTURE_MIPS */
@@ -271,6 +274,7 @@ pub enum MDCPUArchitecture {
 }
 
 /* For (MDRawSystemInfo).platform_id: */
+#[repr(u32)]
 pub enum MDOSPlatform {
     Win32s = 0,       /* VER_PLATFORM_WIN32s (Windows 3.1) */
     Win32Windows = 1, /* VER_PLATFORM_WIN32_WINDOWS (Windows 95-98-Me) */
@@ -336,6 +340,7 @@ pub enum MDType {
 }
 
 /* For (MDRawDirectory).stream_type */
+#[repr(u32)]
 pub enum MDStreamType {
     UnusedStream = 0,
     ReservedStream0 = 1,
@@ -527,4 +532,28 @@ where
             rva: self.position,
         }
     }
+}
+
+pub fn write_string_to_location(
+    buffer: &mut Cursor<Vec<u8>>,
+    text: &str,
+) -> Result<MDLocationDescriptor> {
+    let letters: Vec<u16> = text.encode_utf16().collect();
+
+    // First write size of the string (x letters in u16, times the size of u16)
+    let text_header = SectionWriter::<u32>::alloc_with_val(
+        buffer,
+        (letters.len() * std::mem::size_of::<u16>()).try_into()?,
+    )?;
+
+    // Then write utf-16 letters after that
+    let mut text_section = SectionArrayWriter::<u16>::alloc_array(buffer, letters.len())?;
+    for (index, letter) in letters.iter().enumerate() {
+        text_section.set_value_at(buffer, *letter, index)?;
+    }
+
+    let mut location = text_header.location();
+    location.data_size += text_section.location().data_size;
+
+    Ok(location)
 }

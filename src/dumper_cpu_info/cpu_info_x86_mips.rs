@@ -1,5 +1,6 @@
 use crate::minidump_format::*;
 use crate::Result;
+use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::path;
 
@@ -21,7 +22,7 @@ impl CpuInfoEntry {
 
 pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     let vendor_id_name = "vendor_id";
-    let cpu_info_table = [
+    let mut cpu_info_table = [
         CpuInfoEntry::new("processor", -1, false),
         #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
         CpuInfoEntry::new("model", 0, false),
@@ -44,77 +45,77 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
 
+    let mut vendor_id = String::new();
     for line in BufReader::new(cpuinfo_file).lines() {
         let line = line?;
+        // Expected format: <field-name> <space>+ ':' <space> <value>
+        // Note that:
+        //   - empty lines happen.
+        //   - <field-name> can contain spaces.
+        //   - some fields have an empty <value>
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let split: Vec<_> = line.split(":").map(|x| x.trim()).collect();
+        let field = split[0];
+        let value = split.get(1); // Option, might be missing
+
+        let mut is_first_entry = true;
+        for mut entry in cpu_info_table.iter_mut() {
+            if !is_first_entry && entry.found {
+                // except for the 'processor' field, ignore repeated values.
+                continue;
+            }
+            is_first_entry = false;
+            if field == entry.info_name {
+                if let Some(val) = value {
+                    if let Ok(v) = val.parse() {
+                        entry.value = v;
+                        entry.found = true;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
+            // special case for vendor_id
+            if field == vendor_id_name && value.is_some() && !value.unwrap().is_empty() {
+                vendor_id = value.unwrap().to_string();
+            }
+        }
     }
+    // make sure we got everything we wanted
+    if !cpu_info_table.iter().all(|x| x.found == true) {
+        return Err("Not all entries in /proc/cpuinfo found".into());
+    }
+    // cpu_info_table[0] holds the last cpu id listed in /proc/cpuinfo,
+    // assuming this is the highest id, change it to the number of CPUs
+    // by adding one.
+    cpu_info_table[0].value += 1;
+
+    sys_info.number_of_processors = cpu_info_table[0].value as u8; // TODO: might not work on special machines with LOTS of CPUs
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    {
+        sys_info.processor_level = cpu_info_table[3].value as u16;
+        sys_info.processor_revision =
+            (cpu_info_table[1].value << 8 | cpu_info_table[2].value) as u16;
+    }
+    if !vendor_id.is_empty() {
+        let mut slice = vendor_id.as_bytes();
+        for id_part in sys_info.cpu.vendor_id.iter_mut() {
+            let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
+            slice = rest;
+            *id_part = match int_bytes.try_into() {
+                Ok(x) => u32::from_ne_bytes(x),
+                Err(_) => {
+                    continue;
+                }
+            };
+        }
+    }
+
     Ok(())
 }
-
-//   bool WriteCPUInformation(MDRawSystemInfo* sys_info) {
-
-//     const int fd = sys_open("/proc/cpuinfo", O_RDONLY, 0);
-//     if (fd < 0)
-//       return false;
-
-//     {
-//       PageAllocator allocator;
-//       ProcCpuInfoReader* const reader = new(allocator) ProcCpuInfoReader(fd);
-//       const char* field;
-//       while (reader->GetNextField(&field)) {
-//         bool is_first_entry = true;
-//         for (CpuInfoEntry& entry : cpu_info_table) {
-//           if (!is_first_entry && entry.found) {
-//             // except for the 'processor' field, ignore repeated values.
-//             continue;
-//           }
-//           is_first_entry = false;
-//           if (!my_strcmp(field, entry.info_name)) {
-//             size_t value_len;
-//             const char* value = reader->GetValueAndLen(&value_len);
-//             if (value_len == 0)
-//               continue;
-
-//             uintptr_t val;
-//             if (my_read_decimal_ptr(&val, value) == value)
-//               continue;
-
-//             entry.value = static_cast<int>(val);
-//             entry.found = true;
-//           }
-//         }
-
-//         // special case for vendor_id
-//         if (!my_strcmp(field, vendor_id_name)) {
-//           size_t value_len;
-//           const char* value = reader->GetValueAndLen(&value_len);
-//           if (value_len > 0)
-//             my_strlcpy(vendor_id, value, sizeof(vendor_id));
-//         }
-//       }
-//       sys_close(fd);
-//     }
-
-//     // make sure we got everything we wanted
-//     for (const CpuInfoEntry& entry : cpu_info_table) {
-//       if (!entry.found) {
-//         return false;
-//       }
-//     }
-//     // cpu_info_table[0] holds the last cpu id listed in /proc/cpuinfo,
-//     // assuming this is the highest id, change it to the number of CPUs
-//     // by adding one.
-//     cpu_info_table[0].value++;
-
-//     sys_info->number_of_processors = cpu_info_table[0].value;
-// #if defined(__i386__) || defined(__x86_64__)
-//     sys_info->processor_level      = cpu_info_table[3].value;
-//     sys_info->processor_revision   = cpu_info_table[1].value << 8 |
-//                                      cpu_info_table[2].value;
-// #endif
-
-//     if (vendor_id[0] != '\0') {
-//       my_memcpy(sys_info->cpu.x86_cpu_info.vendor_id, vendor_id,
-//                 sizeof(sys_info->cpu.x86_cpu_info.vendor_id));
-//     }
-//     return true;
-//   }
