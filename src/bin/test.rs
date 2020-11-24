@@ -1,6 +1,5 @@
 // This binary shouldn't be under /src, but under /tests, but that is
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
-use goblin::elf::header;
 use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_EHDR};
 use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME};
 use nix::unistd::getppid;
@@ -119,14 +118,15 @@ fn test_mappings_include_linux_gate() -> Result<()> {
                 "linux_gate_loc != start_address"
             )?;
 
-            let ll = mapping.start_address as *const u8;
-            for idx in 0..header::SELFMAG {
-                let mag = unsafe { std::ptr::read(ll.offset(idx as isize)) == header::ELFMAG[idx] };
-                test!(
-                    mag,
-                    format!("ll: {} != ELFMAG: {} at {}", mag, header::ELFMAG[idx], idx)
-                )?;
-            }
+            // This doesn't work here, as we do not test via "fork()", so the addresses are different
+            // let ll = mapping.start_address as *const u8;
+            // for idx in 0..header::SELFMAG {
+            //     let mag = unsafe { std::ptr::read(ll.offset(idx as isize)) == header::ELFMAG[idx] };
+            //     test!(
+            //         mag,
+            //         format!("ll: {} != ELFMAG: {} at {}", mag, header::ELFMAG[idx], idx)
+            //     )?;
+            // }
             break;
         }
     }
