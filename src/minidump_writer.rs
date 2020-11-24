@@ -398,8 +398,12 @@ impl MinidumpWriter {
                 continue;
             }
             // Note: elf_identifier_for_mapping_index() can manipulate the |mapping.name|.
-            let identifier = self.dumper.elf_identifier_for_mapping_index(idx)?;
-            let module = self.fill_raw_module(buffer, &self.dumper.mappings[idx], &identifier)?;
+            let identifier = self
+                .dumper
+                .elf_identifier_for_mapping_index(map_idx)
+                .unwrap_or(Default::default());
+            let module =
+                self.fill_raw_module(buffer, &self.dumper.mappings[map_idx], &identifier)?;
             mapping_list.set_value_at(buffer, module, idx)?;
             idx += 1;
         }
