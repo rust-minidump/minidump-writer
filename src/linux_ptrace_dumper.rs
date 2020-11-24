@@ -50,20 +50,19 @@ impl LinuxPtraceDumper {
     /// Copies content of |length| bytes from a given process |child|,
     /// starting from |src|, into |dest|. This method uses ptrace to extract
     /// the content from the target process. Always returns true.
-    pub fn copy_from_process(
-        child: Pid,
-        src: *mut c_void,
-        num_of_words: isize,
-    ) -> Result<Vec<libc::c_long>> {
+    pub fn copy_from_process(child: Pid, src: *mut c_void, num_of_bytes: isize) -> Result<Vec<u8>> {
         let pid = nix::unistd::Pid::from_raw(child);
         let mut res = Vec::new();
-        for idx in 0isize..num_of_words {
+        let mut idx = 0isize;
+        while idx < num_of_bytes {
             match ptrace::read(pid, unsafe { src.offset(idx) }) {
-                Ok(word) => res.push(word),
+                Ok(word) => res.append(&mut word.to_ne_bytes().to_vec()),
                 Err(e) => {
-                    return Err(format!("Failed in ptrace::reach: {:?}", e).into());
+                    return Err(format!("Failed in ptrace::read: {:?}", e).into());
                 }
             }
+
+            idx += std::mem::size_of::<libc::c_long>() as isize;
         }
         Ok(res)
     }
@@ -93,10 +92,7 @@ impl LinuxPtraceDumper {
             // the seccomp sandbox's trusted code.
             let skip_thread;
             let regs = ptrace::getregs(pid);
-            if regs.is_err() {
-                skip_thread = true;
-            } else {
-                let regs = regs.unwrap(); // Always save to unwrap here
+            if let Ok(regs) = regs {
                 #[cfg(target_arch = "x86_64")]
                 {
                     skip_thread = regs.rsp == 0;
@@ -105,6 +101,8 @@ impl LinuxPtraceDumper {
                 {
                     skip_thread = regs.esp == 0;
                 }
+            } else {
+                skip_thread = true;
             }
             if skip_thread {
                 ptrace::detach(pid, None)?;
@@ -372,25 +370,19 @@ impl LinuxPtraceDumper {
 
         // Special-case linux-gate because it's not a real file.
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
-            let mem_slice;
             if pid == std::process::id().try_into()? {
-                mem_slice = unsafe {
+                let mem_slice = unsafe {
                     std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
                 };
+                return Self::elf_file_identifier_from_mapped_file(mem_slice);
             } else {
-                let linux_gate = Self::copy_from_process(
+                let mem_slice = Self::copy_from_process(
                     pid,
                     mapping.start_address as *mut libc::c_void,
                     mapping.size.try_into()?,
                 )?;
-                mem_slice = unsafe {
-                    std::slice::from_raw_parts(
-                        linux_gate.as_ptr() as *const u8,
-                        linux_gate.len() * std::mem::size_of::<libc::c_long>(),
-                    )
-                };
+                return Self::elf_file_identifier_from_mapped_file(&mem_slice);
             }
-            return Self::elf_file_identifier_from_mapped_file(mem_slice);
         }
         let new_name = MappingInfo::handle_deleted_file_in_mapping(
             &mapping.name.as_ref().unwrap_or(&String::new()),

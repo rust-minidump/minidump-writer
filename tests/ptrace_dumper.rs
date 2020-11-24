@@ -1,7 +1,9 @@
 use libc;
 use minidump_writer_linux::linux_ptrace_dumper;
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
+use minidump_writer_linux::minidump_writer::write_minidump;
 use nix::sys::signal::Signal;
+use std::convert::TryInto;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Stdio}; // To have .signal() for ExitStatus
@@ -50,7 +52,7 @@ fn start_child_and_wait_for_threads(num: usize) -> Child {
     {
         let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
         let mut lines = 0;
-        while lines < 5 {
+        while lines < num {
             let mut buf = String::new();
             match f.read_line(&mut buf) {
                 Ok(_) => {
@@ -102,17 +104,19 @@ fn test_thread_list_from_parent() {
         let process_tid_location = info.mcontext.gregs[1];
 
         println!("src = 0x{:x}", process_tid_location);
-        let found_thread_id = LinuxPtraceDumper::copy_from_process(
+        let thread_id_data = LinuxPtraceDumper::copy_from_process(
             *curr_thread,
             process_tid_location as *mut libc::c_void,
-            1,
+            4,
         )
         .expect("Could not copy from process");
-        println!(
-            "------> curr_thread: {:b}, found_thread: {:b}",
-            curr_thread, found_thread_id[0] as usize
+        let found_thread_id = i32::from_ne_bytes(
+            thread_id_data
+                .as_slice()
+                .try_into()
+                .expect("couldn't parse i32 from read data"),
         );
-        matching_threads += if *curr_thread as i64 == found_thread_id[0] {
+        matching_threads += if *curr_thread == found_thread_id {
             1
         } else {
             0
@@ -153,4 +157,27 @@ fn test_merged_mappings() {
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_file_id() {
     spawn_child!("file_id");
+}
+
+#[test]
+fn test_write_dump() {
+    let num_of_threads = 1;
+    println!("A");
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    println!("B");
+    let pid = child.id() as i32;
+    write_minidump(
+        "/mnt/hdd/repos/minidump_writer_linux/target/debug/test",
+        pid,
+        pid,
+    )
+    .expect("Could not write minidump");
+    println!("C");
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
 }

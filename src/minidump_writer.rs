@@ -318,17 +318,12 @@ impl MinidumpWriter {
                     }
                 }
             }
-            let stack_copy = LinuxPtraceDumper::copy_from_process(
+            let stack_bytes = LinuxPtraceDumper::copy_from_process(
                 thread.thread_id.try_into()?,
                 stack as *mut libc::c_void,
                 stack_len.try_into()?,
             )?;
             let stack_pointer_offset = info.stack_pointer - stack;
-            let stack_bytes = stack_copy
-                .iter()
-                .map(|x| x.to_ne_bytes().to_vec())
-                .flatten()
-                .collect::<Vec<u8>>();
             if self.skip_stacks_if_mapping_unreferenced {
                 if let Some(principal_mapping) = &self.principal_mapping {
                     let low_addr = principal_mapping.system_mapping_info.start_address;
@@ -466,7 +461,7 @@ impl MinidumpWriter {
                 app_memory.length.try_into()?,
             )?;
 
-            let section = SectionArrayWriter::<libc::c_long>::alloc_from_array(buffer, &data_copy)?;
+            let section = SectionArrayWriter::<u8>::alloc_from_array(buffer, &data_copy)?;
             let desc = MDMemoryDescriptor {
                 start_of_memory_range: app_memory.ptr as u64,
                 memory: section.location(),
