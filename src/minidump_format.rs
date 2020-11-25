@@ -192,7 +192,7 @@ pub struct MDCPUInformation {
 /* For (MDCPUInformation).arm_cpu_info.elf_hwcaps.
  * This matches the Linux kernel definitions from <asm/hwcaps.h> */
 #[repr(u32)]
-enum MDCPUInformationARMElfHwCaps {
+pub enum MDCPUInformationARMElfHwCaps {
     Swp = 1 << 0,
     Half = 1 << 1,
     Thumb = 1 << 2,

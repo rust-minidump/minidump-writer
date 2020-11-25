@@ -76,15 +76,12 @@ impl MinidumpWriter {
         // of stream which we write.
         let num_writers = 13u32;
 
-        // TypedMDRVA<MDRawDirectory> dir(&minidump_writer_);
-
-        // let mut file = std::fs::File::open(&self.minidump_path)?;
         let mut buffer = Cursor::new(Vec::new());
+
+        let mut header_section = SectionWriter::<MDRawHeader>::alloc(&mut buffer)?;
 
         let mut dir_section =
             SectionArrayWriter::<MDRawDirectory>::alloc_array(&mut buffer, num_writers as usize)?;
-
-        let mut header_section = SectionWriter::<MDRawHeader>::alloc(&mut buffer)?;
 
         let header = MDRawHeader {
             signature: MD_HEADER_SIGNATURE,
@@ -215,6 +212,11 @@ impl MinidumpWriter {
 
         // If you add more directory entries, don't forget to update kNumWriters,
         // above.
+
+        // Write results to file
+        let mut file = std::fs::File::create(&self.minidump_path)?;
+        file.write_all(buffer.get_ref())?;
+
         self.dumper.resume_threads()?;
         Ok(())
     }
@@ -226,13 +228,13 @@ impl MinidumpWriter {
 
         let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
 
-        let dirent = MDRawDirectory {
+        let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ThreadListStream as u32,
-            location: list_header.location(), // TODO: WRONG, because location includes size, which should contain mapping_list as well!
+            location: list_header.location(),
         };
 
         let mut thread_list = SectionArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
-
+        dirent.location.data_size += thread_list.location().data_size;
         // If there's a minidump size limit, check if it might be exceeded.  Since
         // most of the space is filled with stack data, just check against that.
         // If this expects to exceed the limit, set extra_thread_stack_len such
@@ -373,9 +375,9 @@ impl MinidumpWriter {
 
         let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
 
-        let dirent = MDRawDirectory {
+        let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ModuleListStream as u32,
-            location: list_header.location(), // TODO: WRONG, because location includes size, which should contain mapping_list as well!
+            location: list_header.location(),
         };
 
         // TODO: We currently ignore this and use size_of<MDRawModule>
@@ -388,6 +390,7 @@ impl MinidumpWriter {
         // In case of num_output_mappings == 0, this call doesn't allocate any memory in the buffer
         let mut mapping_list =
             SectionArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
+        dirent.location.data_size += mapping_list.location().data_size;
 
         // First write all the mappings from the dumper
         let mut idx = 0;
@@ -516,7 +519,7 @@ impl MinidumpWriter {
     }
 
     fn write_system_info_stream(&self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
-        let info_section = SectionWriter::<MDRawSystemInfo>::alloc(buffer)?;
+        let mut info_section = SectionWriter::<MDRawSystemInfo>::alloc(buffer)?;
         let dirent = MDRawDirectory {
             stream_type: MDStreamType::SystemInfoStream as u32,
             location: info_section.location(),
@@ -524,6 +527,8 @@ impl MinidumpWriter {
         let mut info: MDRawSystemInfo = Default::default();
         write_cpu_information(&mut info)?;
         write_os_information(buffer, &mut info)?;
+
+        info_section.set_value(buffer, info)?;
         Ok(dirent)
     }
 
