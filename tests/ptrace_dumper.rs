@@ -225,3 +225,22 @@ fn test_write_dump() {
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
 }
+
+#[test]
+fn test_find_mapping() {
+    let child = Command::new("cargo")
+        .arg("run")
+        .arg("--bin")
+        .arg("test")
+        .arg("--")
+        .arg("find_mappings")
+        .arg(format!("{}", libc::printf as *const () as usize))
+        .arg(format!("{}", String::new as *const () as usize))
+        .output()
+        .expect("failed to execute child");
+
+    println!("Child output:");
+    std::io::stdout().write_all(&child.stdout).unwrap();
+    std::io::stdout().write_all(&child.stderr).unwrap();
+    assert_eq!(child.status.code().expect("No return value"), 0);
+}

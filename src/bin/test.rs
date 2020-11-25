@@ -38,6 +38,21 @@ fn test_thread_list() -> Result<()> {
     Ok(())
 }
 
+fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
+    let ppid = getppid();
+    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
+    dumper
+        .find_mapping(addr1)
+        .ok_or("No mapping for addr1 found")?;
+
+    dumper
+        .find_mapping(addr2)
+        .ok_or("No mapping for addr2 found")?;
+
+    test!(dumper.find_mapping(0).is_none(), "NULL found")?;
+    Ok(())
+}
+
 fn test_file_id() -> Result<()> {
     let ppid = getppid().as_raw();
     let exe_link = format!("/proc/{}/exe", ppid);
@@ -159,6 +174,15 @@ fn main() -> Result<()> {
                 Err(format!("Len 2: Unknown test option: {}", args[0]).into())
             }
         }
+        3 => {
+            if args[0] == "find_mappings" {
+                let addr1: usize = args[1].parse().unwrap();
+                let addr2: usize = args[2].parse().unwrap();
+                test_find_mappings(addr1, addr2)
+            } else {
+                Err(format!("Len 3: Unknown test option: {}", args[0]).into())
+            }
+        }
         4 => {
             if args[0] == "merged_mappings" {
                 let path = &args[1];
@@ -166,7 +190,7 @@ fn main() -> Result<()> {
                 let mem_size: usize = args[3].parse().unwrap();
                 test_merged_mappings(path.to_string(), mapped_mem, mem_size)
             } else {
-                Err(format!("Len 2: Unknown test option: {}", args[0]).into())
+                Err(format!("Len 4: Unknown test option: {}", args[0]).into())
             }
         }
         _ => Err("Unknown test option".into()),
