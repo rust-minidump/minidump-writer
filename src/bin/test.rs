@@ -57,32 +57,22 @@ fn test_file_id() -> Result<()> {
     Ok(())
 }
 
-fn test_merged_mappings() -> Result<()> {
+fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
     // Now check that LinuxPtraceDumper interpreted the mappings properly.
     let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
-    let _mapping_count = 0;
+    let mut mapping_count = 0;
     for map in dumper.mappings {
-        println!(
-            "{:?} => {:x} - {:x}",
-            map.name.unwrap_or("[Not set]".to_string()),
-            map.system_mapping_info.start_address,
-            map.system_mapping_info.end_address
-        );
+        if map.name == Some(path.clone()) {
+            mapping_count += 1;
+            // This mapping should encompass the entire original mapped
+            // range.
+            assert_eq!(map.start_address, mapped_mem);
+            assert_eq!(map.size, mem_size);
+            assert_eq!(0, map.offset);
+        }
     }
+    assert_eq!(1, mapping_count);
     Ok(())
-    //    for (unsigned i = 0; i < dumper.mappings().size(); ++i) {
-    //      const MappingInfo& mapping = *dumper.mappings()[i];
-    //      if (strcmp(mapping.name, this->helper_path_.c_str()) == 0) {
-    //        // This mapping should encompass the entire original mapped
-    //        // range.
-    //        EXPECT_EQ(reinterpret_cast<uintptr_t>(this->helper_.mapping()),
-    //                  mapping.start_addr);
-    //        EXPECT_EQ(this->helper_.size(), mapping.size);
-    //        EXPECT_EQ(0U, mapping.offset);
-    //        mapping_count++;
-    //      }
-    //    }
-    //    EXPECT_EQ(1, mapping_count);
 }
 
 fn test_linux_gate_mapping_id() -> Result<()> {
@@ -159,13 +149,22 @@ fn main() -> Result<()> {
             "thread_list" => test_thread_list(),
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
             "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
-            "merged_mappings" => test_merged_mappings(),
             _ => Err("Len 1: Unknown test option".into()),
         },
         2 => {
             if args[0] == "spawn_and_wait" {
                 let num_of_threads: usize = args[1].parse().unwrap();
                 spawn_and_wait(num_of_threads)
+            } else {
+                Err(format!("Len 2: Unknown test option: {}", args[0]).into())
+            }
+        }
+        4 => {
+            if args[0] == "merged_mappings" {
+                let path = &args[1];
+                let mapped_mem: usize = args[2].parse().unwrap();
+                let mem_size: usize = args[3].parse().unwrap();
+                test_merged_mappings(path.to_string(), mapped_mem, mem_size)
             } else {
                 Err(format!("Len 2: Unknown test option: {}", args[0]).into())
             }

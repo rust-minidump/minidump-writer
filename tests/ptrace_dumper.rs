@@ -1,10 +1,8 @@
-use libc;
-use minidump_writer_linux::linux_ptrace_dumper;
-use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
-use minidump_writer_linux::minidump_writer::write_minidump;
+use minidump_writer_linux::{linux_ptrace_dumper, minidump_writer::write_minidump};
+use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
-use std::convert::TryInto;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Stdio}; // To have .signal() for ExitStatus
 
@@ -79,7 +77,7 @@ fn test_thread_list_from_parent() {
     assert_eq!(dumper.threads.len(), num_of_threads);
     dumper.suspend_threads().expect("Could not suspend threads");
 
-    let mut matching_threads = 0;
+    // let mut matching_threads = 0;
     for (idx, curr_thread) in dumper.threads.iter().enumerate() {
         println!("curr_thread: {}", curr_thread);
         let info = dumper
@@ -154,7 +152,57 @@ fn test_linux_gate_mapping_id() {
 
 #[test]
 fn test_merged_mappings() {
-    spawn_child!("merged_mappings");
+    let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE).unwrap();
+    let page_size = page_size.unwrap() as usize;
+    let map_size = 3 * page_size;
+
+    let path: &'static str = std::env!("CARGO_BIN_EXE_test");
+    let file = std::fs::File::open(path).unwrap();
+
+    // mmap two segments out of the helper binary, one
+    // enclosed in the other, but with different protections.
+    let mapped_mem = unsafe {
+        mmap(
+            std::ptr::null_mut(),
+            map_size,
+            ProtFlags::PROT_READ,
+            MapFlags::MAP_SHARED,
+            file.as_raw_fd(),
+            0,
+        )
+        .unwrap()
+    };
+
+    // Carve a page out of the first mapping with different permissions.
+    let _inside_mapping = unsafe {
+        mmap(
+            (mapped_mem as usize + 2 * page_size) as *mut libc::c_void,
+            page_size,
+            ProtFlags::PROT_NONE,
+            MapFlags::MAP_SHARED | MapFlags::MAP_FIXED,
+            file.as_raw_fd(),
+            // Map a different offset just to
+            // better test real-world conditions.
+            page_size as i64,
+        )
+    };
+
+    let child = Command::new("cargo")
+        .arg("run")
+        .arg("--bin")
+        .arg("test")
+        .arg("--")
+        .arg("merged_mappings")
+        .arg(path)
+        .arg(format!("{}", mapped_mem as usize))
+        .arg(format!("{}", map_size))
+        .output()
+        .expect("failed to execute child");
+
+    println!("Child output:");
+    std::io::stdout().write_all(&child.stdout).unwrap();
+    std::io::stdout().write_all(&child.stderr).unwrap();
+    assert_eq!(child.status.code().expect("No return value"), 0);
 }
 
 #[test]
@@ -165,13 +213,10 @@ fn test_file_id() {
 
 #[test]
 fn test_write_dump() {
-    let num_of_threads = 1;
-    println!("A");
+    let num_of_threads = 3;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
-    println!("B");
     let pid = child.id() as i32;
     write_minidump("/tmp/testdump", pid, pid).expect("Could not write minidump");
-    println!("C");
     child.kill().expect("Failed to kill process");
 
     // Reap child
