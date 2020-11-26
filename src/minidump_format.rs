@@ -248,6 +248,44 @@ pub struct MDRawSystemInfo {
     pub cpu: MDCPUInformation,
 }
 
+#[cfg(target_pointer_width = "64")]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawLinkMap {
+    pub addr: u64,
+    pub name: MDRVA,
+    pub ld: u64,
+}
+
+#[cfg(target_pointer_width = "64")]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawDebug {
+    pub version: u32,
+    pub map: MDRVA, /* array of MDRawLinkMap64 */
+    pub dso_count: u32,
+    pub brk: u64,
+    pub ldbase: u64,
+    pub dynamic: u64,
+}
+
+#[cfg(target_pointer_width = "32")]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawLinkMap {
+    pub addr: u32,
+    pub name: MDRVA,
+    pub ld: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+#[derive(Debug, Default, PartialEq)]
+pub struct MDRawDebug {
+    pub version: u32,
+    pub map: MDRVA, /* array of MDRawLinkMap32 */
+    pub dso_count: u32,
+    pub brk: u32,
+    pub ldbase: u32,
+    pub dynamic: u32,
+}
+
 /* For (MDRawSystemInfo).processor_architecture: */
 #[repr(u16)]
 pub enum MDCPUArchitecture {
