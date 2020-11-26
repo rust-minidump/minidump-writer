@@ -38,6 +38,28 @@ fn test_thread_list() -> Result<()> {
     Ok(())
 }
 
+fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
+    let ppid = getppid().as_raw();
+    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
+    dumper.suspend_threads()?;
+    let stack_res = LinuxPtraceDumper::copy_from_process(ppid, stack_var as *mut libc::c_void, 1)?;
+
+    let expected_stack: libc::c_long = 0x11223344;
+    test!(
+        stack_res == expected_stack.to_ne_bytes(),
+        "stack var not correct"
+    )?;
+
+    let heap_res = LinuxPtraceDumper::copy_from_process(ppid, heap_var as *mut libc::c_void, 1)?;
+    let expected_heap: libc::c_long = 0x55667788;
+    test!(
+        heap_res == expected_heap.to_ne_bytes(),
+        "heap var not correct"
+    )?;
+    dumper.resume_threads()?;
+    Ok(())
+}
+
 fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
     let ppid = getppid();
     let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
@@ -179,6 +201,10 @@ fn main() -> Result<()> {
                 let addr1: usize = args[1].parse().unwrap();
                 let addr2: usize = args[2].parse().unwrap();
                 test_find_mappings(addr1, addr2)
+            } else if args[0] == "copy_from_process" {
+                let stack_var: usize = args[1].parse().unwrap();
+                let heap_var: usize = args[2].parse().unwrap();
+                test_copy_from_process(stack_var, heap_var)
             } else {
                 Err(format!("Len 3: Unknown test option: {}", args[0]).into())
             }

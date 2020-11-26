@@ -253,3 +253,28 @@ fn test_find_mapping() {
     std::io::stdout().write_all(&child.stderr).unwrap();
     assert_eq!(child.status.code().expect("No return value"), 0);
 }
+
+#[test]
+fn test_copy_from_process_self() {
+    let stack_var: libc::c_long = 0x11223344;
+    let heap_var: Box<libc::c_long> = Box::new(0x55667788);
+
+    let child = Command::new("cargo")
+        .arg("run")
+        .arg("--bin")
+        .arg("test")
+        .arg("--")
+        .arg("copy_from_process")
+        .arg(format!("{}", &stack_var as *const libc::c_long as usize))
+        .arg(format!(
+            "{}",
+            heap_var.as_ref() as *const libc::c_long as usize
+        ))
+        .output()
+        .expect("failed to execute child");
+
+    println!("Child output:");
+    std::io::stdout().write_all(&child.stdout).unwrap();
+    std::io::stdout().write_all(&child.stderr).unwrap();
+    assert_eq!(child.status.code().expect("No return value"), 0);
+}
