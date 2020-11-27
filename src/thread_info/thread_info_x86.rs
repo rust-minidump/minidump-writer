@@ -9,6 +9,7 @@ use libc::user;
 use memoffset;
 use nix::sys::ptrace;
 use nix::unistd;
+use std::convert::TryInto;
 
 const NUM_DEBUG_REGISTERS: usize = 8;
 
@@ -25,6 +26,19 @@ pub struct ThreadInfoX86 {
     pub dregs: [libc::c_int; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
     pub fpxregs: libc::user_fpxregs_struct,
+}
+
+fn to_u128(slice: &[u32]) -> u128 {
+    u128::from_ne_bytes(
+        slice
+            .iter()
+            .map(|x| x.to_ne_bytes().to_vec())
+            .flatten()
+            .collect::<Vec<_>>()
+            .as_slice()
+            .try_into() // Make slice into fixed size array
+            .unwrap(), // Which has to work as we know the numbers work out
+    )
 }
 
 impl CommonThreadInfo for ThreadInfoX86 {}
@@ -189,21 +203,21 @@ impl ThreadInfoX86 {
         out.flt_save.mx_csr = self.fpregs.mxcsr;
         out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
 
-        out.flt_save.float_registers[0] =
-            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.st_space[0..4]) };
-        out.flt_save.xmm_registers[0] =
-            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.xmm_space[0..4]) };
-        out.flt_save.xmm_registers[1] =
-            unsafe { std::mem::transmute::<&[u32], u128>(&self.fpregs.xmm_space[4..8]) };
+        u128::from_ne_bytes(
+            self.fpregs.st_space[0..4]
+                .iter()
+                .map(|x| x.to_ne_bytes().to_vec())
+                .flatten()
+                .collect::<Vec<_>>()
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+        out.flt_save.float_registers[0] = to_u128(&self.fpregs.st_space[0..4]);
+        out.flt_save.xmm_registers[0] = to_u128(&self.fpregs.xmm_space[0..4]);
+        out.flt_save.xmm_registers[1] = to_u128(&self.fpregs.xmm_space[4..8]);
         // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
         // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
-
-        // Possible safe way
-        // let mut a = 0u128;
-        // let b = [0xDEADBEEFu32, 0xCAFEBABEu32, 0xABADBABEu32, 0xDEADC0DEu32];
-        // for i in &b {
-        //     a = a << 32 | *i as u128;
-        // }
     }
 
     #[cfg(target_arch = "x86")]
@@ -248,15 +262,17 @@ impl ThreadInfoX86 {
 
         // 8 registers * 10 bytes per register.
         // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
-        unsafe {
-            std::ptr::copy(
-                &std::mem::transmute::<&[u32], [u8; MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE]>(
-                    &self.fpregs.st_space,
-                ),
-                out.float_save.register_area,
-                10 * 8,
-            )
-        }
+        out.float_save.register_area = self
+            .fpregs
+            .st_space
+            .iter()
+            .map(|x| x.to_ne_bytes().to_vec())
+            .flatten()
+            .take(MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE)
+            .collect::<Vec<_>>()
+            .as_slice()
+            .try_into() // Make slice into fixed size array
+            .unwrap(); // Which has to work as we know the numbers work out
 
         // This matches the Intel fpsave format.
         let values = (

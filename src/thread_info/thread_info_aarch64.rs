@@ -30,14 +30,16 @@ impl ThreadInfoAarch64 {
 
         // my_memcpy(&out->float_save.regs, &fpregs.vregs,
         //     MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16);
-        unsafe {
-            std::ptr::copy(
-                &std::mem::transmute::<&[u32], [u8; MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16]>(
-                    &self.fpregs.vregs,
-                ),
-                out.float_save.regs,
-                MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16,
-            )
-        }
+        out.float_save.regs = self
+            .fpregs
+            .vregs
+            .iter()
+            .map(|x| x.to_ne_bytes().to_vec())
+            .flatten()
+            .take(MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16)
+            .collect::<Vec<_>>()
+            .as_slice()
+            .try_into() // Make slice into fixed size array
+            .unwrap(); // Which has to work as we know the numbers work out
     }
 }
