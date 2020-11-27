@@ -1,70 +1,21 @@
-use minidump_writer_linux::{linux_ptrace_dumper, minidump_writer::write_minidump};
+use minidump_writer_linux::linux_ptrace_dumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
-use std::io::{BufRead, BufReader, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Child, Command, Stdio}; // To have .signal() for ExitStatus
 
-macro_rules! spawn_child {
-    ($x:expr) => {
-        let child = Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("test")
-            .arg("--")
-            .arg($x)
-            .output()
-            .expect("failed to execute child");
-
-        println!("Child output:");
-        std::io::stdout().write_all(&child.stdout).unwrap();
-        std::io::stdout().write_all(&child.stderr).unwrap();
-        assert_eq!(child.status.code().expect("No return value"), 0);
-    };
-}
+mod common;
+use common::*;
 
 #[test]
 fn test_setup() {
-    spawn_child!("setup");
+    spawn_child("setup", &[]);
 }
 
 #[test]
 fn test_thread_list_from_child() {
     // Child spawns and looks in the parent (== this process) for its own thread-ID
-    spawn_child!("thread_list");
-}
-
-fn start_child_and_wait_for_threads(num: usize) -> Child {
-    let mut child = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("test")
-        .arg("--")
-        .arg("spawn_and_wait")
-        .arg(format!("{}", num))
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("failed to execute child");
-
-    {
-        let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
-        let mut lines = 0;
-        while lines < num {
-            let mut buf = String::new();
-            match f.read_line(&mut buf) {
-                Ok(_) => {
-                    if buf == "1\n" {
-                        lines += 1;
-                    }
-                }
-                Err(e) => {
-                    panic!(e);
-                }
-            }
-        }
-    }
-    child
+    spawn_child("thread_list", &[]);
 }
 
 #[test]
@@ -142,12 +93,12 @@ fn test_thread_list_from_parent() {
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_mappings_include_linux_gate() {
-    spawn_child!("mappings_include_linux_gate");
+    spawn_child("mappings_include_linux_gate", &[]);
 }
 
 #[test]
 fn test_linux_gate_mapping_id() {
-    spawn_child!("linux_gate_mapping_id");
+    spawn_child("linux_gate_mapping_id", &[]);
 }
 
 #[test]
@@ -187,94 +138,42 @@ fn test_merged_mappings() {
         )
     };
 
-    let child = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("test")
-        .arg("--")
-        .arg("merged_mappings")
-        .arg(path)
-        .arg(format!("{}", mapped_mem as usize))
-        .arg(format!("{}", map_size))
-        .output()
-        .expect("failed to execute child");
-
-    println!("Child output:");
-    std::io::stdout().write_all(&child.stdout).unwrap();
-    std::io::stdout().write_all(&child.stderr).unwrap();
-    assert_eq!(child.status.code().expect("No return value"), 0);
+    spawn_child(
+        "merged_mappings",
+        &[
+            path,
+            &format!("{}", mapped_mem as usize),
+            &format!("{}", map_size),
+        ],
+    );
 }
 
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_file_id() {
-    spawn_child!("file_id");
+    spawn_child("file_id", &[]);
 }
 
 #[test]
 fn test_find_mapping() {
-    let child = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("test")
-        .arg("--")
-        .arg("find_mappings")
-        .arg(format!("{}", libc::printf as *const () as usize))
-        .arg(format!("{}", String::new as *const () as usize))
-        .output()
-        .expect("failed to execute child");
-
-    println!("Child output:");
-    std::io::stdout().write_all(&child.stdout).unwrap();
-    std::io::stdout().write_all(&child.stderr).unwrap();
-    assert_eq!(child.status.code().expect("No return value"), 0);
+    spawn_child(
+        "find_mappings",
+        &[
+            &format!("{}", libc::printf as *const () as usize),
+            &format!("{}", String::new as *const () as usize),
+        ],
+    );
 }
 
 #[test]
 fn test_copy_from_process_self() {
     let stack_var: libc::c_long = 0x11223344;
     let heap_var: Box<libc::c_long> = Box::new(0x55667788);
-
-    let child = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("test")
-        .arg("--")
-        .arg("copy_from_process")
-        .arg(format!("{}", &stack_var as *const libc::c_long as usize))
-        .arg(format!(
-            "{}",
-            heap_var.as_ref() as *const libc::c_long as usize
-        ))
-        .output()
-        .expect("failed to execute child");
-
-    println!("Child output:");
-    std::io::stdout().write_all(&child.stdout).unwrap();
-    std::io::stdout().write_all(&child.stderr).unwrap();
-    assert_eq!(child.status.code().expect("No return value"), 0);
-}
-
-#[test]
-fn test_write_dump() {
-    let num_of_threads = 3;
-    let mut child = start_child_and_wait_for_threads(num_of_threads);
-    let pid = child.id() as i32;
-
-    let tmpfile = tempfile::Builder::new()
-        .prefix("write_dump")
-        .tempfile()
-        .unwrap();
-
-    write_minidump(tmpfile.path().to_str().unwrap(), pid, pid).expect("Could not write minidump");
-    child.kill().expect("Failed to kill process");
-
-    // Reap child
-    let waitres = child.wait().expect("Failed to wait for child");
-    let status = waitres.signal().expect("Child did not die due to signal");
-    assert_eq!(waitres.code(), None);
-    assert_eq!(status, Signal::SIGKILL as i32);
-
-    let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
-    assert!(meta.len() > 0);
+    spawn_child(
+        "copy_from_process",
+        &[
+            &format!("{}", &stack_var as *const libc::c_long as usize),
+            &format!("{}", heap_var.as_ref() as *const libc::c_long as usize),
+        ],
+    );
 }
