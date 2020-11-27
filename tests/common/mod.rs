@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 pub fn spawn_child(command: &str, args: &[&str]) {
     let mut cmd_object = Command::new("cargo");
     let mut cmd_ref = cmd_object
+        .env("RUST_BACKTRACE", "1")
         .arg("run")
         .arg("-q")
         .arg("--bin")
@@ -25,6 +26,7 @@ pub fn spawn_child(command: &str, args: &[&str]) {
 #[allow(unused)]
 pub fn start_child_and_wait_for_threads(num: usize) -> Child {
     let mut child = Command::new("cargo")
+        .env("RUST_BACKTRACE", "1")
         .arg("run")
         .arg("-q")
         .arg("--bin")
@@ -53,5 +55,22 @@ pub fn start_child_and_wait_for_threads(num: usize) -> Child {
             }
         }
     }
+    child
+}
+
+#[allow(unused)]
+pub fn start_child_and_return(command: &str) -> Child {
+    let mut child = Command::new("cargo")
+        .env("RUST_BACKTRACE", "1")
+        .arg("run")
+        .arg("-q")
+        .arg("--bin")
+        .arg("test")
+        .arg("--")
+        .arg(format!("{}", command))
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to execute child");
+
     child
 }

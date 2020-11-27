@@ -14,3 +14,7 @@ memoffset = "*"
 byteorder = "*"
 memmap = "*"
 goblin = "*"
+
+[dev-dependencies]
+minidump = {git = "https://github.com/luser/rust-minidump" }
+minidump-common = {git = "https://github.com/luser/rust-minidump" }

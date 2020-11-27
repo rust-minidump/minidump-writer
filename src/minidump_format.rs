@@ -12,7 +12,7 @@ pub struct MDGUID {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
 pub struct MDVSFixedFileInfo {
     pub signature: u32,
     pub struct_version: u32,
@@ -34,7 +34,7 @@ pub struct MDVSFixedFileInfo {
 type MDRVA = u32;
 
 #[repr(C)]
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct MDLocationDescriptor {
     pub data_size: u32,
     pub rva: MDRVA,
@@ -85,8 +85,17 @@ pub struct MDRawThread {
 
 pub type MDRawThreadList = Vec<MDRawThread>;
 
-#[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+/* The inclusion of a 64-bit type in MINIDUMP_MODULE forces the struct to
+ * be tail-padded out to a multiple of 64 bits under some ABIs (such as PPC).
+ * This doesn't occur on systems that don't tail-pad in this manner.  Define
+ * this macro to be the usable size of the MDRawModule struct, and use it in
+ * place of sizeof(MDRawModule). */
+// pub const MD_MODULE_SIZE: usize = 108;
+// NOTE: We use "packed" here instead, to size_of::<MDRawModule>() == 108
+//       "packed" should be safe here, as we don't address reserved{0,1} at all
+//       and padding should happen only at the tail
+#[repr(C, packed)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MDRawModule {
     pub base_of_image: u64,
     pub size_of_image: u32,
@@ -118,13 +127,6 @@ pub struct MDRawModule {
     pub reserved0: [u32; 2],
     pub reserved1: [u32; 2],
 }
-
-/* The inclusion of a 64-bit type in MINIDUMP_MODULE forces the struct to
- * be tail-padded out to a multiple of 64 bits under some ABIs (such as PPC).
- * This doesn't occur on systems that don't tail-pad in this manner.  Define
- * this macro to be the usable size of the MDRawModule struct, and use it in
- * place of sizeof(MDRawModule). */
-pub const MD_MODULE_SIZE: usize = 108;
 
 #[repr(C)]
 #[derive(Debug, Default, PartialEq, Clone)]

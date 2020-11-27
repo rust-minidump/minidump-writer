@@ -2,6 +2,7 @@
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
 use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_EHDR};
 use minidump_writer_linux::{linux_ptrace_dumper, Result, LINUX_GATE_LIBRARY_NAME};
+use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::unistd::getppid;
 use std::convert::TryInto;
 use std::env;
@@ -177,6 +178,28 @@ fn spawn_and_wait(num: usize) -> Result<()> {
     }
 }
 
+fn spawn_mmap_wait() -> Result<()> {
+    let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE).unwrap();
+    let memory_size = page_size.unwrap() as usize;
+    // Get some memory to be mapped by the child-process
+    let mapped_mem = unsafe {
+        mmap(
+            std::ptr::null_mut(),
+            memory_size,
+            ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON,
+            -1,
+            0,
+        )
+        .unwrap()
+    };
+
+    println!("{} {}", mapped_mem as usize, memory_size);
+    loop {
+        std::thread::park();
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
     match args.len() {
@@ -186,6 +209,7 @@ fn main() -> Result<()> {
             "thread_list" => test_thread_list(),
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
             "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
+            "spawn_mmap_wait" => spawn_mmap_wait(),
             _ => Err("Len 1: Unknown test option".into()),
         },
         2 => {

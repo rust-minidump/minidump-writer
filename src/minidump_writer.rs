@@ -381,13 +381,6 @@ impl MinidumpWriter {
             location: list_header.location(),
         };
 
-        // TODO: We currently ignore this and use size_of<MDRawModule>
-        /* The inclusion of a 64-bit type in MINIDUMP_MODULE forces the struct to
-         * be tail-padded out to a multiple of 64 bits under some ABIs (such as PPC).
-         * This doesn't occur on systems that don't tail-pad in this manner.  Define
-         * this macro to be the usable size of the MDRawModule struct, and use it in
-         * place of sizeof(MDRawModule). */
-        // #define MD_MODULE_SIZE 108
         // In case of num_output_mappings == 0, this call doesn't allocate any memory in the buffer
         let mut mapping_list =
             SectionArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
@@ -557,11 +550,19 @@ impl MinidumpWriter {
     // }
 }
 
-pub fn write_minidump(minidump_path: &str, process: Pid, process_blamed_thread: Pid) -> Result<()> {
+pub fn write_minidump(
+    minidump_path: &str,
+    process: Pid,
+    process_blamed_thread: Pid,
+    user_mapping: Option<MappingList>,
+) -> Result<()> {
     let dumper = LinuxPtraceDumper::new(process)?;
     //   dumper.set_crash_signal(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED);
     //   dumper.set_crash_thread(process_blamed_thread);
     let mut writer = MinidumpWriter::new(minidump_path, dumper, process_blamed_thread);
+    if let Some(user_maps) = user_mapping {
+        writer.user_mapping_list = user_maps;
+    }
     writer.init()?;
     writer.dump()
 }
