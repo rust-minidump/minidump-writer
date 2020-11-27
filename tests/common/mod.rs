@@ -6,6 +6,7 @@ pub fn spawn_child(command: &str, args: &[&str]) {
     let mut cmd_object = Command::new("cargo");
     let mut cmd_ref = cmd_object
         .arg("run")
+        .arg("-q")
         .arg("--bin")
         .arg("test")
         .arg("--")
@@ -25,6 +26,7 @@ pub fn spawn_child(command: &str, args: &[&str]) {
 pub fn start_child_and_wait_for_threads(num: usize) -> Child {
     let mut child = Command::new("cargo")
         .arg("run")
+        .arg("-q")
         .arg("--bin")
         .arg("test")
         .arg("--")
