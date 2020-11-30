@@ -5,6 +5,7 @@ use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
 use crate::minidump_cpu::RawContextCPU;
 use crate::minidump_format::*;
+use crate::section_writer::*;
 use crate::thread_info::Pid;
 use crate::thread_info::ThreadInfo;
 use crate::Result;
