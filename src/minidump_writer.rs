@@ -28,14 +28,19 @@ const LIMIT_MAX_EXTRA_THREAD_STACK_LEN: i32 = 2 * 1024;
 const LIMIT_MINIDUMP_FUDGE_FACTOR: u64 = 64 * 1024;
 
 #[derive(Debug)]
-struct MinidumpWriter {
+pub struct DumpInfo {
+    buffer: Cursor<Vec<u8>>,
     dumper: LinuxPtraceDumper,
-    minidump_path: String,
+}
+
+#[derive(Debug)]
+pub struct MinidumpWriter {
+    process_id: Pid,
+    blamed_thread: Pid,
     minidump_size_limit: i64,
     skip_stacks_if_mapping_unreferenced: bool,
     principal_mapping: Option<MappingInfo>,
     user_mapping_list: MappingList,
-    blamed_thread: Pid,
     app_memory: AppMemoryList,
     memory_blocks: Vec<MDMemoryDescriptor>,
 }
@@ -50,39 +55,66 @@ struct MinidumpWriter {
 // }
 
 impl MinidumpWriter {
-    fn new(minidump_path: &str, dumper: LinuxPtraceDumper, blamed_thread: Pid) -> Self {
+    pub fn new(process: Pid, blamed_thread: Pid) -> Self {
         MinidumpWriter {
-            dumper,
-            minidump_path: minidump_path.to_string(),
+            process_id: process,
+            blamed_thread,
             minidump_size_limit: -1,
             skip_stacks_if_mapping_unreferenced: false,
             principal_mapping: None,
-            user_mapping_list: Vec::new(),
-            blamed_thread,
+            user_mapping_list: MappingList::new(),
             app_memory: Vec::new(),
             memory_blocks: Vec::new(),
         }
     }
 
-    fn init(&mut self) -> Result<()> {
-        self.dumper.suspend_threads()?;
+    fn init(&mut self) -> Result<LinuxPtraceDumper> {
+        let mut dumper = LinuxPtraceDumper::new(self.process_id)?;
+        dumper.suspend_threads()?;
         // TODO: Doesn't exist yet
         //self.dumper.late_init()?;
+
+        Ok(dumper)
+    }
+
+    pub fn set_user_mapping_list(&mut self, user_mapping_list: MappingList) -> &mut Self {
+        self.user_mapping_list = user_mapping_list;
+        self
+    }
+
+    pub fn set_minidump_size_limit(&mut self, limit: i64) -> &mut Self {
+        self.minidump_size_limit = limit;
+        self
+    }
+
+    pub fn dump(&mut self, destination: &mut impl Write) -> Result<()> {
+        let dumper = self.init()?;
+        let dump = self.generate_dump(dumper)?;
+
+        // Write results to file
+        destination.write_all(dump.buffer.get_ref())?;
+
+        dump.dumper.resume_threads()?;
 
         Ok(())
     }
 
-    fn dump(&mut self) -> Result<()> {
+    fn generate_dump(&mut self, dumper: LinuxPtraceDumper) -> Result<DumpInfo> {
         // A minidump file contains a number of tagged streams. This is the number
         // of stream which we write.
         let num_writers = 13u32;
 
-        let mut buffer = Cursor::new(Vec::new());
+        let mut dump = DumpInfo {
+            buffer: Cursor::new(Vec::new()),
+            dumper,
+        };
 
-        let mut header_section = SectionWriter::<MDRawHeader>::alloc(&mut buffer)?;
+        let mut header_section = SectionWriter::<MDRawHeader>::alloc(&mut dump.buffer)?;
 
-        let mut dir_section =
-            SectionArrayWriter::<MDRawDirectory>::alloc_array(&mut buffer, num_writers as usize)?;
+        let mut dir_section = SectionArrayWriter::<MDRawDirectory>::alloc_array(
+            &mut dump.buffer,
+            num_writers as usize,
+        )?;
 
         let header = MDRawHeader {
             signature: MD_HEADER_SIGNATURE,
@@ -97,60 +129,59 @@ impl MinidumpWriter {
                 .as_secs() as u32, // TODO: This is not Y2038 safe, but thats how its currently defined as
             flags: 0,
         };
-        header_section.set_value(&mut buffer, header)?;
+        header_section.set_value(&mut dump.buffer, header)?;
 
         // Ensure the header gets flushed. If we crash somewhere below,
         // we should have a mostly-intact dump
         // TODO: Write header_section to file here
 
         let mut dir_idx = 0;
-        let mut dirent = self.write_thread_list_stream(&mut buffer)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        let mut dirent = self.write_thread_list_stream(&mut dump)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = self.write_mappings(&mut buffer)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dirent = self.write_mappings(&mut dump)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        let _ = self.write_app_memory(&mut buffer)?;
+        let _ = self.write_app_memory(&mut dump.buffer)?;
 
-        dirent = self.write_memory_list_stream(&mut buffer)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dirent = self.write_memory_list_stream(&mut dump.buffer)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
         // Currently unused
-        dirent = self.write_exception_stream(&mut buffer)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dirent = self.write_exception_stream(&mut dump.buffer)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = self.write_system_info_stream(&mut buffer)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dirent = self.write_system_info_stream(&mut dump.buffer)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(&mut buffer, "/proc/cpuinfo") {
+        dirent = match self.write_file(&mut dump, "/proc/cpuinfo") {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxCpuInfo as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/status", self.blamed_thread))
-        {
+        dirent = match self.write_file(&mut dump, &format!("/proc/{}/status", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxProcStatus as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
         dirent = match self
-            .write_file(&mut buffer, "/etc/lsb-release")
-            .or_else(|_| self.write_file(&mut buffer, "/etc/os-release"))
+            .write_file(&mut dump, "/etc/lsb-release")
+            .or_else(|_| self.write_file(&mut dump, "/etc/os-release"))
         {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxLsbRelease as u32,
@@ -158,83 +189,78 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(
-            &mut buffer,
-            &format!("/proc/{}/cmdline", self.blamed_thread),
-        ) {
+        dirent = match self.write_file(&mut dump, &format!("/proc/{}/cmdline", self.blamed_thread))
+        {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxCmdLine as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(
-            &mut buffer,
-            &format!("/proc/{}/environ", self.blamed_thread),
-        ) {
+        dirent = match self.write_file(&mut dump, &format!("/proc/{}/environ", self.blamed_thread))
+        {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxEnviron as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
+        dirent = match self.write_file(&mut dump, &format!("/proc/{}/auxv", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxAuxv as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent = match self.write_file(&mut buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
+        dirent = match self.write_file(&mut dump, &format!("/proc/{}/maps", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxMaps as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
         dir_idx += 1;
 
-        dirent =
-            dso_debug::write_dso_debug_stream(&mut buffer, self.blamed_thread, &self.dumper.auxv)?;
-        dir_section.set_value_at(&mut buffer, dirent, dir_idx)?;
+        dirent = dso_debug::write_dso_debug_stream(
+            &mut dump.buffer,
+            self.blamed_thread,
+            &dump.dumper.auxv,
+        )?;
+        dir_section.set_value_at(&mut dump.buffer, dirent, dir_idx)?;
 
         // If you add more directory entries, don't forget to update kNumWriters,
         // above.
-
-        // Write results to file
-        let mut file = std::fs::File::create(&self.minidump_path)?;
-        file.write_all(buffer.get_ref())?;
-
-        self.dumper.resume_threads()?;
-        Ok(())
+        Ok(dump)
     }
 
-    fn write_thread_list_stream(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
-        let num_threads = self.dumper.threads.len();
+    fn write_thread_list_stream(&mut self, dump: &mut DumpInfo) -> Result<MDRawDirectory> {
+        let num_threads = dump.dumper.threads.len();
         // Memory looks like this:
         // <num_threads><thread_1><thread_2>...
 
-        let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
+        let list_header =
+            SectionWriter::<u32>::alloc_with_val(&mut dump.buffer, num_threads as u32)?;
 
         let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ThreadListStream as u32,
             location: list_header.location(),
         };
 
-        let mut thread_list = SectionArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
+        let mut thread_list =
+            SectionArrayWriter::<MDRawThread>::alloc_array(&mut dump.buffer, num_threads)?;
         dirent.location.data_size += thread_list.location().data_size;
         // If there's a minidump size limit, check if it might be exceeded.  Since
         // most of the space is filled with stack data, just check against that.
@@ -245,7 +271,7 @@ impl MinidumpWriter {
         if self.minidump_size_limit >= 0 {
             let estimated_total_stack_size =
                 (num_threads * LIMIT_AVERAGE_THREAD_STACK_LENGTH) as u64;
-            let curr_pos = buffer.position();
+            let curr_pos = dump.buffer.position();
             let estimated_minidump_size =
                 curr_pos + estimated_total_stack_size + LIMIT_MINIDUMP_FUDGE_FACTOR;
             if estimated_minidump_size as i64 > self.minidump_size_limit {
@@ -253,7 +279,7 @@ impl MinidumpWriter {
             }
         }
 
-        for (idx, item) in self.dumper.threads.clone().iter().enumerate() {
+        for (idx, item) in dump.dumper.threads.clone().iter().enumerate() {
             let mut thread = MDRawThread::default();
             thread.thread_id = (*item).try_into()?;
 
@@ -267,7 +293,7 @@ impl MinidumpWriter {
                 //           ucontext_ &&
                 //           !dumper_->IsPostMortem())
             } else {
-                let info = self.dumper.get_thread_info_by_index(idx)?;
+                let info = dump.dumper.get_thread_info_by_index(idx)?;
                 let max_stack_len =
                     if self.minidump_size_limit >= 0 && idx >= LIMIT_BASE_THREAD_COUNT {
                         extra_thread_stack_len
@@ -275,12 +301,13 @@ impl MinidumpWriter {
                         -1 // default to no maximum for this thread
                     };
 
-                self.fill_thread_stack(buffer, &mut thread, &info, max_stack_len)?;
+                self.fill_thread_stack(dump, &mut thread, &info, max_stack_len)?;
 
                 // let cpu = SectionWriter::<RawContextCPU>::alloc(&mut buffer)?;
                 let mut cpu = RawContextCPU::default();
                 info.fill_cpu_context(&mut cpu);
-                let cpu_section = SectionWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
+                let cpu_section =
+                    SectionWriter::<RawContextCPU>::alloc_with_val(&mut dump.buffer, cpu)?;
                 thread.thread_context = cpu_section.location();
                 // if item == &self.blamed_thread {
                 //     // This is the crashing thread of a live process, but
@@ -291,14 +318,14 @@ impl MinidumpWriter {
                 //         .set_crash_address(info.get_instruction_pointer());
                 // }
             }
-            thread_list.set_value_at(buffer, thread, idx)?;
+            thread_list.set_value_at(&mut dump.buffer, thread, idx)?;
         }
         Ok(dirent)
     }
 
     fn fill_thread_stack(
         &mut self,
-        buffer: &mut Cursor<Vec<u8>>,
+        dump: &mut DumpInfo,
         thread: &mut MDRawThread,
         info: &ThreadInfo,
         max_stack_len: i32,
@@ -307,9 +334,9 @@ impl MinidumpWriter {
 
         thread.stack.start_of_memory_range = info.stack_pointer.try_into()?;
         thread.stack.memory.data_size = 0;
-        thread.stack.memory.rva = buffer.position() as u32;
+        thread.stack.memory.rva = dump.buffer.position() as u32;
 
-        if let Ok((mut stack, mut stack_len)) = self.dumper.get_stack_info(info.stack_pointer) {
+        if let Ok((mut stack, mut stack_len)) = dump.dumper.get_stack_info(info.stack_pointer) {
             if max_stack_len >= 0 && stack_len > max_stack_len as usize {
                 stack_len = max_stack_len as usize; // Casting is ok, as we checked that its positive
 
@@ -348,9 +375,9 @@ impl MinidumpWriter {
             //     }
             let stack_location = MDLocationDescriptor {
                 data_size: stack_bytes.len() as u32,
-                rva: buffer.position() as u32,
+                rva: dump.buffer.position() as u32,
             };
-            buffer.write_all(&stack_bytes)?;
+            dump.buffer.write_all(&stack_bytes)?;
             thread.stack.start_of_memory_range = stack as u64;
             thread.stack.memory = stack_location;
             self.memory_blocks.push(thread.stack.clone());
@@ -362,10 +389,10 @@ impl MinidumpWriter {
     /// minidump format, the information about the mappings is pretty limited.
     /// Because of this, we also include the full, unparsed, /proc/$x/maps file in
     /// another stream in the file.
-    fn write_mappings(&mut self, buffer: &mut Cursor<Vec<u8>>) -> Result<MDRawDirectory> {
+    fn write_mappings(&mut self, dump: &mut DumpInfo) -> Result<MDRawDirectory> {
         let mut num_output_mappings = self.user_mapping_list.len();
 
-        for mapping in &self.dumper.mappings {
+        for mapping in &dump.dumper.mappings {
             // If the mapping is uninteresting, or if
             // there is caller-provided information about this mapping
             // in the user_mapping_list list, skip it
@@ -374,7 +401,8 @@ impl MinidumpWriter {
             }
         }
 
-        let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
+        let list_header =
+            SectionWriter::<u32>::alloc_with_val(&mut dump.buffer, num_output_mappings as u32)?;
 
         let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ModuleListStream as u32,
@@ -383,33 +411,36 @@ impl MinidumpWriter {
 
         // In case of num_output_mappings == 0, this call doesn't allocate any memory in the buffer
         let mut mapping_list =
-            SectionArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
+            SectionArrayWriter::<MDRawModule>::alloc_array(&mut dump.buffer, num_output_mappings)?;
         dirent.location.data_size += mapping_list.location().data_size;
 
         // First write all the mappings from the dumper
         let mut idx = 0;
-        for map_idx in 0..self.dumper.mappings.len() {
-            if !self.dumper.mappings[map_idx].is_interesting()
-                || self.dumper.mappings[map_idx].is_contained_in(&self.user_mapping_list)
+        for map_idx in 0..dump.dumper.mappings.len() {
+            if !dump.dumper.mappings[map_idx].is_interesting()
+                || dump.dumper.mappings[map_idx].is_contained_in(&self.user_mapping_list)
             {
                 continue;
             }
             // Note: elf_identifier_for_mapping_index() can manipulate the |mapping.name|.
-            let identifier = self
+            let identifier = dump
                 .dumper
                 .elf_identifier_for_mapping_index(map_idx)
                 .unwrap_or(Default::default());
-            let module =
-                self.fill_raw_module(buffer, &self.dumper.mappings[map_idx], &identifier)?;
-            mapping_list.set_value_at(buffer, module, idx)?;
+            let module = self.fill_raw_module(
+                &mut dump.buffer,
+                &dump.dumper.mappings[map_idx],
+                &identifier,
+            )?;
+            mapping_list.set_value_at(&mut dump.buffer, module, idx)?;
             idx += 1;
         }
 
         // Next write all the mappings provided by the caller
         for user in &self.user_mapping_list {
             // GUID was provided by caller.
-            let module = self.fill_raw_module(buffer, &user.mapping, &user.identifier)?;
-            mapping_list.set_value_at(buffer, module, idx)?;
+            let module = self.fill_raw_module(&mut dump.buffer, &user.mapping, &user.identifier)?;
+            mapping_list.set_value_at(&mut dump.buffer, module, idx)?;
             idx += 1;
         }
         Ok(dirent)
@@ -526,11 +557,7 @@ impl MinidumpWriter {
         Ok(dirent)
     }
 
-    fn write_file(
-        &self,
-        buffer: &mut Cursor<Vec<u8>>,
-        filename: &str,
-    ) -> Result<MDLocationDescriptor> {
+    fn write_file(&self, dump: &mut DumpInfo, filename: &str) -> Result<MDLocationDescriptor> {
         // TODO: Is this buffer-limitation really needed? Or could we read&write all?
         // We can't stat the files because several of the files that we want to
         // read are kernel seqfiles, which always have a length of zero. So we have
@@ -541,42 +568,7 @@ impl MinidumpWriter {
         let mut content = Vec::new();
         file.read_to_end(&mut content)?;
 
-        let section = SectionArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
+        let section = SectionArrayWriter::<u8>::alloc_from_array(&mut dump.buffer, &content)?;
         Ok(section.location())
     }
-
-    // pub fn set_minidump_size_limit(&mut self, limit: i64) {
-    //     self.minidump_size_limit = limit;
-    // }
 }
-
-pub fn write_minidump(
-    minidump_path: &str,
-    process: Pid,
-    process_blamed_thread: Pid,
-    user_mapping: Option<MappingList>,
-) -> Result<()> {
-    let dumper = LinuxPtraceDumper::new(process)?;
-    //   dumper.set_crash_signal(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED);
-    //   dumper.set_crash_thread(process_blamed_thread);
-    let mut writer = MinidumpWriter::new(minidump_path, dumper, process_blamed_thread);
-    if let Some(user_maps) = user_mapping {
-        writer.user_mapping_list = user_maps;
-    }
-    writer.init()?;
-    writer.dump()
-}
-// bool WriteMinidump(const char* minidump_path, pid_t process,
-//                    pid_t process_blamed_thread) {
-//   LinuxPtraceDumper dumper(process);
-//   // MinidumpWriter will set crash address
-//   dumper.set_crash_signal(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED);
-//   dumper.set_crash_thread(process_blamed_thread);
-//   MappingList mapping_list;
-//   AppMemoryList app_memory_list;
-//   MinidumpWriter writer(minidump_path, -1, NULL, mapping_list,
-//                         app_memory_list, false, 0, false, &dumper);
-//   if (!writer.Init())
-//     return false;
-//   return writer.Dump();
-// }

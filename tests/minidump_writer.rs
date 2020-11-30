@@ -1,7 +1,7 @@
 use minidump::*;
 use minidump_common::format::MINIDUMP_STREAM_TYPE::*;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
-use minidump_writer_linux::minidump_writer::write_minidump;
+use minidump_writer_linux::minidump_writer::MinidumpWriter;
 use nix::sys::signal::Signal;
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::ExitStatusExt;
@@ -16,12 +16,13 @@ fn test_write_dump() {
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
 
-    let tmpfile = tempfile::Builder::new()
+    let mut tmpfile = tempfile::Builder::new()
         .prefix("write_dump")
         .tempfile()
         .unwrap();
 
-    write_minidump(tmpfile.path().to_str().unwrap(), pid, pid, None)
+    MinidumpWriter::new(pid, pid)
+        .dump(&mut tmpfile)
         .expect("Could not write minidump");
     child.kill().expect("Failed to kill process");
 
@@ -40,7 +41,7 @@ fn test_write_and_read_dump_from_parent() {
     let mut child = start_child_and_return("spawn_mmap_wait");
     let pid = child.id() as i32;
 
-    let tmpfile = tempfile::Builder::new()
+    let mut tmpfile = tempfile::Builder::new()
         .prefix("write_dump")
         .tempfile()
         .unwrap();
@@ -74,13 +75,10 @@ fn test_write_and_read_dump_from_parent() {
         mapping,
         identifier,
     };
-    write_minidump(
-        tmpfile.path().to_str().unwrap(),
-        pid,
-        pid,
-        Some(vec![entry]),
-    )
-    .expect("Couldn't write minidump");
+    MinidumpWriter::new(pid, pid)
+        .set_user_mapping_list(vec![entry])
+        .dump(&mut tmpfile)
+        .expect("Could not write minidump");
 
     child.kill().expect("Failed to kill process");
     // Reap child
