@@ -37,7 +37,7 @@ pub struct DumpInfo {
 pub struct MinidumpWriter {
     process_id: Pid,
     blamed_thread: Pid,
-    minidump_size_limit: i64,
+    minidump_size_limit: Option<u64>,
     skip_stacks_if_mapping_unreferenced: bool,
     principal_mapping: Option<MappingInfo>,
     user_mapping_list: MappingList,
@@ -59,11 +59,11 @@ impl MinidumpWriter {
         MinidumpWriter {
             process_id: process,
             blamed_thread,
-            minidump_size_limit: -1,
+            minidump_size_limit: None,
             skip_stacks_if_mapping_unreferenced: false,
             principal_mapping: None,
             user_mapping_list: MappingList::new(),
-            app_memory: Vec::new(),
+            app_memory: AppMemoryList::new(),
             memory_blocks: Vec::new(),
         }
     }
@@ -77,13 +77,28 @@ impl MinidumpWriter {
         Ok(dumper)
     }
 
+    pub fn set_minidump_size_limit(&mut self, limit: u64) -> &mut Self {
+        self.minidump_size_limit = Some(limit);
+        self
+    }
+
     pub fn set_user_mapping_list(&mut self, user_mapping_list: MappingList) -> &mut Self {
         self.user_mapping_list = user_mapping_list;
         self
     }
 
-    pub fn set_minidump_size_limit(&mut self, limit: i64) -> &mut Self {
-        self.minidump_size_limit = limit;
+    pub fn set_principal_mapping(&mut self, principal_mapping: MappingInfo) -> &mut Self {
+        self.principal_mapping = Some(principal_mapping);
+        self
+    }
+
+    pub fn set_app_memory(&mut self, app_memory: AppMemoryList) -> &mut Self {
+        self.app_memory = app_memory;
+        self
+    }
+
+    pub fn skip_stacks_if_mapping_unreferenced(&mut self) -> &mut Self {
+        self.skip_stacks_if_mapping_unreferenced = true; // Off by default
         self
     }
 
@@ -268,13 +283,13 @@ impl MinidumpWriter {
         // that any thread beyond the first kLimitBaseThreadCount threads will
         // have only kLimitMaxExtraThreadStackLen bytes dumped.
         let mut extra_thread_stack_len = -1; // default to no maximum
-        if self.minidump_size_limit >= 0 {
+        if let Some(minidump_size_limit) = self.minidump_size_limit {
             let estimated_total_stack_size =
                 (num_threads * LIMIT_AVERAGE_THREAD_STACK_LENGTH) as u64;
             let curr_pos = dump.buffer.position();
             let estimated_minidump_size =
                 curr_pos + estimated_total_stack_size + LIMIT_MINIDUMP_FUDGE_FACTOR;
-            if estimated_minidump_size as i64 > self.minidump_size_limit {
+            if estimated_minidump_size > minidump_size_limit {
                 extra_thread_stack_len = LIMIT_MAX_EXTRA_THREAD_STACK_LEN;
             }
         }
@@ -295,7 +310,7 @@ impl MinidumpWriter {
             } else {
                 let info = dump.dumper.get_thread_info_by_index(idx)?;
                 let max_stack_len =
-                    if self.minidump_size_limit >= 0 && idx >= LIMIT_BASE_THREAD_COUNT {
+                    if self.minidump_size_limit.is_some() && idx >= LIMIT_BASE_THREAD_COUNT {
                         extra_thread_stack_len
                     } else {
                         -1 // default to no maximum for this thread
