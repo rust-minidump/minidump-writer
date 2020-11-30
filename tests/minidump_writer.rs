@@ -45,7 +45,7 @@ fn test_write_and_read_dump_from_parent() {
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()
-        .prefix("write_dump")
+        .prefix("write_and_read_dump")
         .tempfile()
         .unwrap();
 
@@ -139,7 +139,7 @@ fn test_write_with_additional_memory() {
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()
-        .prefix("write_dump")
+        .prefix("additional_memory")
         .tempfile()
         .unwrap();
 
@@ -272,7 +272,7 @@ fn test_minidump_size_limit() {
         }
 
         let mut tmpfile = tempfile::Builder::new()
-            .prefix("write_dump_unlimited")
+            .prefix("write_dump_limited")
             .tempfile()
             .unwrap();
 
@@ -331,7 +331,7 @@ fn test_with_deleted_binary() {
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()
-        .prefix("write_dump")
+        .prefix("deleted_binary")
         .tempfile()
         .unwrap();
 
@@ -399,4 +399,30 @@ fn test_with_deleted_binary() {
         main_module.debug_identifier(),
         Some(std::borrow::Cow::from(filtered.as_str()))
     );
+}
+
+#[test]
+fn test_skip_if_requested() {
+    let num_of_threads = 1;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("skip_if_requested")
+        .tempfile()
+        .unwrap();
+
+    let res = MinidumpWriter::new(pid, pid)
+        .skip_stacks_if_mapping_unreferenced()
+        .set_principal_mapping_address(0x0102030405060708)
+        .dump(&mut tmpfile);
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+
+    assert!(res.is_err());
 }

@@ -17,10 +17,11 @@ pub struct MinidumpWriter {
     pub blamed_thread: Pid,
     pub minidump_size_limit: Option<u64>,
     pub skip_stacks_if_mapping_unreferenced: bool,
-    pub principal_mapping: Option<MappingInfo>,
+    pub principal_mapping_address: Option<usize>,
     pub user_mapping_list: MappingList,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
+    pub principal_mapping: Option<MappingInfo>,
 }
 
 // This doesn't work yet:
@@ -39,10 +40,11 @@ impl MinidumpWriter {
             blamed_thread,
             minidump_size_limit: None,
             skip_stacks_if_mapping_unreferenced: false,
-            principal_mapping: None,
+            principal_mapping_address: None,
             user_mapping_list: MappingList::new(),
             app_memory: AppMemoryList::new(),
             memory_blocks: Vec::new(),
+            principal_mapping: None,
         }
     }
 
@@ -56,8 +58,8 @@ impl MinidumpWriter {
         self
     }
 
-    pub fn set_principal_mapping(&mut self, principal_mapping: MappingInfo) -> &mut Self {
-        self.principal_mapping = Some(principal_mapping);
+    pub fn set_principal_mapping_address(&mut self, principal_mapping_address: usize) -> &mut Self {
+        self.principal_mapping_address = Some(principal_mapping_address);
         self
     }
 
@@ -76,6 +78,18 @@ impl MinidumpWriter {
         dumper.suspend_threads()?;
         // TODO: Doesn't exist yet
         //self.dumper.late_init()?;
+
+        if self.skip_stacks_if_mapping_unreferenced {
+            if let Some(address) = self.principal_mapping_address {
+                self.principal_mapping = dumper.find_mapping_no_bias(address).cloned();
+            }
+            // This is currently always false, as we don't yet support ucontext.
+            //if (!CrashingThreadReferencesPrincipalMapping())
+            if true {
+                return Err("!CrashingThreadReferencesPrincipalMapping".into());
+            }
+        }
+
         let mut buffer = Cursor::new(Vec::new());
         self.generate_dump(&mut buffer, &mut dumper)?;
 
