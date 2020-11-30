@@ -314,7 +314,7 @@ impl LinuxPtraceDumper {
         None
     }
 
-    fn elf_file_identifier_from_mapped_file(mem_slice: &[u8]) -> Result<Vec<u8>> {
+    pub fn elf_file_identifier_from_mapped_file(mem_slice: &[u8]) -> Result<Vec<u8>> {
         let elf_obj = elf::Elf::parse(mem_slice)?;
         match Self::parse_build_id(&elf_obj, mem_slice) {
             // Look for a build id note first.

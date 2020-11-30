@@ -1,9 +1,11 @@
 use minidump::*;
-use minidump_common::format::MINIDUMP_STREAM_TYPE::*;
+use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer_linux::app_memory::AppMemory;
+use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
 use nix::sys::signal::Signal;
+use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::ExitStatusExt;
 use std::str::FromStr;
@@ -320,4 +322,81 @@ fn test_minidump_size_limit() {
     let status = waitres.signal().expect("Child did not die due to signal");
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
+}
+
+#[test]
+fn test_with_deleted_binary() {
+    let num_of_threads = 1;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("write_dump")
+        .tempfile()
+        .unwrap();
+
+    let path: &'static str = std::env!("CARGO_BIN_EXE_test");
+
+    let mem_slice = std::fs::read(path).expect("Failed to read binary");
+    let build_id = LinuxPtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
+        .expect("Failed to get build_id");
+
+    let guid = GUID {
+        data1: u32::from_ne_bytes(build_id[0..4].try_into().unwrap()),
+        data2: u16::from_ne_bytes(build_id[4..6].try_into().unwrap()),
+        data3: u16::from_ne_bytes(build_id[6..8].try_into().unwrap()),
+        data4: build_id[8..16].try_into().unwrap(),
+    };
+
+    // guid_to_string() is not public in minidump, so copied it here
+    let mut filtered = format!(
+        "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        guid.data1,
+        guid.data2,
+        guid.data3,
+        guid.data4[0],
+        guid.data4[1],
+        guid.data4[2],
+        guid.data4[3],
+        guid.data4[4],
+        guid.data4[5],
+        guid.data4[6],
+        guid.data4[7],
+    );
+    // Strip out dashes
+    //let mut filtered: String = identifier.chars().filter(|x| *x != '-').collect();
+
+    // And append a zero, because module IDs include an "age" field
+    // which is always zero on Linux.
+    filtered.push('0');
+    std::fs::remove_file(path).expect("Failed to remove binary");
+
+    MinidumpWriter::new(pid, pid)
+        .dump(&mut tmpfile)
+        .expect("Could not write minidump");
+
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+
+    // Begin checks on dump
+    let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+    assert!(meta.len() > 0);
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let module_list: MinidumpModuleList = dump
+        .get_stream()
+        .expect("Couldn't find stream MinidumpModuleList");
+    let main_module = module_list
+        .main_module()
+        .expect("Could not get main module");
+    assert_eq!(main_module.code_file(), path);
+    assert_eq!(
+        main_module.debug_identifier(),
+        Some(std::borrow::Cow::from(filtered.as_str()))
+    );
 }
