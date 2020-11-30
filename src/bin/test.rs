@@ -200,6 +200,21 @@ fn spawn_mmap_wait() -> Result<()> {
     }
 }
 
+fn spawn_alloc_wait() -> Result<()> {
+    let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE).unwrap();
+    let memory_size = page_size.unwrap() as usize;
+
+    let mut values = Vec::<u8>::with_capacity(memory_size);
+    for idx in 0..memory_size {
+        values.push((idx % 255) as u8);
+    }
+
+    println!("{:p} {}", values.as_ptr(), memory_size);
+    loop {
+        std::thread::park();
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
     match args.len() {
@@ -210,6 +225,7 @@ fn main() -> Result<()> {
             "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
             "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
             "spawn_mmap_wait" => spawn_mmap_wait(),
+            "spawn_alloc_wait" => spawn_alloc_wait(),
             _ => Err("Len 1: Unknown test option".into()),
         },
         2 => {

@@ -1,5 +1,6 @@
 use minidump::*;
 use minidump_common::format::MINIDUMP_STREAM_TYPE::*;
+use minidump_writer_linux::app_memory::AppMemory;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
 use nix::sys::signal::Signal;
@@ -87,9 +88,6 @@ fn test_write_and_read_dump_from_parent() {
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
 
-    let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE).unwrap();
-    let _page_size = page_size.unwrap() as usize;
-
     let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
     let module_list: MinidumpModuleList = dump
         .get_stream()
@@ -131,4 +129,61 @@ fn test_write_and_read_dump_from_parent() {
     let _ = dump
         .get_raw_stream(LinuxDsoDebug)
         .expect("Couldn't find LinuxDsoDebug");
+}
+
+#[test]
+fn test_write_with_additional_memory() {
+    let mut child = start_child_and_return("spawn_alloc_wait");
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("write_dump")
+        .tempfile()
+        .unwrap();
+
+    let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+    let mut buf = String::new();
+    let _ = f
+        .read_line(&mut buf)
+        .expect("Couldn't read address provided by child");
+    let mut output = buf.split_whitespace();
+    let memory_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
+        .expect("unable to parse mmap_addr");
+    let memory_size = usize::from_str(output.next().unwrap()).expect("unable to parse memory_size");
+
+    let app_memory = AppMemory {
+        ptr: memory_addr,
+        length: memory_size,
+    };
+
+    MinidumpWriter::new(pid, pid)
+        .set_app_memory(vec![app_memory])
+        .dump(&mut tmpfile)
+        .expect("Could not write minidump");
+
+    child.kill().expect("Failed to kill process");
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+
+    // Read dump file and check its contents
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+
+    let section: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
+    let region = section
+        .memory_at_address(memory_addr as u64)
+        .expect("Couldn't find memory region");
+
+    assert_eq!(region.base_address, memory_addr as u64);
+    assert_eq!(region.size, memory_size as u64);
+
+    let mut values = Vec::<u8>::with_capacity(memory_size);
+    for idx in 0..memory_size {
+        values.push((idx % 255) as u8);
+    }
+
+    // Verify memory contents.
+    assert_eq!(region.bytes, values);
 }
