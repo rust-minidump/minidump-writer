@@ -187,3 +187,137 @@ fn test_write_with_additional_memory() {
     // Verify memory contents.
     assert_eq!(region.bytes, values);
 }
+
+#[test]
+fn test_minidump_size_limit() {
+    let num_of_threads = 40;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+
+    let mut total_normal_stack_size = 0;
+    let normal_file_size;
+    // First, write a minidump with no size limit.
+    {
+        let mut tmpfile = tempfile::Builder::new()
+            .prefix("write_dump_unlimited")
+            .tempfile()
+            .unwrap();
+
+        MinidumpWriter::new(pid, pid)
+            .dump(&mut tmpfile)
+            .expect("Could not write minidump");
+
+        let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+        assert!(meta.len() > 0);
+
+        normal_file_size = meta.len();
+
+        // Read dump file and check its contents
+        let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+        let thread_list: MinidumpThreadList =
+            dump.get_stream().expect("Couldn't find MinidumpThreadList");
+        for thread in thread_list.threads {
+            assert!(thread.raw.thread_id > 0);
+            assert!(thread.raw.stack.memory.data_size > 0);
+            total_normal_stack_size += thread.raw.stack.memory.data_size;
+        }
+    }
+
+    // Second, write a minidump with a size limit big enough to not trigger
+    // anything.
+    {
+        // Set size limit arbitrarily 1MB larger than the normal file size -- such
+        // that the limiting code will not kick in.
+        let minidump_size_limit = normal_file_size + 1024 * 1024;
+
+        let mut tmpfile = tempfile::Builder::new()
+            .prefix("write_dump_pseudolimited")
+            .tempfile()
+            .unwrap();
+
+        MinidumpWriter::new(pid, pid)
+            .set_minidump_size_limit(minidump_size_limit)
+            .dump(&mut tmpfile)
+            .expect("Could not write minidump");
+
+        let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+
+        // Make sure limiting wasn't actually triggered.  NOTE: If you fail this,
+        // first make sure that "minidump_size_limit" above is indeed set to a
+        // large enough value -- the limit-checking code in minidump_writer.rs
+        // does just a rough estimate.
+        assert_eq!(meta.len(), normal_file_size);
+    }
+
+    // Third, write a minidump with a size limit small enough to be triggered.
+    {
+        // Set size limit to some arbitrary amount, such that the limiting code
+        // will kick in.  The equation used to set this value was determined by
+        // simply reversing the size-limit logic a little bit in order to pick a
+        // size we know will trigger it.
+
+        // Copyied from sections/thread_list_stream.rs
+        const LIMIT_AVERAGE_THREAD_STACK_LENGTH: u64 = 8 * 1024;
+        let mut minidump_size_limit = LIMIT_AVERAGE_THREAD_STACK_LENGTH * 40;
+
+        // If, in reality, each of the threads' stack is *smaller* than
+        // kLimitAverageThreadStackLength, the normal file size could very well be
+        // smaller than the arbitrary limit that was just set.  In that case,
+        // either of these numbers should trigger the size-limiting code, but we
+        // might as well pick the smallest.
+        if normal_file_size < minidump_size_limit {
+            minidump_size_limit = normal_file_size;
+        }
+
+        let mut tmpfile = tempfile::Builder::new()
+            .prefix("write_dump_unlimited")
+            .tempfile()
+            .unwrap();
+
+        MinidumpWriter::new(pid, pid)
+            .set_minidump_size_limit(minidump_size_limit)
+            .dump(&mut tmpfile)
+            .expect("Could not write minidump");
+
+        let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+        assert!(meta.len() > 0);
+        // Make sure the file size is at least smaller than the original.  If this
+        // fails because it's the same size, then the size-limit logic didn't kick
+        // in like it was supposed to.
+        assert!(meta.len() < normal_file_size);
+
+        let mut total_limit_stack_size = 0;
+        // Read dump file and check its contents
+        let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+        let thread_list: MinidumpThreadList =
+            dump.get_stream().expect("Couldn't find MinidumpThreadList");
+        for thread in thread_list.threads {
+            assert!(thread.raw.thread_id > 0);
+            assert!(thread.raw.stack.memory.data_size > 0);
+            total_limit_stack_size += thread.raw.stack.memory.data_size;
+        }
+
+        // Make sure stack size shrunk by at least 1KB per extra thread.
+        // Note: The 1KB is arbitrary, and assumes that the thread stacks are big
+        // enough to shrink by that much.  For example, if each thread stack was
+        // originally only 2KB, the current size-limit logic wouldn't actually
+        // shrink them because that's the size to which it tries to shrink.  If
+        // you fail this part of the test due to something like that, the test
+        // logic should probably be improved to account for your situation.
+
+        // Copyied from sections/thread_list_stream.rs
+        const LIMIT_BASE_THREAD_COUNT: usize = 20;
+        const MIN_PER_EXTRA_THREAD_STACK_REDUCTION: usize = 1024;
+        let min_expected_reduction =
+            (40 - LIMIT_BASE_THREAD_COUNT) * MIN_PER_EXTRA_THREAD_STACK_REDUCTION;
+        assert!(total_limit_stack_size < total_normal_stack_size - min_expected_reduction as u32);
+    }
+
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+}
