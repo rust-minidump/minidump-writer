@@ -6,6 +6,7 @@ use std::io::{Cursor, Write};
 #[derive(Debug, PartialEq)]
 pub struct SectionWriter<T: Default + Sized> {
     pub position: MDRVA,
+    pub size: usize,
     phantom: std::marker::PhantomData<T>,
 }
 
@@ -17,13 +18,13 @@ where
     pub fn alloc_with_val(buffer: &mut Cursor<Vec<u8>>, val: T) -> Result<Self> {
         // Get position of this value (e.g. before we add ourselves there)
         let position = buffer.position();
-        let bytes = unsafe {
-            std::slice::from_raw_parts(&val as *const T as *const u8, std::mem::size_of::<T>())
-        };
+        let size = std::mem::size_of::<T>();
+        let bytes = unsafe { std::slice::from_raw_parts(&val as *const T as *const u8, size) };
         buffer.write_all(bytes)?;
 
         Ok(SectionWriter {
             position: position as u32,
+            size,
             phantom: std::marker::PhantomData::<T> {},
         })
     }
@@ -147,6 +148,13 @@ where
         MDLocationDescriptor {
             data_size: (self.array_size * std::mem::size_of::<T>()) as u32,
             rva: self.position,
+        }
+    }
+
+    pub fn location_of_index(&self, idx: usize) -> MDLocationDescriptor {
+        MDLocationDescriptor {
+            data_size: std::mem::size_of::<T>() as u32,
+            rva: self.position + (std::mem::size_of::<T>() * idx) as u32,
         }
     }
 }

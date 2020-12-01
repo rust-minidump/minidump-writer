@@ -24,7 +24,7 @@ fn test_write_dump() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriter::new(pid, pid)
+    let in_memory_buffer = MinidumpWriter::new(pid, pid)
         .dump(&mut tmpfile)
         .expect("Could not write minidump");
     child.kill().expect("Failed to kill process");
@@ -37,6 +37,10 @@ fn test_write_dump() {
 
     let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
     assert!(meta.len() > 0);
+
+    let mem_slice = std::fs::read(tmpfile.path()).expect("Failed to minidump");
+    assert_eq!(mem_slice.len(), in_memory_buffer.len());
+    assert_eq!(mem_slice, in_memory_buffer);
 }
 
 #[test]

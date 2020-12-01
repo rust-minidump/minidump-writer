@@ -7,9 +7,85 @@ use crate::section_writer::*;
 use crate::sections::*;
 use crate::thread_info::Pid;
 use crate::Result;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 pub type DumpBuf = Cursor<Vec<u8>>;
+
+#[derive(Debug)]
+pub struct DirSection<'a, W>
+where
+    W: Write + Seek,
+{
+    curr_idx: usize,
+    section: SectionArrayWriter<MDRawDirectory>,
+    /// If we have to append to some file, we have to know where we currently are
+    destination_start_offset: u64,
+    destination: &'a mut W,
+    last_position_written_to_file: u64,
+}
+
+impl<'a, W> DirSection<'a, W>
+where
+    W: Write + Seek,
+{
+    fn new(buffer: &mut DumpBuf, index_length: u32, destination: &'a mut W) -> Result<Self> {
+        let dir_section =
+            SectionArrayWriter::<MDRawDirectory>::alloc_array(buffer, index_length as usize)?;
+        Ok(DirSection {
+            curr_idx: 0,
+            section: dir_section,
+            destination_start_offset: destination.seek(SeekFrom::Current(0))?,
+            destination,
+            last_position_written_to_file: 0,
+        })
+    }
+
+    fn position(&self) -> u32 {
+        self.section.position
+    }
+
+    fn dump_dir_entry(&mut self, buffer: &mut DumpBuf, dirent: MDRawDirectory) -> Result<()> {
+        self.section.set_value_at(buffer, dirent, self.curr_idx)?;
+
+        // Now write it to file
+
+        // First get all the positions
+        let curr_file_pos = self.destination.seek(SeekFrom::Current(0))?;
+        let idx_pos = self.section.location_of_index(self.curr_idx);
+        self.curr_idx += 1;
+
+        self.destination.seek(std::io::SeekFrom::Start(
+            self.destination_start_offset + idx_pos.rva as u64,
+        ))?;
+        let start = idx_pos.rva as usize;
+        let end = (idx_pos.rva + idx_pos.data_size) as usize;
+        self.destination.write_all(&buffer.get_ref()[start..end])?;
+
+        // Reset file-position
+        self.destination
+            .seek(std::io::SeekFrom::Start(curr_file_pos))?;
+
+        Ok(())
+    }
+
+    /// Writes 2 things to file:
+    /// 1. The given dirent into the dir section in the header (if any is given)
+    /// 2. Everything in the in-memory buffer that was added since the last call to this function
+    fn write_to_file(
+        &mut self,
+        buffer: &mut DumpBuf,
+        dirent: Option<MDRawDirectory>,
+    ) -> Result<()> {
+        if let Some(dirent) = dirent {
+            self.dump_dir_entry(buffer, dirent)?;
+        }
+
+        let start_pos = self.last_position_written_to_file as usize;
+        self.destination.write_all(&buffer.get_ref()[start_pos..])?;
+        self.last_position_written_to_file = buffer.position();
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub struct MinidumpWriter {
@@ -73,7 +149,9 @@ impl MinidumpWriter {
         self
     }
 
-    pub fn dump(&mut self, destination: &mut impl Write) -> Result<()> {
+    /// Generates a minidump and writes to the destination provided. Returns the in-memory
+    /// version of the minidump as well.
+    pub fn dump(&mut self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>> {
         let mut dumper = LinuxPtraceDumper::new(self.process_id)?;
         dumper.suspend_threads()?;
         // TODO: Doesn't exist yet
@@ -91,22 +169,20 @@ impl MinidumpWriter {
         }
 
         let mut buffer = Cursor::new(Vec::new());
-        self.generate_dump(&mut buffer, &mut dumper)?;
-
-        // Write results to file
-        destination.write_all(buffer.get_ref())?;
+        self.generate_dump(&mut buffer, &mut dumper, destination)?;
 
         // dumper would resume threads in drop() automatically,
         // but in case there is an error, we want to catch it
         dumper.resume_threads()?;
 
-        Ok(())
+        Ok(buffer.into_inner())
     }
 
     fn generate_dump(
         &mut self,
         buffer: &mut DumpBuf,
         dumper: &mut LinuxPtraceDumper,
+        destination: &mut (impl Write + Seek),
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
         // of stream which we write.
@@ -114,15 +190,14 @@ impl MinidumpWriter {
 
         let mut header_section = SectionWriter::<MDRawHeader>::alloc(buffer)?;
 
-        let mut dir_section =
-            SectionArrayWriter::<MDRawDirectory>::alloc_array(buffer, num_writers as usize)?;
+        let mut dir_section = DirSection::new(buffer, num_writers, destination)?;
 
         let header = MDRawHeader {
             signature: MD_HEADER_SIGNATURE,
             version: MD_HEADER_VERSION,
             stream_count: num_writers,
             //   header.get()->stream_directory_rva = dir.position();
-            stream_directory_rva: dir_section.position as u32,
+            stream_directory_rva: dir_section.position(),
             checksum: 0, /* Can be 0.  In fact, that's all that's
                           * been found in minidump files. */
             time_date_stamp: std::time::SystemTime::now()
@@ -134,53 +209,55 @@ impl MinidumpWriter {
 
         // Ensure the header gets flushed. If we crash somewhere below,
         // we should have a mostly-intact dump
-        // TODO: Write header_section to file here
+        dir_section.write_to_file(buffer, None)?;
 
-        let mut dir_idx = 0;
-        let mut dirent = thread_list_stream::write(self, buffer, &dumper)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        let dirent = thread_list_stream::write(self, buffer, &dumper)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = mappings::write(self, buffer, dumper)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        let dirent = mappings::write(self, buffer, dumper)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
         let _ = app_memory::write(self, buffer)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, None)?;
 
-        dirent = memory_list_stream::write(self, buffer)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        let dirent = memory_list_stream::write(self, buffer)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
         // Currently unused
-        dirent = exception_stream::write(self, buffer)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        let dirent = exception_stream::write(self, buffer)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = systeminfo_stream::write(buffer)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        let dirent = systeminfo_stream::write(buffer)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, "/proc/cpuinfo") {
+        let dirent = match self.write_file(buffer, "/proc/cpuinfo") {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxCpuInfo as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, &format!("/proc/{}/status", self.blamed_thread)) {
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/status", self.blamed_thread))
+        {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxProcStatus as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self
+        let dirent = match self
             .write_file(buffer, "/etc/lsb-release")
             .or_else(|_| self.write_file(buffer, "/etc/os-release"))
         {
@@ -190,51 +267,54 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread)) {
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread))
+        {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxCmdLine as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread)) {
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread))
+        {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxEnviron as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxAuxv as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = match self.write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
                 stream_type: MDStreamType::LinuxMaps as u32,
                 location,
             },
             Err(_) => Default::default(),
         };
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
-        dir_idx += 1;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        dirent = dso_debug::write_dso_debug_stream(buffer, self.blamed_thread, &dumper.auxv)?;
-        dir_section.set_value_at(buffer, dirent, dir_idx)?;
+        let dirent = dso_debug::write_dso_debug_stream(buffer, self.blamed_thread, &dumper.auxv)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
 
         // If you add more directory entries, don't forget to update kNumWriters,
         // above.
