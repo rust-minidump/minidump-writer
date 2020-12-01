@@ -96,6 +96,8 @@ impl MinidumpWriter {
         // Write results to file
         destination.write_all(buffer.get_ref())?;
 
+        // dumper would resume threads in drop() automatically,
+        // but in case there is an error, we want to catch it
         dumper.resume_threads()?;
 
         Ok(())

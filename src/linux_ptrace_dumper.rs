@@ -25,6 +25,13 @@ pub struct LinuxPtraceDumper {
 
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
+impl Drop for LinuxPtraceDumper {
+    fn drop(&mut self) {
+        // Always try to resume all threads (e.g. in case of error)
+        let _ = self.resume_threads();
+    }
+}
+
 impl LinuxPtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
@@ -129,20 +136,24 @@ impl LinuxPtraceDumper {
         if self.threads.is_empty() {
             Err("No threads left".into())
         } else {
+            self.threads_suspended = true;
             Ok(())
         }
     }
 
-    pub fn resume_threads(&self) -> Result<()> {
+    pub fn resume_threads(&mut self) -> Result<()> {
         let mut result = Ok(());
-        for thread in &self.threads {
-            match Self::resume_thread(*thread) {
-                Ok(_) => {}
-                x => {
-                    result = x;
+        if self.threads_suspended {
+            for thread in &self.threads {
+                match Self::resume_thread(*thread) {
+                    Ok(_) => {}
+                    x => {
+                        result = x;
+                    }
                 }
             }
         }
+        self.threads_suspended = false;
         return result;
     }
 

@@ -99,7 +99,7 @@ fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Res
     // Now check that LinuxPtraceDumper interpreted the mappings properly.
     let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
     let mut mapping_count = 0;
-    for map in dumper.mappings {
+    for map in &dumper.mappings {
         if map.name == Some(path.clone()) {
             mapping_count += 1;
             // This mapping should encompass the entire original mapped
@@ -138,7 +138,7 @@ fn test_mappings_include_linux_gate() -> Result<()> {
     let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
     test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
     let mut found_linux_gate = false;
-    for mapping in dumper.mappings {
+    for mapping in &dumper.mappings {
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
             found_linux_gate = true;
             test!(
