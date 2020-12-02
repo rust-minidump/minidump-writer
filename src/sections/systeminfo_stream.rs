@@ -1,7 +1,7 @@
 use crate::dumper_cpu_info::{write_cpu_information, write_os_information};
 use crate::minidump_format::*;
 use crate::minidump_writer::DumpBuf;
-use crate::section_writer::*;
+use crate::sections::MemoryWriter;
 use crate::Result;
 
 pub fn write(buffer: &mut DumpBuf) -> Result<MDRawDirectory> {

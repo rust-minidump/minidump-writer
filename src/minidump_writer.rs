@@ -3,7 +3,6 @@ use crate::dso_debug;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
 use crate::minidump_format::*;
-use crate::section_writer::*;
 use crate::sections::*;
 use crate::thread_info::Pid;
 use crate::Result;

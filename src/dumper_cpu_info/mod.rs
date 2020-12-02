@@ -13,7 +13,7 @@ pub mod imp;
 pub use imp::write_cpu_information;
 
 use crate::minidump_format::{MDOSPlatform, MDRawSystemInfo};
-use crate::section_writer::write_string_to_location;
+use crate::sections::write_string_to_location;
 use crate::Result;
 use nix::sys::utsname::uname;
 use std::io::Cursor;

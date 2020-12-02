@@ -1,7 +1,7 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::section_writer::*;
+use crate::sections::MemoryArrayWriter;
 use crate::Result;
 use std::convert::TryInto;
 

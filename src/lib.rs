@@ -14,7 +14,6 @@ pub mod maps_reader;
 pub mod minidump_cpu;
 pub mod minidump_format;
 pub mod minidump_writer;
-mod section_writer;
 mod sections;
 pub mod thread_info;
 

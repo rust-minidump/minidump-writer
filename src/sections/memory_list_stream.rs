@@ -1,6 +1,6 @@
 use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::section_writer::*;
+use crate::sections::{MemoryArrayWriter, MemoryWriter};
 use crate::Result;
 
 pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {

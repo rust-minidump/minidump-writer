@@ -1,7 +1,7 @@
 use crate::auxv_reader::AuxvType;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_format::*;
-use crate::section_writer::*;
+use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
 use crate::Result;
 use libc;
 use std::collections::HashMap;
