@@ -4,13 +4,13 @@ use std::convert::TryInto;
 use std::io::{Cursor, Write};
 
 #[derive(Debug, PartialEq)]
-pub struct SectionWriter<T: Default + Sized> {
+pub struct MemoryWriter<T: Default + Sized> {
     pub position: MDRVA,
     pub size: usize,
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> SectionWriter<T>
+impl<T> MemoryWriter<T>
 where
     T: Default + Sized,
 {
@@ -22,7 +22,7 @@ where
         let bytes = unsafe { std::slice::from_raw_parts(&val as *const T as *const u8, size) };
         buffer.write_all(bytes)?;
 
-        Ok(SectionWriter {
+        Ok(MemoryWriter {
             position: position as u32,
             size,
             phantom: std::marker::PhantomData::<T> {},
@@ -68,13 +68,13 @@ where
 }
 
 #[derive(Debug, PartialEq)]
-pub struct SectionArrayWriter<T: Default + Sized> {
+pub struct MemoryArrayWriter<T: Default + Sized> {
     pub position: MDRVA,
     array_size: usize,
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> SectionArrayWriter<T>
+impl<T> MemoryArrayWriter<T>
 where
     T: Default + Sized,
 {
@@ -89,7 +89,7 @@ where
             buffer.write_all(bytes)?;
         }
 
-        Ok(SectionArrayWriter {
+        Ok(MemoryArrayWriter {
             position: position as u32,
             array_size: array.len(),
             phantom: std::marker::PhantomData::<T> {},
@@ -111,7 +111,7 @@ where
             buffer.write_all(bytes)?;
         }
 
-        Ok(SectionArrayWriter {
+        Ok(MemoryArrayWriter {
             position: position as u32,
             array_size,
             phantom: std::marker::PhantomData::<T> {},
@@ -166,13 +166,13 @@ pub fn write_string_to_location(
     let letters: Vec<u16> = text.encode_utf16().collect();
 
     // First write size of the string (x letters in u16, times the size of u16)
-    let text_header = SectionWriter::<u32>::alloc_with_val(
+    let text_header = MemoryWriter::<u32>::alloc_with_val(
         buffer,
         (letters.len() * std::mem::size_of::<u16>()).try_into()?,
     )?;
 
     // Then write utf-16 letters after that
-    let mut text_section = SectionArrayWriter::<u16>::alloc_array(buffer, letters.len())?;
+    let mut text_section = MemoryArrayWriter::<u16>::alloc_array(buffer, letters.len())?;
     for (index, letter) in letters.iter().enumerate() {
         text_section.set_value_at(buffer, *letter, index)?;
     }

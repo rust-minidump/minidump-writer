@@ -17,7 +17,7 @@ where
     W: Write + Seek,
 {
     curr_idx: usize,
-    section: SectionArrayWriter<MDRawDirectory>,
+    section: MemoryArrayWriter<MDRawDirectory>,
     /// If we have to append to some file, we have to know where we currently are
     destination_start_offset: u64,
     destination: &'a mut W,
@@ -30,7 +30,7 @@ where
 {
     fn new(buffer: &mut DumpBuf, index_length: u32, destination: &'a mut W) -> Result<Self> {
         let dir_section =
-            SectionArrayWriter::<MDRawDirectory>::alloc_array(buffer, index_length as usize)?;
+            MemoryArrayWriter::<MDRawDirectory>::alloc_array(buffer, index_length as usize)?;
         Ok(DirSection {
             curr_idx: 0,
             section: dir_section,
@@ -188,7 +188,7 @@ impl MinidumpWriter {
         // of stream which we write.
         let num_writers = 13u32;
 
-        let mut header_section = SectionWriter::<MDRawHeader>::alloc(buffer)?;
+        let mut header_section = MemoryWriter::<MDRawHeader>::alloc(buffer)?;
 
         let mut dir_section = DirSection::new(buffer, num_writers, destination)?;
 
@@ -332,7 +332,7 @@ impl MinidumpWriter {
         let mut content = Vec::new();
         file.read_to_end(&mut content)?;
 
-        let section = SectionArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
+        let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
         Ok(section.location())
     }
 }

@@ -33,14 +33,14 @@ pub fn write(
     // Memory looks like this:
     // <num_threads><thread_1><thread_2>...
 
-    let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
+    let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
 
     let mut dirent = MDRawDirectory {
         stream_type: MDStreamType::ThreadListStream as u32,
         location: list_header.location(),
     };
 
-    let mut thread_list = SectionArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
+    let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
     dirent.location.data_size += thread_list.location().data_size;
     // If there's a minidump size limit, check if it might be exceeded.  Since
     // most of the space is filled with stack data, just check against that.
@@ -82,10 +82,10 @@ pub fn write(
 
             fill_thread_stack(config, buffer, dumper, &mut thread, &info, max_stack_len)?;
 
-            // let cpu = SectionWriter::<RawContextCPU>::alloc(buffer)?;
+            // let cpu = MemoryWriter::<RawContextCPU>::alloc(buffer)?;
             let mut cpu = RawContextCPU::default();
             info.fill_cpu_context(&mut cpu);
-            let cpu_section = SectionWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
+            let cpu_section = MemoryWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
             thread.thread_context = cpu_section.location();
             // if item == &self.blamed_thread {
             //     // This is the crashing thread of a live process, but

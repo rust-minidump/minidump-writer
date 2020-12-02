@@ -5,7 +5,7 @@ use crate::section_writer::*;
 use crate::Result;
 
 pub fn write(buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
-    let mut info_section = SectionWriter::<MDRawSystemInfo>::alloc(buffer)?;
+    let mut info_section = MemoryWriter::<MDRawSystemInfo>::alloc(buffer)?;
     let dirent = MDRawDirectory {
         stream_type: MDStreamType::SystemInfoStream as u32,
         location: info_section.location(),

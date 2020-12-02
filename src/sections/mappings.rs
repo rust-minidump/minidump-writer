@@ -25,7 +25,7 @@ pub fn write(
         }
     }
 
-    let list_header = SectionWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
+    let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
 
     let mut dirent = MDRawDirectory {
         stream_type: MDStreamType::ModuleListStream as u32,
@@ -34,7 +34,7 @@ pub fn write(
 
     // In case of num_output_mappings == 0, this call doesn't allocate any memory in the buffer
     let mut mapping_list =
-        SectionArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
+        MemoryArrayWriter::<MDRawModule>::alloc_array(buffer, num_output_mappings)?;
     dirent.location.data_size += mapping_list.location().data_size;
 
     // First write all the mappings from the dumper
@@ -77,7 +77,7 @@ fn fill_raw_module(
         let cv_signature = MD_CVINFOELF_SIGNATURE;
         let array_size = std::mem::size_of_val(&cv_signature) + identifier.len();
 
-        let mut sig_section = SectionArrayWriter::<u8>::alloc_array(buffer, array_size)?;
+        let mut sig_section = MemoryArrayWriter::<u8>::alloc_array(buffer, array_size)?;
         for (index, val) in cv_signature
             .to_ne_bytes()
             .iter()

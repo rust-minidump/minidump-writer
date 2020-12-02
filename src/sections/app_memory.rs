@@ -14,7 +14,7 @@ pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<()> {
             app_memory.length.try_into()?,
         )?;
 
-        let section = SectionArrayWriter::<u8>::alloc_from_array(buffer, &data_copy)?;
+        let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &data_copy)?;
         let desc = MDMemoryDescriptor {
             start_of_memory_range: app_memory.ptr as u64,
             memory: section.location(),

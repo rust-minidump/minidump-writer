@@ -188,7 +188,7 @@ pub fn write_dso_debug_stream(
     if dso_vec.len() > 0 {
         // If we have at least one DSO, create an array of MDRawLinkMap
         // entries in the minidump file.
-        let mut linkmap = SectionArrayWriter::<MDRawLinkMap>::alloc_array(buffer, dso_vec.len())?;
+        let mut linkmap = MemoryArrayWriter::<MDRawLinkMap>::alloc_array(buffer, dso_vec.len())?;
         linkmap_rva = linkmap.location().rva;
 
         // Iterate over DSOs and write their information to mini dump
@@ -226,7 +226,7 @@ pub fn write_dso_debug_stream(
         ldbase: debug_entry.r_ldbase,
         dynamic: dyn_addr,
     };
-    let debug_loc = SectionWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
+    let debug_loc = MemoryWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
 
     let mut dirent = MDRawDirectory {
         stream_type: MDStreamType::LinuxDsoDebug as u32,
@@ -239,7 +239,7 @@ pub fn write_dso_debug_stream(
         dyn_addr as *mut libc::c_void,
         dynamic_length as isize,
     )?;
-    SectionArrayWriter::<u8>::alloc_from_array(buffer, &dso_debug_data)?;
+    MemoryArrayWriter::<u8>::alloc_from_array(buffer, &dso_debug_data)?;
 
     Ok(dirent)
 }

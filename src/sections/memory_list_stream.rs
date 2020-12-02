@@ -5,7 +5,7 @@ use crate::Result;
 
 pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
     let list_header =
-        SectionWriter::<u32>::alloc_with_val(buffer, config.memory_blocks.len() as u32)?;
+        MemoryWriter::<u32>::alloc_with_val(buffer, config.memory_blocks.len() as u32)?;
 
     let mut dirent = MDRawDirectory {
         stream_type: MDStreamType::MemoryListStream as u32,
@@ -13,7 +13,7 @@ pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawD
     };
 
     let block_list =
-        SectionArrayWriter::<MDMemoryDescriptor>::alloc_from_array(buffer, &config.memory_blocks)?;
+        MemoryArrayWriter::<MDMemoryDescriptor>::alloc_from_array(buffer, &config.memory_blocks)?;
 
     dirent.location.data_size += block_list.location().data_size;
 

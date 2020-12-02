@@ -4,7 +4,7 @@ use crate::section_writer::*;
 use crate::Result;
 
 pub fn write(_config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
-    let exc = SectionWriter::<MDRawExceptionStream>::alloc(buffer)?;
+    let exc = MemoryWriter::<MDRawExceptionStream>::alloc(buffer)?;
     let dirent = MDRawDirectory {
         stream_type: MDStreamType::ExceptionStream as u32,
         location: exc.location(),
