@@ -1,6 +1,7 @@
 use minidump_writer_linux::linux_ptrace_dumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
+use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
 
@@ -176,4 +177,107 @@ fn test_copy_from_process_self() {
             &format!("{}", heap_var.as_ref() as *const libc::c_long as usize),
         ],
     );
+}
+
+#[test]
+fn test_sanitize_stack_copy() {
+    let num_of_threads = 1;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+    let mut dumper =
+        linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
+    assert_eq!(dumper.threads.len(), num_of_threads);
+    dumper.suspend_threads().expect("Could not suspend threads");
+    let thread_info = dumper
+        .get_thread_info_by_index(0)
+        .expect("Couldn't find thread_info");
+
+    let defaced = if cfg!(target_pointer_width = "64") {
+        0x0defaced0defacedusize.to_ne_bytes()
+    } else {
+        0x0defacedusize.to_ne_bytes()
+    };
+
+    let mut simulated_stack = vec![0xffu8; 2 * size_of::<usize>()];
+    // Pointers into the stack shouldn't be sanitized.
+    simulated_stack[size_of::<usize>()..].copy_from_slice(&thread_info.stack_pointer.to_ne_bytes());
+
+    dumper
+        .sanitize_stack_copy(
+            &mut simulated_stack,
+            thread_info.stack_pointer,
+            size_of::<usize>(),
+        )
+        .expect("Could not sanitize stack");
+
+    assert!(simulated_stack[size_of::<usize>()..] != defaced);
+    // Memory prior to the stack pointer should be cleared.
+    assert_eq!(
+        &simulated_stack[0..size_of::<usize>()],
+        vec![0u8; size_of::<usize>()].as_slice()
+    );
+
+    // Small integers should not be sanitized.
+    for ii in -4096..=4096isize {
+        simulated_stack = vec![0u8; 2 * size_of::<usize>()];
+        simulated_stack[0..size_of::<usize>()].copy_from_slice(&(ii as usize).to_ne_bytes());
+        dumper
+            .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+            .expect("Failed to sanitize with small integers");
+        assert!(simulated_stack[size_of::<usize>()..] != defaced);
+    }
+
+    // The instruction pointer definitely should point into an executable mapping.
+    let instr_ptr = thread_info.get_instruction_pointer() as usize;
+    let mapping_info = dumper
+        .find_mapping_no_bias(instr_ptr)
+        .expect("Failed to find mapping info");
+    assert!(mapping_info.executable);
+
+    // Pointers to code shouldn't be sanitized.
+    simulated_stack = vec![0u8; 2 * size_of::<usize>()];
+    simulated_stack[size_of::<usize>()..].copy_from_slice(&instr_ptr.to_ne_bytes());
+    dumper
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .expect("Failed to sanitize with instr_ptr");
+    assert!(simulated_stack[0..size_of::<usize>()] != defaced);
+
+    // String fragments should be sanitized.
+    let junk = "abcdefghijklmnop".as_bytes();
+    simulated_stack.copy_from_slice(&junk[0..2 * size_of::<usize>()]);
+    dumper
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .expect("Failed to sanitize with junk");
+    assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
+    assert_eq!(simulated_stack[size_of::<usize>()..], defaced);
+
+    // Heap pointers should be sanititzed.
+    #[cfg(target_arch = "x86_64")]
+    let heap_addr = thread_info.regs.rcx;
+    #[cfg(target_arch = "x86")]
+    let heap_addr = thread_info.regs.ecx;
+    #[cfg(target_arch = "arm")]
+    let heap_addr = thread_info.regs.uregs[3];
+    #[cfg(target_arch = "aarch64")]
+    let heap_addr = thread_info.regs.regs[3];
+    #[cfg(target_arch = "mips")]
+    let heap_addr = thread_info.mcontext.gregs[1];
+
+    simulated_stack = vec![0u8; 2 * size_of::<usize>()];
+    simulated_stack[0..size_of::<usize>()].copy_from_slice(&((heap_addr as usize).to_ne_bytes()));
+    dumper
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .expect("Failed to sanitize with heap addr");
+
+    // TOOD: Heap addresses seem to not be defaced at the moment!
+    assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
+
+    dumper.resume_threads().expect("Failed to resume threads");
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
 }

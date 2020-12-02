@@ -280,6 +280,110 @@ impl LinuxPtraceDumper {
         Ok((stack_pointer, stack_len))
     }
 
+    pub fn sanitize_stack_copy(
+        &self,
+        stack_copy: &mut [u8],
+        stack_pointer: usize,
+        sp_offset: usize,
+    ) -> Result<()> {
+        // We optimize the search for containing mappings in three ways:
+        // 1) We expect that pointers into the stack mapping will be common, so
+        //    we cache that address range.
+        // 2) The last referenced mapping is a reasonable predictor for the next
+        //    referenced mapping, so we test that first.
+        // 3) We precompute a bitfield based upon bits 32:32-n of the start and
+        //    stop addresses, and use that to short circuit any values that can
+        //    not be pointers. (n=11)
+        let defaced = if cfg!(target_pointer_width = "64") {
+            0x0defaced0defacedusize.to_ne_bytes()
+        } else {
+            0x0defacedusize.to_ne_bytes()
+        };
+        // the bitfield length is 2^test_bits long.
+        let test_bits = 11;
+        // byte length of the corresponding array.
+        let array_size = 1 << (test_bits - 3);
+        let array_mask = array_size - 1;
+        // The amount to right shift pointers by. This captures the top bits
+        // on 32 bit architectures. On 64 bit architectures this would be
+        // uninformative so we take the same range of bits.
+        let shift = 32 - 11;
+        // let MappingInfo* last_hit_mapping = nullptr;
+        // let MappingInfo* hit_mapping = nullptr;
+        let stack_mapping = self.find_mapping_no_bias(stack_pointer);
+        let mut last_hit_mapping: Option<&MappingInfo> = None;
+        // The magnitude below which integers are considered to be to be
+        // 'small', and not constitute a PII risk. These are included to
+        // avoid eliding useful register values.
+        let small_int_magnitude: isize = 4096;
+
+        let mut could_hit_mapping = vec![0; array_size];
+        // Initialize the bitfield such that if the (pointer >> shift)'th
+        // bit, modulo the bitfield size, is not set then there does not
+        // exist a mapping in mappings_ that would contain that pointer.
+        for mapping in &self.mappings {
+            if !mapping.executable {
+                continue;
+            }
+            // For each mapping, work out the (unmodulo'ed) range of bits to
+            // set.
+            let mut start = mapping.start_address;
+            let mut end = start + mapping.size;
+            start >>= shift;
+            end >>= shift;
+            for bit in start..=end {
+                // Set each bit in the range, applying the modulus.
+                could_hit_mapping[(bit >> 3) & array_mask] |= 1 << (bit & 7);
+            }
+        }
+
+        // Zero memory that is below the current stack pointer.
+        let offset =
+            (sp_offset + std::mem::size_of::<usize>() - 1) & !(std::mem::size_of::<usize>() - 1);
+        for x in &mut stack_copy[0..offset] {
+            *x = 0;
+        }
+
+        let mut chunks = stack_copy[offset..].chunks_exact_mut(std::mem::size_of::<usize>());
+        // Apply sanitization to each complete pointer-aligned word in the
+        // stack.
+        for sp in &mut chunks {
+            let addr = usize::from_ne_bytes(sp.to_vec().as_slice().try_into()?);
+            let addr_signed = isize::from_ne_bytes(sp.to_vec().as_slice().try_into()?);
+
+            if addr <= small_int_magnitude as usize && addr_signed >= -small_int_magnitude {
+                continue;
+            }
+
+            if let Some(stack_map) = stack_mapping {
+                if stack_map.contains_address(addr) {
+                    continue;
+                }
+            }
+            if let Some(last_hit) = last_hit_mapping {
+                if last_hit.contains_address(addr) {
+                    continue;
+                }
+            }
+            let test = addr >> shift;
+            if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
+                if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
+                    if hit_mapping.executable {
+                        last_hit_mapping = Some(hit_mapping);
+                        continue;
+                    }
+                }
+            }
+            sp.copy_from_slice(&defaced);
+        }
+        // Zero any partial word at the top of the stack, if alignment is
+        // such that that is required.
+        for sp in chunks.into_remainder() {
+            *sp = 0;
+        }
+        Ok(())
+    }
+
     // Find the mapping which the given memory address falls in.
     pub fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
         for map in &self.mappings {

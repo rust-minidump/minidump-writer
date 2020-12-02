@@ -430,3 +430,50 @@ fn test_skip_if_requested() {
 
     assert!(res.is_err());
 }
+
+#[test]
+fn test_sanitized_stacks() {
+    let num_of_threads = 1;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("skip_if_requested")
+        .tempfile()
+        .unwrap();
+
+    MinidumpWriter::new(pid, pid)
+        .sanitize_stack()
+        .dump(&mut tmpfile)
+        .expect("Faild to dump minidump");
+    child.kill().expect("Failed to kill process");
+
+    // Reap child
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+
+    // Read dump file and check its contents
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let dump_array = std::fs::read(tmpfile.path()).expect("Failed to read minidump as vec");
+    let thread_list: MinidumpThreadList =
+        dump.get_stream().expect("Couldn't find MinidumpThreadList");
+
+    let defaced = if cfg!(target_pointer_width = "64") {
+        0x0defaced0defacedusize.to_ne_bytes()
+    } else {
+        0x0defacedusize.to_ne_bytes()
+    };
+
+    for thread in thread_list.threads {
+        let mem = thread.raw.stack.memory;
+        let start = mem.rva as usize;
+        let end = (mem.rva + mem.data_size) as usize;
+        let slice = &dump_array.as_slice()[start..end];
+        assert!(slice
+            .windows(defaced.len())
+            .position(|window| window == defaced)
+            .is_some());
+    }
+}

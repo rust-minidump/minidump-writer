@@ -331,6 +331,11 @@ impl MappingInfo {
         // big enough to get a signature for.
         self.size >= 4096
     }
+
+    pub fn contains_address(&self, address: usize) -> bool {
+        self.system_mapping_info.start_address <= address
+            && address < self.system_mapping_info.end_address
+    }
 }
 
 #[cfg(test)]

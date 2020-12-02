@@ -127,7 +127,7 @@ fn fill_thread_stack(
                 }
             }
         }
-        let stack_bytes = LinuxPtraceDumper::copy_from_process(
+        let mut stack_bytes = LinuxPtraceDumper::copy_from_process(
             thread.thread_id.try_into()?,
             stack as *mut libc::c_void,
             stack_len.try_into()?,
@@ -148,10 +148,14 @@ fn fill_thread_stack(
             }
         }
 
-        //     if self.sanitize_stacks {
-        //       self.dumper.SanitizeStackCopy(&stack_bytes, stack_pointer,
-        //                                  stack_pointer_offset);
-        //     }
+        if config.sanitize_stack {
+            dumper.sanitize_stack_copy(
+                &mut stack_bytes,
+                info.stack_pointer,
+                stack_pointer_offset,
+            )?;
+        }
+
         let stack_location = MDLocationDescriptor {
             data_size: stack_bytes.len() as u32,
             rva: buffer.position() as u32,

@@ -97,6 +97,7 @@ pub struct MinidumpWriter {
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
     pub principal_mapping: Option<MappingInfo>,
+    pub sanitize_stack: bool,
 }
 
 // This doesn't work yet:
@@ -120,6 +121,7 @@ impl MinidumpWriter {
             app_memory: AppMemoryList::new(),
             memory_blocks: Vec::new(),
             principal_mapping: None,
+            sanitize_stack: false,
         }
     }
 
@@ -145,6 +147,11 @@ impl MinidumpWriter {
 
     pub fn skip_stacks_if_mapping_unreferenced(&mut self) -> &mut Self {
         self.skip_stacks_if_mapping_unreferenced = true; // Off by default
+        self
+    }
+
+    pub fn sanitize_stack(&mut self) -> &mut Self {
+        self.sanitize_stack = true; // Off by default
         self
     }
 
