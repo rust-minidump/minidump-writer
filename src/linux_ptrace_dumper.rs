@@ -320,7 +320,7 @@ impl LinuxPtraceDumper {
         let mut could_hit_mapping = vec![0; array_size];
         // Initialize the bitfield such that if the (pointer >> shift)'th
         // bit, modulo the bitfield size, is not set then there does not
-        // exist a mapping in mappings_ that would contain that pointer.
+        // exist a mapping in mappings that would contain that pointer.
         for mapping in &self.mappings {
             if !mapping.executable {
                 continue;
@@ -343,8 +343,8 @@ impl LinuxPtraceDumper {
         for x in &mut stack_copy[0..offset] {
             *x = 0;
         }
-
         let mut chunks = stack_copy[offset..].chunks_exact_mut(std::mem::size_of::<usize>());
+
         // Apply sanitization to each complete pointer-aligned word in the
         // stack.
         for sp in &mut chunks {
@@ -365,6 +365,7 @@ impl LinuxPtraceDumper {
                     continue;
                 }
             }
+
             let test = addr >> shift;
             if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
                 if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {

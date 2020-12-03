@@ -1,6 +1,7 @@
 use minidump_writer_linux::linux_ptrace_dumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
+use std::io::{BufRead, BufReader};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
@@ -182,8 +183,18 @@ fn test_copy_from_process_self() {
 #[test]
 fn test_sanitize_stack_copy() {
     let num_of_threads = 1;
-    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let mut child = start_child_and_return("spawn_alloc_wait");
     let pid = child.id() as i32;
+
+    let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+    let mut buf = String::new();
+    let _ = f
+        .read_line(&mut buf)
+        .expect("Couldn't read address provided by child");
+    let mut output = buf.split_whitespace();
+    let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
+        .expect("unable to parse mmap_addr");
+
     let mut dumper =
         linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
@@ -241,6 +252,7 @@ fn test_sanitize_stack_copy() {
         .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
         .expect("Failed to sanitize with instr_ptr");
     assert!(simulated_stack[0..size_of::<usize>()] != defaced);
+    assert!(simulated_stack[size_of::<usize>()..] != defaced);
 
     // String fragments should be sanitized.
     let junk = "abcdefghijklmnop".as_bytes();
@@ -252,24 +264,29 @@ fn test_sanitize_stack_copy() {
     assert_eq!(simulated_stack[size_of::<usize>()..], defaced);
 
     // Heap pointers should be sanititzed.
-    #[cfg(target_arch = "x86_64")]
-    let heap_addr = thread_info.regs.rcx;
-    #[cfg(target_arch = "x86")]
-    let heap_addr = thread_info.regs.ecx;
-    #[cfg(target_arch = "arm")]
-    let heap_addr = thread_info.regs.uregs[3];
-    #[cfg(target_arch = "aarch64")]
-    let heap_addr = thread_info.regs.regs[3];
-    #[cfg(target_arch = "mips")]
-    let heap_addr = thread_info.mcontext.gregs[1];
+
+    // NOTE: The original test used the heap-address below, but here thread_info.regs.rcx
+    //       is the instruction pointer, and thus in direct conflict with the "instruction pointer"
+    //       testcase.
+    //       Instead we just allocate something on the heap in the child and pass that address to this test.
+    // #[cfg(target_arch = "x86_64")]
+    // let heap_addr = thread_info.regs.rcx as usize;
+    // #[cfg(target_arch = "x86")]
+    // let heap_addr = thread_info.regs.ecx as usize;
+    // #[cfg(target_arch = "arm")]
+    // let heap_addr = thread_info.regs.uregs[3] as usize;
+    // #[cfg(target_arch = "aarch64")]
+    // let heap_addr = thread_info.regs.regs[3] as usize;
+    // #[cfg(target_arch = "mips")]
+    // let heap_addr = thread_info.mcontext.gregs[1] as usize;
 
     simulated_stack = vec![0u8; 2 * size_of::<usize>()];
-    simulated_stack[0..size_of::<usize>()].copy_from_slice(&((heap_addr as usize).to_ne_bytes()));
+
+    simulated_stack[0..size_of::<usize>()].copy_from_slice(&heap_addr.to_ne_bytes());
     dumper
         .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
         .expect("Failed to sanitize with heap addr");
 
-    // TOOD: Heap addresses seem to not be defaced at the moment!
     assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
 
     dumper.resume_threads().expect("Failed to resume threads");
