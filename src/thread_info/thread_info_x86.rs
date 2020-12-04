@@ -13,7 +13,6 @@ use std::convert::TryInto;
 
 const NUM_DEBUG_REGISTERS: usize = 8;
 
-#[derive(Debug)]
 pub struct ThreadInfoX86 {
     pub stack_pointer: usize,
     pub tgid: Pid, // thread group id

@@ -83,7 +83,7 @@ impl LinuxPtraceDumper {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
                 Err(nix::Error::Sys(Errno::EINTR)) => {
-                    ptrace::detach(pid, None)?;
+                    ptrace::detach(pid)?;
                     return Err(format!("Failed to attach to: {:?}. Got EINTR.", pid).into());
                 }
                 Err(_) => continue,
@@ -112,7 +112,7 @@ impl LinuxPtraceDumper {
                 skip_thread = true;
             }
             if skip_thread {
-                ptrace::detach(pid, None)?;
+                ptrace::detach(pid)?;
                 return Err(format!("Skipped thread {:?} due to it being part of the seccomp sandbox's trusted code", child).into());
             }
         }
@@ -122,7 +122,7 @@ impl LinuxPtraceDumper {
     /// Resumes a thread by detaching from it.
     pub fn resume_thread(child: Pid) -> Result<()> {
         let pid = nix::unistd::Pid::from_raw(child);
-        ptrace::detach(pid, None)?;
+        ptrace::detach(pid)?;
         Ok(())
     }
 
