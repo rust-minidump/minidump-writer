@@ -1,4 +1,5 @@
 use crate::app_memory::AppMemoryList;
+use crate::crash_context::CrashContext;
 use crate::dso_debug;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
@@ -86,7 +87,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct MinidumpWriter {
     pub process_id: Pid,
     pub blamed_thread: Pid,
@@ -98,6 +98,7 @@ pub struct MinidumpWriter {
     pub memory_blocks: Vec<MDMemoryDescriptor>,
     pub principal_mapping: Option<MappingInfo>,
     pub sanitize_stack: bool,
+    pub crash_context: Option<CrashContext>,
 }
 
 // This doesn't work yet:
@@ -122,6 +123,7 @@ impl MinidumpWriter {
             memory_blocks: Vec::new(),
             principal_mapping: None,
             sanitize_stack: false,
+            crash_context: None,
         }
     }
 
@@ -142,6 +144,11 @@ impl MinidumpWriter {
 
     pub fn set_app_memory(&mut self, app_memory: AppMemoryList) -> &mut Self {
         self.app_memory = app_memory;
+        self
+    }
+
+    pub fn set_crash_context(&mut self, crash_context: CrashContext) -> &mut Self {
+        self.crash_context = Some(crash_context);
         self
     }
 
@@ -167,10 +174,9 @@ impl MinidumpWriter {
             if let Some(address) = self.principal_mapping_address {
                 self.principal_mapping = dumper.find_mapping_no_bias(address).cloned();
             }
-            // This is currently always false, as we don't yet support ucontext.
-            //if (!CrashingThreadReferencesPrincipalMapping())
-            if true {
-                return Err("!CrashingThreadReferencesPrincipalMapping".into());
+
+            if !self.crash_thread_references_principal_mapping(&dumper) {
+                return Err("!crash_thread_references_principal_mapping".into());
             }
         }
 
@@ -182,6 +188,59 @@ impl MinidumpWriter {
         dumper.resume_threads()?;
 
         Ok(buffer.into_inner())
+    }
+
+    fn crash_thread_references_principal_mapping(&self, dumper: &LinuxPtraceDumper) -> bool {
+        if self.crash_context.is_none() || self.principal_mapping.is_none() {
+            return false;
+        }
+
+        let low_addr = self
+            .principal_mapping
+            .as_ref()
+            .unwrap()
+            .system_mapping_info
+            .start_address;
+        let high_addr = self
+            .principal_mapping
+            .as_ref()
+            .unwrap()
+            .system_mapping_info
+            .end_address;
+
+        let pc = self
+            .crash_context
+            .as_ref()
+            .unwrap()
+            .get_instruction_pointer();
+        let stack_pointer = self.crash_context.as_ref().unwrap().get_stack_pointer();
+
+        if pc >= low_addr as libc::greg_t && pc < high_addr as libc::greg_t {
+            return true;
+        }
+
+        let (stack_ptr, stack_len) = match dumper.get_stack_info(stack_pointer as usize) {
+            Ok(x) => x,
+            Err(_) => {
+                return false;
+            }
+        };
+        let stack_copy = match LinuxPtraceDumper::copy_from_process(
+            self.blamed_thread,
+            stack_ptr as *mut libc::c_void,
+            stack_len as isize,
+        ) {
+            Ok(x) => x,
+            Err(_) => {
+                return false;
+            }
+        };
+
+        let sp_offset = stack_pointer as usize - stack_ptr;
+        self.principal_mapping
+            .as_ref()
+            .unwrap()
+            .stack_has_pointer_to_mapping(&stack_copy, sp_offset)
     }
 
     fn generate_dump(

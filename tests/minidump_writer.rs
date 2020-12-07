@@ -1,9 +1,12 @@
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer_linux::app_memory::AppMemory;
+use minidump_writer_linux::crash_context::{fpstate_t, CrashContext};
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
+use minidump_writer_linux::Result;
+use nix::errno::Errno;
 use nix::sys::signal::Signal;
 use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
@@ -405,6 +408,13 @@ fn test_with_deleted_binary() {
     );
 }
 
+fn get_ucontext() -> Result<libc::ucontext_t> {
+    let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
+    let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
+    Errno::result(res)?;
+    unsafe { Ok(context.assume_init()) }
+}
+
 #[test]
 fn test_skip_if_requested() {
     let num_of_threads = 1;
@@ -416,9 +426,20 @@ fn test_skip_if_requested() {
         .tempfile()
         .unwrap();
 
+    let context = get_ucontext().expect("Failed to get ucontext");
+    let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let float_state: fpstate_t = unsafe { std::mem::zeroed() };
+    let crash_context = CrashContext {
+        siginfo: siginfo,
+        tid: pid,
+        context,
+        float_state: float_state,
+    };
+
     let res = MinidumpWriter::new(pid, pid)
         .skip_stacks_if_mapping_unreferenced()
         .set_principal_mapping_address(0x0102030405060708)
+        .set_crash_context(crash_context)
         .dump(&mut tmpfile);
     child.kill().expect("Failed to kill process");
 
