@@ -5,6 +5,7 @@ use minidump_writer_linux::crash_context::{fpstate_t, CrashContext};
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
+use minidump_writer_linux::thread_info::Pid;
 use minidump_writer_linux::Result;
 use nix::errno::Errno;
 use nix::sys::signal::Signal;
@@ -16,8 +17,32 @@ use std::str::FromStr;
 mod common;
 use common::*;
 
-#[test]
-fn test_write_dump() {
+#[derive(Debug, PartialEq)]
+enum Context {
+    With,
+    Without,
+}
+
+fn get_ucontext() -> Result<libc::ucontext_t> {
+    let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
+    let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
+    Errno::result(res)?;
+    unsafe { Ok(context.assume_init()) }
+}
+
+fn get_crash_context(tid: Pid) -> CrashContext {
+    let context = get_ucontext().expect("Failed to get ucontext");
+    let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let float_state: fpstate_t = unsafe { std::mem::zeroed() };
+    CrashContext {
+        siginfo,
+        tid,
+        context,
+        float_state,
+    }
+}
+
+fn test_write_dump_helper(context: Context) {
     let num_of_threads = 3;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
@@ -27,9 +52,12 @@ fn test_write_dump() {
         .tempfile()
         .unwrap();
 
-    let in_memory_buffer = MinidumpWriter::new(pid, pid)
-        .dump(&mut tmpfile)
-        .expect("Could not write minidump");
+    let mut tmp = MinidumpWriter::new(pid, pid);
+    if context == Context::With {
+        let crash_context = get_crash_context(pid);
+        tmp.set_crash_context(crash_context);
+    }
+    let in_memory_buffer = tmp.dump(&mut tmpfile).expect("Could not write minidump");
     child.kill().expect("Failed to kill process");
 
     // Reap child
@@ -45,9 +73,16 @@ fn test_write_dump() {
     assert_eq!(mem_slice.len(), in_memory_buffer.len());
     assert_eq!(mem_slice, in_memory_buffer);
 }
-
 #[test]
-fn test_write_and_read_dump_from_parent() {
+fn test_write_dump() {
+    test_write_dump_helper(Context::Without)
+}
+#[test]
+fn test_write_dump_with_context() {
+    test_write_dump_helper(Context::With)
+}
+
+fn test_write_and_read_dump_from_parent_helper(context: Context) {
     let mut child = start_child_and_return("spawn_mmap_wait");
     let pid = child.id() as i32;
 
@@ -85,8 +120,14 @@ fn test_write_and_read_dump_from_parent() {
         mapping,
         identifier,
     };
-    MinidumpWriter::new(pid, pid)
-        .set_user_mapping_list(vec![entry])
+
+    let mut tmp = MinidumpWriter::new(pid, pid);
+    if context == Context::With {
+        let crash_context = get_crash_context(pid);
+        tmp.set_crash_context(crash_context);
+    }
+
+    tmp.set_user_mapping_list(vec![entry])
         .dump(&mut tmpfile)
         .expect("Could not write minidump");
 
@@ -139,9 +180,16 @@ fn test_write_and_read_dump_from_parent() {
         .get_raw_stream(LinuxDsoDebug)
         .expect("Couldn't find LinuxDsoDebug");
 }
-
 #[test]
-fn test_write_with_additional_memory() {
+fn test_write_and_read_dump_from_parent() {
+    test_write_and_read_dump_from_parent_helper(Context::Without)
+}
+#[test]
+fn test_write_and_read_dump_from_parent_with_context() {
+    test_write_and_read_dump_from_parent_helper(Context::With)
+}
+
+fn test_write_with_additional_memory_helper(context: Context) {
     let mut child = start_child_and_return("spawn_alloc_wait");
     let pid = child.id() as i32;
 
@@ -165,8 +213,13 @@ fn test_write_with_additional_memory() {
         length: memory_size,
     };
 
-    MinidumpWriter::new(pid, pid)
-        .set_app_memory(vec![app_memory])
+    let mut tmp = MinidumpWriter::new(pid, pid);
+    if context == Context::With {
+        let crash_context = get_crash_context(pid);
+        tmp.set_crash_context(crash_context);
+    }
+
+    tmp.set_app_memory(vec![app_memory])
         .dump(&mut tmpfile)
         .expect("Could not write minidump");
 
@@ -195,6 +248,14 @@ fn test_write_with_additional_memory() {
 
     // Verify memory contents.
     assert_eq!(region.bytes, values);
+}
+#[test]
+fn test_write_with_additional_memory() {
+    test_write_with_additional_memory_helper(Context::Without)
+}
+#[test]
+fn test_write_with_additional_memory_with_context() {
+    test_write_with_additional_memory_helper(Context::With)
 }
 
 #[test]
@@ -408,15 +469,7 @@ fn test_with_deleted_binary() {
     );
 }
 
-fn get_ucontext() -> Result<libc::ucontext_t> {
-    let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
-    let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
-    Errno::result(res)?;
-    unsafe { Ok(context.assume_init()) }
-}
-
-#[test]
-fn test_skip_if_requested() {
+fn test_skip_if_requested_helper(context: Context) {
     let num_of_threads = 1;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
@@ -426,20 +479,15 @@ fn test_skip_if_requested() {
         .tempfile()
         .unwrap();
 
-    let context = get_ucontext().expect("Failed to get ucontext");
-    let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
-    let float_state: fpstate_t = unsafe { std::mem::zeroed() };
-    let crash_context = CrashContext {
-        siginfo: siginfo,
-        tid: pid,
-        context,
-        float_state: float_state,
-    };
+    let mut tmp = MinidumpWriter::new(pid, pid);
+    if context == Context::With {
+        let crash_context = get_crash_context(pid);
+        tmp.set_crash_context(crash_context);
+    }
 
-    let res = MinidumpWriter::new(pid, pid)
+    let res = tmp
         .skip_stacks_if_mapping_unreferenced()
         .set_principal_mapping_address(0x0102030405060708)
-        .set_crash_context(crash_context)
         .dump(&mut tmpfile);
     child.kill().expect("Failed to kill process");
 
@@ -451,9 +499,16 @@ fn test_skip_if_requested() {
 
     assert!(res.is_err());
 }
-
 #[test]
-fn test_sanitized_stacks() {
+fn test_skip_if_requested() {
+    test_skip_if_requested_helper(Context::Without)
+}
+#[test]
+fn test_skip_if_requested_with_context() {
+    test_skip_if_requested_helper(Context::With)
+}
+
+fn test_sanitized_stacks_helper(context: Context) {
     let num_of_threads = 1;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
@@ -463,8 +518,12 @@ fn test_sanitized_stacks() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriter::new(pid, pid)
-        .sanitize_stack()
+    let mut tmp = MinidumpWriter::new(pid, pid);
+    if context == Context::With {
+        let crash_context = get_crash_context(pid);
+        tmp.set_crash_context(crash_context);
+    }
+    tmp.sanitize_stack()
         .dump(&mut tmpfile)
         .expect("Faild to dump minidump");
     child.kill().expect("Failed to kill process");
@@ -497,4 +556,12 @@ fn test_sanitized_stacks() {
             .position(|window| window == defaced)
             .is_some());
     }
+}
+#[test]
+fn test_sanitized_stacks() {
+    test_sanitized_stacks_helper(Context::Without)
+}
+#[test]
+fn test_sanitized_stacks_with_context() {
+    test_sanitized_stacks_helper(Context::Without)
 }
