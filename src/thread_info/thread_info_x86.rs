@@ -27,17 +27,22 @@ pub struct ThreadInfoX86 {
     pub fpxregs: libc::user_fpxregs_struct,
 }
 
-fn to_u128(slice: &[u32]) -> u128 {
-    u128::from_ne_bytes(
-        slice
-            .iter()
-            .map(|x| x.to_ne_bytes().to_vec())
-            .flatten()
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into() // Make slice into fixed size array
-            .unwrap(), // Which has to work as we know the numbers work out
-    )
+fn to_u128(slice: &[u32]) -> Vec<u128> {
+    let mut res = Vec::new();
+    for chunk in slice.chunks_exact(4) {
+        let value = u128::from_ne_bytes(
+            chunk
+                .iter()
+                .map(|x| x.to_ne_bytes().to_vec())
+                .flatten()
+                .collect::<Vec<_>>()
+                .as_slice()
+                .try_into() // Make slice into fixed size array
+                .unwrap(), // Which has to work as we know the numbers work out
+        );
+        res.push(value)
+    }
+    res
 }
 
 impl CommonThreadInfo for ThreadInfoX86 {}
@@ -202,19 +207,15 @@ impl ThreadInfoX86 {
         out.flt_save.mx_csr = self.fpregs.mxcsr;
         out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
 
-        u128::from_ne_bytes(
-            self.fpregs.st_space[0..4]
-                .iter()
-                .map(|x| x.to_ne_bytes().to_vec())
-                .flatten()
-                .collect::<Vec<_>>()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-        );
-        out.flt_save.float_registers[0] = to_u128(&self.fpregs.st_space[0..4]);
-        out.flt_save.xmm_registers[0] = to_u128(&self.fpregs.xmm_space[0..4]);
-        out.flt_save.xmm_registers[1] = to_u128(&self.fpregs.xmm_space[4..8]);
+        let data = to_u128(&self.fpregs.st_space);
+        for idx in 0..data.len() {
+            out.flt_save.float_registers[idx] = data[idx];
+        }
+
+        let data = to_u128(&self.fpregs.xmm_space);
+        for idx in 0..data.len() {
+            out.flt_save.xmm_registers[idx] = data[idx];
+        }
         // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
         // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
     }
