@@ -31,6 +31,7 @@ pub type fpstate_t = libc::fpsimd_context; // Currently not part of libc! This w
 pub type fpstate_t = libc::user_fpregs_struct;
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct CrashContext {
     pub siginfo: libc::siginfo_t,
     pub tid: libc::pid_t, // the crashing thread.
