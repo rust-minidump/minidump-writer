@@ -1,4 +1,5 @@
 use super::CrashContext;
+use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
 use crate::thread_info::to_u128;
 use libc::{
@@ -16,8 +17,7 @@ impl CrashContext {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        // out.context_flags = self.MD_CONTEXT_AMD64_FULL |
-        //                      MD_CONTEXT_AMD64_SEGMENTS;
+        out.context_flags = MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS;
         out.cs = (self.context.uc_mcontext.gregs[REG_CSGSFS as usize] & 0xffff) as u16;
 
         out.fs = ((self.context.uc_mcontext.gregs[REG_CSGSFS as usize] >> 32) & 0xffff) as u16;

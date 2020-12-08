@@ -1,6 +1,5 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
-#[cfg(target_arch = "x86")]
-use crate::minidump_cpu::imp::MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE;
+use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
 use crate::thread_info::to_u128;
 use crate::Result;
@@ -135,8 +134,7 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86_64")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        // out.context_flags = self.MD_CONTEXT_AMD64_FULL |
-        //                      MD_CONTEXT_AMD64_SEGMENTS;
+        out.context_flags = MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS;
 
         out.cs = self.regs.cs as u16; // TODO: This is u64, do we loose information by doing this?
 
@@ -204,7 +202,7 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        // out->context_flags = MD_CONTEXT_X86_ALL;
+        out.context_flags = MD_CONTEXT_X86_ALL;
 
         out.dr0 = self.dregs[0];
         out.dr1 = self.dregs[1];

@@ -67,34 +67,32 @@ pub struct MDRawContextX86 {
     pub extended_registers: [u8; MD_CONTEXT_X86_EXTENDED_REGISTERS_SIZE],
 }
 
-//* For (MDRawContextX86).context_flags.  These values indicate the type of
-// * context stored in the structure.  The high 24 bits identify the CPU, the
-// * low 8 bits identify the type of context saved. */
-//#define MD_CONTEXT_X86                    0x00010000
-//     /* CONTEXT_i386, CONTEXT_i486: identifies CPU */
-//#define MD_CONTEXT_X86_CONTROL            (MD_CONTEXT_X86 | 0x00000001)
-//     /* CONTEXT_CONTROL */
-//#define MD_CONTEXT_X86_INTEGER            (MD_CONTEXT_X86 | 0x00000002)
-//     /* CONTEXT_INTEGER */
-//#define MD_CONTEXT_X86_SEGMENTS           (MD_CONTEXT_X86 | 0x00000004)
-//     /* CONTEXT_SEGMENTS */
-//#define MD_CONTEXT_X86_FLOATING_POINT     (MD_CONTEXT_X86 | 0x00000008)
-//     /* CONTEXT_FLOATING_POINT */
-//#define MD_CONTEXT_X86_DEBUG_REGISTERS    (MD_CONTEXT_X86 | 0x00000010)
-//     /* CONTEXT_DEBUG_REGISTERS */
-//#define MD_CONTEXT_X86_EXTENDED_REGISTERS (MD_CONTEXT_X86 | 0x00000020)
-//     /* CONTEXT_EXTENDED_REGISTERS */
-//#define MD_CONTEXT_X86_XSTATE             (MD_CONTEXT_X86 | 0x00000040)
-//     /* CONTEXT_XSTATE */
-//
-//#define MD_CONTEXT_X86_FULL              (MD_CONTEXT_X86_CONTROL | \
-//                                          MD_CONTEXT_X86_INTEGER | \
-//                                          MD_CONTEXT_X86_SEGMENTS)
-//     /* CONTEXT_FULL */
-//
-//#define MD_CONTEXT_X86_ALL               (MD_CONTEXT_X86_FULL | \
-//                                          MD_CONTEXT_X86_FLOATING_POINT | \
-//                                          MD_CONTEXT_X86_DEBUG_REGISTERS | \
-//                                          MD_CONTEXT_X86_EXTENDED_REGISTERS)
-//     /* CONTEXT_ALL */
-//
+/* For (MDRawContextX86).context_flags.  These values indicate the type of
+ * context stored in the structure.  The high 24 bits identify the CPU, the
+ * low 8 bits identify the type of context saved. */
+const MD_CONTEXT_X86: u32 = 0x00010000;
+/* CONTEXT_i386, CONTEXT_i486: identifies CPU */
+const MD_CONTEXT_X86_CONTROL: u32 = MD_CONTEXT_X86 | 0x00000001;
+/* CONTEXT_CONTROL */
+const MD_CONTEXT_X86_INTEGER: u32 = MD_CONTEXT_X86 | 0x00000002;
+/* CONTEXT_INTEGER */
+const MD_CONTEXT_X86_SEGMENTS: u32 = MD_CONTEXT_X86 | 0x00000004;
+/* CONTEXT_SEGMENTS */
+const MD_CONTEXT_X86_FLOATING_POINT: u32 = MD_CONTEXT_X86 | 0x00000008;
+/* CONTEXT_FLOATING_POINT */
+const MD_CONTEXT_X86_DEBUG_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000010;
+/* CONTEXT_DEBUG_REGISTERS */
+const MD_CONTEXT_X86_EXTENDED_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000020;
+/* CONTEXT_EXTENDED_REGISTERS */
+const MD_CONTEXT_X86_XSTATE: u32 = MD_CONTEXT_X86 | 0x00000040;
+/* CONTEXT_XSTATE */
+
+const MD_CONTEXT_X86_FULL: u32 =
+    MD_CONTEXT_X86_CONTROL | MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_SEGMENTS;
+/* CONTEXT_FULL */
+
+const MD_CONTEXT_X86_ALL: u32 = MD_CONTEXT_X86_FULL
+    | MD_CONTEXT_X86_FLOATING_POINT
+    | MD_CONTEXT_X86_DEBUG_REGISTERS
+    | MD_CONTEXT_X86_EXTENDED_REGISTERS;
+/* CONTEXT_ALL */

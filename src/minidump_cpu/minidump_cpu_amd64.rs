@@ -149,33 +149,31 @@ pub struct MDRawContextAMD64 {
     pub last_exception_from_rip: u64,
 }
 
-//* For (MDRawContextAMD64).context_flags.  These values indicate the type of
-// * context stored in the structure.  The high 24 bits identify the CPU, the
-// * low 8 bits identify the type of context saved. */
-//#define MD_CONTEXT_AMD64 0x00100000  /* CONTEXT_AMD64 */
-//#define MD_CONTEXT_AMD64_CONTROL         (MD_CONTEXT_AMD64 | 0x00000001)
-//     /* CONTEXT_CONTROL */
-//#define MD_CONTEXT_AMD64_INTEGER         (MD_CONTEXT_AMD64 | 0x00000002)
-//     /* CONTEXT_INTEGER */
-//#define MD_CONTEXT_AMD64_SEGMENTS        (MD_CONTEXT_AMD64 | 0x00000004)
-//     /* CONTEXT_SEGMENTS */
-//#define MD_CONTEXT_AMD64_FLOATING_POINT  (MD_CONTEXT_AMD64 | 0x00000008)
-//     /* CONTEXT_FLOATING_POINT */
-//#define MD_CONTEXT_AMD64_DEBUG_REGISTERS (MD_CONTEXT_AMD64 | 0x00000010)
-//     /* CONTEXT_DEBUG_REGISTERS */
-//#define MD_CONTEXT_AMD64_XSTATE          (MD_CONTEXT_AMD64 | 0x00000040)
-//     /* CONTEXT_XSTATE */
-//
-//* WinNT.h refers to CONTEXT_MMX_REGISTERS but doesn't appear to define it
-// * I think it really means CONTEXT_FLOATING_POINT.
-// */
-//
-//#define MD_CONTEXT_AMD64_FULL            (MD_CONTEXT_AMD64_CONTROL | \
-//                                          MD_CONTEXT_AMD64_INTEGER | \
-//                                          MD_CONTEXT_AMD64_FLOATING_POINT)
-//     /* CONTEXT_FULL */
-//
-//#define MD_CONTEXT_AMD64_ALL             (MD_CONTEXT_AMD64_FULL | \
-//                                          MD_CONTEXT_AMD64_SEGMENTS | \
-//                                          MD_CONTEXT_X86_DEBUG_REGISTERS)
-//     /* CONTEXT_ALL */
+/* For (MDRawContextAMD64).context_flags.  These values indicate the type of
+* context stored in the structure.  The high 24 bits identify the CPU, the
+* low 8 bits identify the type of context saved. */
+pub const MD_CONTEXT_AMD64: u32 = 0x00100000; /* CONTEXT_AMD64 */
+pub const MD_CONTEXT_AMD64_CONTROL: u32 = MD_CONTEXT_AMD64 | 0x00000001;
+/* CONTEXT_CONTROL */
+pub const MD_CONTEXT_AMD64_INTEGER: u32 = MD_CONTEXT_AMD64 | 0x00000002;
+/* CONTEXT_INTEGER */
+pub const MD_CONTEXT_AMD64_SEGMENTS: u32 = MD_CONTEXT_AMD64 | 0x00000004;
+/* CONTEXT_SEGMENTS */
+pub const MD_CONTEXT_AMD64_FLOATING_POINT: u32 = MD_CONTEXT_AMD64 | 0x00000008;
+/* CONTEXT_FLOATING_POINT */
+pub const MD_CONTEXT_AMD64_DEBUG_REGISTERS: u32 = MD_CONTEXT_AMD64 | 0x00000010;
+/* CONTEXT_DEBUG_REGISTERS */
+pub const MD_CONTEXT_AMD64_XSTATE: u32 = MD_CONTEXT_AMD64 | 0x00000040;
+/* CONTEXT_XSTATE */
+
+/* WinNT.h refers to CONTEXT_MMX_REGISTERS but doesn't appear to define it
+* I think it really means CONTEXT_FLOATING_POINT.
+*/
+
+pub const MD_CONTEXT_AMD64_FULL: u32 =
+    MD_CONTEXT_AMD64_CONTROL | MD_CONTEXT_AMD64_INTEGER | MD_CONTEXT_AMD64_FLOATING_POINT;
+/* CONTEXT_FULL */
+
+pub const MD_CONTEXT_AMD64_ALL: u32 =
+    MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS | MD_CONTEXT_AMD64_DEBUG_REGISTERS;
+/* CONTEXT_ALL */
