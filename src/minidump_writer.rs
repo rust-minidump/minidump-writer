@@ -387,13 +387,7 @@ impl MinidumpWriter {
     }
 
     fn write_file(&self, buffer: &mut DumpBuf, filename: &str) -> Result<MDLocationDescriptor> {
-        // TODO: Is this buffer-limitation really needed? Or could we read&write all?
-        // We can't stat the files because several of the files that we want to
-        // read are kernel seqfiles, which always have a length of zero. So we have
-        // to read as much as we can into a buffer.
-        let buf_size = 1024 - 2 * std::mem::size_of::<usize>() as u64;
-
-        let mut file = std::fs::File::open(std::path::PathBuf::from(filename))?.take(buf_size);
+        let mut file = std::fs::File::open(std::path::PathBuf::from(filename))?;
         let mut content = Vec::new();
         file.read_to_end(&mut content)?;
 
