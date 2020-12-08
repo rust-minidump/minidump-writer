@@ -2,8 +2,10 @@ use crate::Result;
 use nix::errno::Errno;
 use nix::sys::ptrace;
 use nix::unistd;
+use std::convert::TryInto;
 use std::io::{self, BufRead};
 use std::path;
+
 pub type Pid = i32;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -37,6 +39,24 @@ enum NT_Elf {
     //NT_PRPSINFO = 3,
     //NT_TASKSTRUCT = 4,
     //NT_AUXV = 6,
+}
+
+pub fn to_u128(slice: &[u32]) -> Vec<u128> {
+    let mut res = Vec::new();
+    for chunk in slice.chunks_exact(4) {
+        let value = u128::from_ne_bytes(
+            chunk
+                .iter()
+                .map(|x| x.to_ne_bytes().to_vec())
+                .flatten()
+                .collect::<Vec<_>>()
+                .as_slice()
+                .try_into() // Make slice into fixed size array
+                .unwrap(), // Which has to work as we know the numbers work out
+        );
+        res.push(value)
+    }
+    res
 }
 
 trait CommonThreadInfo {

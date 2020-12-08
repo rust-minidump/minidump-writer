@@ -2,6 +2,7 @@ use super::{CommonThreadInfo, NT_Elf, Pid};
 #[cfg(target_arch = "x86")]
 use crate::minidump_cpu::imp::MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE;
 use crate::minidump_cpu::RawContextCPU;
+use crate::thread_info::to_u128;
 use crate::Result;
 use core::mem::size_of_val;
 use libc;
@@ -9,7 +10,6 @@ use libc::user;
 use memoffset;
 use nix::sys::ptrace;
 use nix::unistd;
-use std::convert::TryInto;
 
 const NUM_DEBUG_REGISTERS: usize = 8;
 
@@ -25,24 +25,6 @@ pub struct ThreadInfoX86 {
     pub dregs: [libc::c_int; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
     pub fpxregs: libc::user_fpxregs_struct,
-}
-
-fn to_u128(slice: &[u32]) -> Vec<u128> {
-    let mut res = Vec::new();
-    for chunk in slice.chunks_exact(4) {
-        let value = u128::from_ne_bytes(
-            chunk
-                .iter()
-                .map(|x| x.to_ne_bytes().to_vec())
-                .flatten()
-                .collect::<Vec<_>>()
-                .as_slice()
-                .try_into() // Make slice into fixed size array
-                .unwrap(), // Which has to work as we know the numbers work out
-        );
-        res.push(value)
-    }
-    res
 }
 
 impl CommonThreadInfo for ThreadInfoX86 {}

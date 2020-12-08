@@ -1,10 +1,10 @@
 use super::CrashContext;
 use crate::minidump_cpu::RawContextCPU;
+use crate::thread_info::to_u128;
 use libc::{
     greg_t, REG_CSGSFS, REG_EFL, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15, REG_R8,
     REG_R9, REG_RAX, REG_RBP, REG_RBX, REG_RCX, REG_RDI, REG_RDX, REG_RIP, REG_RSI, REG_RSP,
 };
-use std::convert::TryInto;
 
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> greg_t {
@@ -56,28 +56,12 @@ impl CrashContext {
         out.flt_save.mx_csr = self.float_state.mxcsr;
         out.flt_save.mx_csr_mask = self.float_state.mxcr_mask;
 
-        let slice = unsafe {
-            std::mem::transmute::<[libc::_libc_fpxreg; 8], [u8; 128]>(
-                (*self.context.uc_mcontext.fpregs)._st,
-            )
-        };
-        let data: Vec<u128> = slice
-            .chunks(16)
-            .map(|x| u128::from_ne_bytes(x.try_into().unwrap()))
-            .collect();
+        let data = to_u128(&self.float_state.st_space);
         for idx in 0..data.len() {
             out.flt_save.float_registers[idx] = data[idx];
         }
 
-        let slice = unsafe {
-            std::mem::transmute::<[libc::_libc_xmmreg; 16], [u8; 256]>(
-                (*self.context.uc_mcontext.fpregs)._xmm,
-            )
-        };
-        let data: Vec<u128> = slice
-            .chunks(16)
-            .map(|x| u128::from_ne_bytes(x.try_into().unwrap()))
-            .collect();
+        let data = to_u128(&self.float_state.xmm_space);
         for idx in 0..data.len() {
             out.flt_save.xmm_registers[idx] = data[idx];
         }
