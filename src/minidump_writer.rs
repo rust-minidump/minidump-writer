@@ -87,6 +87,12 @@ where
     }
 }
 
+pub enum CrashingThreadContext {
+    None,
+    CrashContext(MDLocationDescriptor),
+    CrashContextPlusAddress((MDLocationDescriptor, u64)),
+}
+
 pub struct MinidumpWriter {
     pub process_id: Pid,
     pub blamed_thread: Pid,
@@ -99,6 +105,7 @@ pub struct MinidumpWriter {
     pub principal_mapping: Option<MappingInfo>,
     pub sanitize_stack: bool,
     pub crash_context: Option<CrashContext>,
+    pub crashing_thread_context: CrashingThreadContext,
 }
 
 // This doesn't work yet:
@@ -124,6 +131,7 @@ impl MinidumpWriter {
             principal_mapping: None,
             sanitize_stack: false,
             crash_context: None,
+            crashing_thread_context: CrashingThreadContext::None,
         }
     }
 

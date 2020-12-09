@@ -134,21 +134,21 @@ pub struct MDRawDirectory {
 #[repr(C)]
 #[derive(Debug, Default, PartialEq)]
 pub struct MDException {
-    exception_code: u32, /* Windows: MDExceptionCodeWin,
-                          * Mac OS X: MDExceptionMac,
-                          * Linux: MDExceptionCodeLinux. */
-    exception_flags: u32, /* Windows: 1 if noncontinuable,
-                          Mac OS X: MDExceptionCodeMac. */
-    exception_record: u64, /* Address (in the minidump-producing host's
-                            * memory) of another MDException, for
-                            * nested exceptions. */
-    exception_address: u64, /* The address that caused the exception.
-                             * Mac OS X: exception subcode (which is
-                             *           typically the address). */
-    number_parameters: u32, /* Number of valid elements in
-                             * exception_information. */
-    __align: u32,
-    exception_information: [u64; 15],
+    pub exception_code: u32, /* Windows: MDExceptionCodeWin,
+                              * Mac OS X: MDExceptionMac,
+                              * Linux: MDExceptionCodeLinux. */
+    pub exception_flags: u32, /* Windows: 1 if noncontinuable,
+                              Mac OS X: MDExceptionCodeMac. */
+    pub exception_record: u64, /* Address (in the minidump-producing host's
+                                * memory) of another MDException, for
+                                * nested exceptions. */
+    pub exception_address: u64, /* The address that caused the exception.
+                                 * Mac OS X: exception subcode (which is
+                                 *           typically the address). */
+    pub number_parameters: u32, /* Number of valid elements in
+                                 * exception_information. */
+    pub __align: u32,
+    pub exception_information: [u64; 15],
 }
 
 #[repr(C)]

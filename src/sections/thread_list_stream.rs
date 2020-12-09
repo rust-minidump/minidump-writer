@@ -1,7 +1,7 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_cpu::RawContextCPU;
 use crate::minidump_format::*;
-use crate::minidump_writer::{DumpBuf, MinidumpWriter};
+use crate::minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter};
 use crate::sections::{MemoryArrayWriter, MemoryWriter};
 use crate::Result;
 use std::convert::TryInto;
@@ -128,8 +128,9 @@ pub fn write(
             crash_context.fill_cpu_context(&mut cpu);
             let cpu_section = MemoryWriter::alloc_with_val(buffer, cpu)?;
             thread.thread_context = cpu_section.location();
-        // TODO:
-        //      crashing_thread_context_ = cpu.location();
+
+            config.crashing_thread_context =
+                CrashingThreadContext::CrashContext(cpu_section.location());
         } else {
             let info = dumper.get_thread_info_by_index(idx)?;
             let max_stack_len =
@@ -153,14 +154,15 @@ pub fn write(
             info.fill_cpu_context(&mut cpu);
             let cpu_section = MemoryWriter::<RawContextCPU>::alloc_with_val(buffer, cpu)?;
             thread.thread_context = cpu_section.location();
-            // if item == &self.blamed_thread {
-            //     // This is the crashing thread of a live process, but
-            //     // no context was provided, so set the crash address
-            //     // while the instruction pointer is already here.
-            //     self.crashing_thread_context = cpu_section.location();
-            //     self.dumper
-            //         .set_crash_address(info.get_instruction_pointer());
-            // }
+            if item == &config.blamed_thread {
+                // This is the crashing thread of a live process, but
+                // no context was provided, so set the crash address
+                // while the instruction pointer is already here.
+                config.crashing_thread_context = CrashingThreadContext::CrashContextPlusAddress((
+                    cpu_section.location(),
+                    info.get_instruction_pointer(),
+                ));
+            }
         }
         thread_list.set_value_at(buffer, thread, idx)?;
     }
