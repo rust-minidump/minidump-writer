@@ -17,7 +17,7 @@ impl CrashContext {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS;
+        out.context_flags = MD_CONTEXT_AMD64_FULL;
         out.cs = (self.context.uc_mcontext.gregs[REG_CSGSFS as usize] & 0xffff) as u16;
 
         out.fs = ((self.context.uc_mcontext.gregs[REG_CSGSFS as usize] >> 32) & 0xffff) as u16;
