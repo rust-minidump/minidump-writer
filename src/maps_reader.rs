@@ -297,9 +297,10 @@ impl MappingInfo {
             file_path = format!("{}/{}", file_path, file_name);
         } else {
             // Otherwise, replace the basename with the SONAME.
-            let split: Vec<_> = file_path.rsplitn(1, "/").collect();
+            let split: Vec<_> = file_path.rsplitn(2, '/').collect();
             if split.len() == 2 {
-                file_path = format!("{}/{}", split[0], file_name);
+                // NOTE: rsplitn reverses the order, so the remainder is the last item
+                file_path = format!("{}/{}", split[1], file_name);
             } else {
                 file_path = file_name.clone();
             }
@@ -533,5 +534,31 @@ mod tests {
         };
 
         assert_eq!(mappings[6], gate_map);
+    }
+
+    #[test]
+    fn test_get_mapping_effective_name() {
+        let lines = vec![
+"7f0b97b6f000-7f0b97b70000 r--p 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so",
+"7f0b97b70000-7f0b97b71000 r-xp 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so",
+"7f0b97b71000-7f0b97b73000 r--p 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so",
+"7f0b97b73000-7f0b97b74000 rw-p 00001000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so",
+        ];
+        let linux_gate_loc = 0x7ffe091bf000;
+        let mut mappings: Vec<MappingInfo> = Vec::new();
+        for line in lines {
+            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
+                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
+                Ok(MappingInfoParsingResult::SkipLine) => continue,
+                Err(_) => assert!(false),
+            }
+        }
+        assert_eq!(mappings.len(), 1);
+
+        let (file_path, file_name) = mappings[0]
+            .get_mapping_effective_name_and_path()
+            .expect("Couldn't get effective name for mapping");
+        assert_eq!(file_name, "libmozgtk.so");
+        assert_eq!(file_path, "/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so");
     }
 }
