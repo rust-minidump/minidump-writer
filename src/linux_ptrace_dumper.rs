@@ -453,12 +453,17 @@ impl LinuxPtraceDumper {
                                     ptr as *const u8,
                                     section.sh_size.try_into()?,
                                 );
+
                                 // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
                                 // function backwards-compatible.
+                                let max_len = std::cmp::min(text_section.len(), 4096);
                                 let mut result = vec![0u8; std::mem::size_of::<MDGUID>()];
                                 let mut offset = 0;
-                                while offset < 4096 {
+                                while offset < max_len {
                                     for idx in 0..std::mem::size_of::<MDGUID>() {
+                                        if offset + idx >= text_section.len() {
+                                            break;
+                                        }
                                         result[idx] ^= text_section[offset + idx];
                                     }
                                     offset += std::mem::size_of::<MDGUID>();
