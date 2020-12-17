@@ -1,9 +1,9 @@
 use crate::auxv_reader::AuxvType;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_format::*;
 use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
 use crate::Result;
 use libc;
+use minidump_common::format::*;
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -16,6 +16,16 @@ type ElfPhdr = libc::Elf32_Phdr;
 type ElfAddr = libc::Elf64_Addr;
 #[cfg(target_pointer_width = "32")]
 type ElfAddr = libc::Elf32_Addr;
+
+#[cfg(target_pointer_width = "64")]
+type MDRawLinkMap = MDRawLinkMap64;
+#[cfg(target_pointer_width = "32")]
+type MDRawLinkMap = MDRawLinkMap32;
+
+#[cfg(target_pointer_width = "64")]
+type MDRawDebug = MDRawDebug64;
+#[cfg(target_pointer_width = "32")]
+type MDRawDebug = MDRawDebug32;
 
 // COPY from <link.h>
 #[derive(Debug, Clone, Default)]
@@ -229,7 +239,7 @@ pub fn write_dso_debug_stream(
     let debug_loc = MemoryWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
 
     let mut dirent = MDRawDirectory {
-        stream_type: MDStreamType::LinuxDsoDebug as u32,
+        stream_type: MD_LINUX_DSO_DEBUG as u32,
         location: debug_loc.location(),
     };
 

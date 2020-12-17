@@ -1,8 +1,8 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
 use crate::sections::MemoryArrayWriter;
 use crate::Result;
+use minidump_common::format::*;
 use std::convert::TryInto;
 
 /// Write application-provided memory regions.

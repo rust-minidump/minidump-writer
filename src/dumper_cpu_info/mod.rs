@@ -12,9 +12,9 @@ pub mod imp;
 
 pub use imp::write_cpu_information;
 
-use crate::minidump_format::{MDOSPlatform, MDRawSystemInfo};
 use crate::sections::write_string_to_location;
 use crate::Result;
+use minidump_common::format::{MDRawSystemInfo, MD_OS_ANDROID, MD_OS_LINUX};
 use nix::sys::utsname::uname;
 use std::io::Cursor;
 
@@ -24,9 +24,9 @@ pub fn write_os_information(
 ) -> Result<()> {
     let info = uname();
     if cfg!(target_os = "android") {
-        sys_info.platform_id = MDOSPlatform::Android as u32;
+        sys_info.platform_id = MD_OS_ANDROID as u32;
     } else {
-        sys_info.platform_id = MDOSPlatform::Linux as u32;
+        sys_info.platform_id = MD_OS_LINUX as u32;
     }
     let merged = vec![
         info.sysname(),

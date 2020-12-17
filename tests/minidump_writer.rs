@@ -1,5 +1,5 @@
 use minidump::*;
-use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
+use minidump_common::format::*;
 use minidump_writer_linux::app_memory::AppMemory;
 use minidump_writer_linux::crash_context::{fpstate_t, CrashContext};
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
@@ -160,26 +160,26 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
     let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
     let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
     let _ = dump
-        .get_raw_stream(LinuxCpuInfo)
-        .expect("Couldn't find LinuxCpuInfo");
+        .get_raw_stream(MD_LINUX_CPU_INFO)
+        .expect("Couldn't find MD_LINUX_CPU_INFO");
     let _ = dump
-        .get_raw_stream(LinuxProcStatus)
-        .expect("Couldn't find LinuxProcStatus");
+        .get_raw_stream(MD_LINUX_PROC_STATUS)
+        .expect("Couldn't find MD_LINUX_PROC_STATUS");
     let _ = dump
-        .get_raw_stream(LinuxCmdLine)
-        .expect("Couldn't find LinuxCmdLine");
+        .get_raw_stream(MD_LINUX_CMD_LINE)
+        .expect("Couldn't find MD_LINUX_CMD_LINE");
     let _ = dump
-        .get_raw_stream(LinuxEnviron)
-        .expect("Couldn't find LinuxEnviron");
+        .get_raw_stream(MD_LINUX_ENVIRON)
+        .expect("Couldn't find MD_LINUX_ENVIRON");
     let _ = dump
-        .get_raw_stream(LinuxAuxv)
-        .expect("Couldn't find LinuxAuxv");
+        .get_raw_stream(MD_LINUX_AUXV)
+        .expect("Couldn't find MD_LINUX_AUXV");
     let _ = dump
-        .get_raw_stream(LinuxMaps)
-        .expect("Couldn't find LinuxMaps");
+        .get_raw_stream(MD_LINUX_MAPS)
+        .expect("Couldn't find MD_LINUX_MAPS");
     let _ = dump
-        .get_raw_stream(LinuxDsoDebug)
-        .expect("Couldn't find LinuxDsoDebug");
+        .get_raw_stream(MD_LINUX_DSO_DEBUG)
+        .expect("Couldn't find MD_LINUX_DSO_DEBUG");
 }
 #[test]
 fn test_write_and_read_dump_from_parent() {
@@ -421,7 +421,7 @@ fn test_with_deleted_binary() {
     let build_id = LinuxPtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
         .expect("Failed to get build_id");
 
-    let guid = GUID {
+    let guid = MDGUID {
         data1: u32::from_ne_bytes(build_id[0..4].try_into().unwrap()),
         data2: u16::from_ne_bytes(build_id[4..6].try_into().unwrap()),
         data3: u16::from_ne_bytes(build_id[6..8].try_into().unwrap()),
@@ -431,20 +431,24 @@ fn test_with_deleted_binary() {
     // guid_to_string() is not public in minidump, so copied it here
     // And append a zero, because module IDs include an "age" field
     // which is always zero on Linux.
-    let filtered = format!(
-        "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}0",
-        guid.data1,
-        guid.data2,
-        guid.data3,
-        guid.data4[0],
-        guid.data4[1],
-        guid.data4[2],
-        guid.data4[3],
-        guid.data4[4],
-        guid.data4[5],
-        guid.data4[6],
-        guid.data4[7],
-    );
+
+    let filtered = unsafe {
+        format!(
+            "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}0",
+            guid.data1,
+            guid.data2,
+            guid.data3,
+            guid.data4[0],
+            guid.data4[1],
+            guid.data4[2],
+            guid.data4[3],
+            guid.data4[4],
+            guid.data4[5],
+            guid.data4[6],
+            guid.data4[7],
+        )
+    };
+
     // Strip out dashes
     //let mut filtered: String = identifier.chars().filter(|x| *x != '-').collect();
 

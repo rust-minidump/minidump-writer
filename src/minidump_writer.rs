@@ -3,15 +3,14 @@ use crate::crash_context::CrashContext;
 use crate::dso_debug;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::{MappingInfo, MappingList};
-use crate::minidump_format::*;
 use crate::sections::*;
 use crate::thread_info::Pid;
 use crate::Result;
+use minidump_common::format::*;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 pub type DumpBuf = Cursor<Vec<u8>>;
 
-#[derive(Debug)]
 pub struct DirSection<'a, W>
 where
     W: Write + Seek,
@@ -310,7 +309,7 @@ impl MinidumpWriter {
 
         let dirent = match self.write_file(buffer, "/proc/cpuinfo") {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCpuInfo as u32,
+                stream_type: MD_LINUX_CPU_INFO,
                 location,
             },
             Err(_) => Default::default(),
@@ -321,7 +320,7 @@ impl MinidumpWriter {
         let dirent = match self.write_file(buffer, &format!("/proc/{}/status", self.blamed_thread))
         {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxProcStatus as u32,
+                stream_type: MD_LINUX_PROC_STATUS,
                 location,
             },
             Err(_) => Default::default(),
@@ -334,7 +333,7 @@ impl MinidumpWriter {
             .or_else(|_| self.write_file(buffer, "/etc/os-release"))
         {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxLsbRelease as u32,
+                stream_type: MD_LINUX_LSB_RELEASE,
                 location,
             },
             Err(_) => Default::default(),
@@ -345,7 +344,7 @@ impl MinidumpWriter {
         let dirent = match self.write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread))
         {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCmdLine as u32,
+                stream_type: MD_LINUX_CMD_LINE,
                 location,
             },
             Err(_) => Default::default(),
@@ -356,7 +355,7 @@ impl MinidumpWriter {
         let dirent = match self.write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread))
         {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxEnviron as u32,
+                stream_type: MD_LINUX_ENVIRON,
                 location,
             },
             Err(_) => Default::default(),
@@ -366,7 +365,7 @@ impl MinidumpWriter {
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxAuxv as u32,
+                stream_type: MD_LINUX_AUXV as u32,
                 location,
             },
             Err(_) => Default::default(),
@@ -376,7 +375,7 @@ impl MinidumpWriter {
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxMaps as u32,
+                stream_type: MD_LINUX_MAPS,
                 location,
             },
             Err(_) => Default::default(),
