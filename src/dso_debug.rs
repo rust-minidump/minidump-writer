@@ -104,7 +104,7 @@ pub fn write_dso_debug_stream(
 
     // Assume the program base is at the beginning of the same page as the PHDR
     let mut base = phdr & !0xfff;
-    let mut dyn_addr = 0 as ElfAddr;
+    let mut dyn_addr: ElfAddr = 0;
     // Search for the program PT_DYNAMIC segment
     for ph in program_headers {
         // Adjust base address with the virtual address of the PT_LOAD segment
@@ -239,7 +239,7 @@ pub fn write_dso_debug_stream(
     let debug_loc = MemoryWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
 
     let mut dirent = MDRawDirectory {
-        stream_type: MD_LINUX_DSO_DEBUG as u32,
+        stream_type: MD_LINUX_DSO_DEBUG,
         location: debug_loc.location(),
     };
 

@@ -365,7 +365,7 @@ impl MinidumpWriter {
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
             Ok(location) => MDRawDirectory {
-                stream_type: MD_LINUX_AUXV as u32,
+                stream_type: MD_LINUX_AUXV,
                 location,
             },
             Err(_) => Default::default(),
