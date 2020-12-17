@@ -300,7 +300,6 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        // Currently unused
         let dirent = exception_stream::write(self, buffer)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
@@ -385,7 +384,8 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = dso_debug::write_dso_debug_stream(buffer, self.blamed_thread, &dumper.auxv)?;
+        let dirent = dso_debug::write_dso_debug_stream(buffer, self.blamed_thread, &dumper.auxv)
+            .unwrap_or_default();
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 

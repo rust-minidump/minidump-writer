@@ -38,24 +38,27 @@ pub fn start_child_and_wait_for_threads(num: usize) -> Child {
         .spawn()
         .expect("failed to execute child");
 
-    {
-        let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
-        let mut lines = 0;
-        while lines < num {
-            let mut buf = String::new();
-            match f.read_line(&mut buf) {
-                Ok(_) => {
-                    if buf == "1\n" {
-                        lines += 1;
-                    }
+    wait_for_threads(&mut child, num);
+    child
+}
+
+#[allow(unused)]
+pub fn wait_for_threads(child: &mut Child, num: usize) {
+    let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+    let mut lines = 0;
+    while lines < num {
+        let mut buf = String::new();
+        match f.read_line(&mut buf) {
+            Ok(_) => {
+                if buf == "1\n" {
+                    lines += 1;
                 }
-                Err(e) => {
-                    panic!(e);
-                }
+            }
+            Err(e) => {
+                panic!(e);
             }
         }
     }
-    child
 }
 
 #[allow(unused)]
