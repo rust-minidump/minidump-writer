@@ -1,12 +1,13 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
-use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
-use crate::thread_info::to_u128;
+use crate::minidump_cpu::*;
 use crate::Result;
+use bytemuck;
 use core::mem::size_of_val;
 use libc;
 use libc::user;
 use memoffset;
+use minidump_common::format::uint128_struct;
 use nix::sys::ptrace;
 use nix::unistd;
 
@@ -176,26 +177,37 @@ impl ThreadInfoX86 {
 
         out.rip = self.regs.rip;
 
-        out.flt_save.control_word = self.fpregs.cwd;
-        out.flt_save.status_word = self.fpregs.swd;
-        out.flt_save.tag_word = self.fpregs.ftw as u8; // TODO: This is u16, do we loose information by doing this?
-        out.flt_save.error_opcode = self.fpregs.fop;
-        out.flt_save.error_offset = self.fpregs.rip as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.error_selector = 0; // We don't have this.
-        out.flt_save.data_offset = self.fpregs.rdp as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.data_selector = 0; // We don't have this.
-        out.flt_save.mx_csr = self.fpregs.mxcsr;
-        out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
+        unsafe {
+            (*out.flt_save()).control_word = self.fpregs.cwd;
+            (*out.flt_save()).status_word = self.fpregs.swd;
+            (*out.flt_save()).tag_word = self.fpregs.ftw as u8; // TODO: This is u16, do we loose information by doing this?
+            (*out.flt_save()).error_opcode = self.fpregs.fop;
+            (*out.flt_save()).error_offset = self.fpregs.rip as u32; // TODO: This is u64, do we loose information by doing this?
+            (*out.flt_save()).error_selector = 0; // We don't have this.
+            (*out.flt_save()).data_offset = self.fpregs.rdp as u32; // TODO: This is u64, do we loose information by doing this?
+            (*out.flt_save()).data_selector = 0; // We don't have this.
+            (*out.flt_save()).mx_csr = self.fpregs.mxcsr;
+            (*out.flt_save()).mx_csr_mask = self.fpregs.mxcr_mask;
 
-        let data = to_u128(&self.fpregs.st_space);
-        for idx in 0..data.len() {
-            out.flt_save.float_registers[idx] = data[idx];
+            let st_space =
+                bytemuck::try_cast_slice::<u32, u64>(&self.fpregs.st_space).unwrap_or_default();
+            for (idx, vals) in st_space.chunks_exact(2).enumerate() {
+                (*out.flt_save()).float_registers[idx] = uint128_struct {
+                    high: vals[0],
+                    low: vals[1],
+                };
+            }
+
+            let xmm_space =
+                bytemuck::try_cast_slice::<u32, u64>(&self.fpregs.xmm_space).unwrap_or_default();
+            for (idx, vals) in xmm_space.chunks_exact(2).enumerate() {
+                (*out.flt_save()).xmm_registers[idx] = uint128_struct {
+                    high: vals[0],
+                    low: vals[1],
+                };
+            }
         }
 
-        let data = to_u128(&self.fpregs.xmm_space);
-        for idx in 0..data.len() {
-            out.flt_save.xmm_registers[idx] = data[idx];
-        }
         // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
         // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
     }

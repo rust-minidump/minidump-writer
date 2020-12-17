@@ -17,3 +17,4 @@ memmap = "0.7.0"
 goblin = "0.1.2"
 minidump-common = "0.1.0"
 minidump = {git = "https://github.com/luser/rust-minidump" }
+bytemuck = "1.2.0"
