@@ -1,6 +1,6 @@
 // use libc::c_void;
 use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
-use crate::maps_reader::{MappingInfo, MappingInfoParsingResult};
+use crate::maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX};
 use crate::minidump_format::MDGUID;
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
@@ -513,8 +513,18 @@ impl LinuxPtraceDumper {
         let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
         let build_id = Self::elf_file_identifier_from_mapped_file(&mem_slice)?;
 
-        if Some(&new_name) != mapping.name.as_ref() {
-            mapping.name = Some(new_name);
+        // This means we switched from "/my/binary" to "/proc/1234/exe", because /my/binary
+        // was deleted and thus has a "/my/binary (deleted)" entry. We found the mapping anyway
+        // so we remove the "(deleted)".
+        if let Some(old_name) = &mapping.name {
+            if &new_name != old_name {
+                mapping.name = Some(
+                    old_name
+                        .trim_end_matches(DELETED_SUFFIX)
+                        .trim_end()
+                        .to_string(),
+                );
+            }
         }
         return Ok(build_id);
     }

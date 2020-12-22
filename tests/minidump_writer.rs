@@ -12,6 +12,7 @@ use nix::sys::signal::Signal;
 use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::ExitStatusExt;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 
 mod common;
@@ -395,17 +396,28 @@ fn test_minidump_size_limit() {
 #[test]
 fn test_with_deleted_binary() {
     let num_of_threads = 1;
-    let mut child = start_child_and_wait_for_threads(num_of_threads);
-    let pid = child.id() as i32;
-
-    let mut tmpfile = tempfile::Builder::new()
+    let binary_copy_dir = tempfile::Builder::new()
         .prefix("deleted_binary")
-        .tempfile()
+        .tempdir()
         .unwrap();
+    let binary_copy = binary_copy_dir.as_ref().join("binary_copy");
 
     let path: &'static str = std::env!("CARGO_BIN_EXE_test");
 
-    let mem_slice = std::fs::read(path).expect("Failed to read binary");
+    std::fs::copy(path, &binary_copy).expect("Failed to copy binary");
+    let mem_slice = std::fs::read(&binary_copy).expect("Failed to read binary");
+
+    let mut child = Command::new(&binary_copy)
+        .env("RUST_BACKTRACE", "1")
+        .arg("spawn_and_wait")
+        .arg(format!("{}", num_of_threads))
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to execute child");
+    wait_for_threads(&mut child, num_of_threads);
+
+    let pid = child.id() as i32;
+
     let build_id = LinuxPtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
         .expect("Failed to get build_id");
 
@@ -417,8 +429,10 @@ fn test_with_deleted_binary() {
     };
 
     // guid_to_string() is not public in minidump, so copied it here
-    let mut filtered = format!(
-        "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+    // And append a zero, because module IDs include an "age" field
+    // which is always zero on Linux.
+    let filtered = format!(
+        "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}0",
         guid.data1,
         guid.data2,
         guid.data3,
@@ -434,10 +448,12 @@ fn test_with_deleted_binary() {
     // Strip out dashes
     //let mut filtered: String = identifier.chars().filter(|x| *x != '-').collect();
 
-    // And append a zero, because module IDs include an "age" field
-    // which is always zero on Linux.
-    filtered.push('0');
-    std::fs::remove_file(path).expect("Failed to remove binary");
+    std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("deleted_binary")
+        .tempfile()
+        .unwrap();
 
     MinidumpWriter::new(pid, pid)
         .dump(&mut tmpfile)
@@ -462,7 +478,7 @@ fn test_with_deleted_binary() {
     let main_module = module_list
         .main_module()
         .expect("Could not get main module");
-    assert_eq!(main_module.code_file(), path);
+    assert_eq!(main_module.code_file(), binary_copy.to_string_lossy());
     assert_eq!(
         main_module.debug_identifier(),
         Some(std::borrow::Cow::from(filtered.as_str()))

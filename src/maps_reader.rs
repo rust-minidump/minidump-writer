@@ -78,7 +78,26 @@ impl MappingInfo {
         linux_gate_loc: AuxvType,
         last_mapping: Option<&mut MappingInfo>,
     ) -> Result<MappingInfoParsingResult> {
-        let mut splits = line.split_ascii_whitespace();
+        let mut last_whitespace = false;
+
+        // There is no `line.splitn_whitespace(6)`, so we have to do it somewhat manually
+        // Split at the first whitespace, trim of the rest.
+        let mut splits = line
+            .trim()
+            .splitn(6, |c: char| {
+                if c.is_whitespace() {
+                    if last_whitespace {
+                        return false;
+                    }
+                    last_whitespace = true;
+                    true
+                } else {
+                    last_whitespace = false;
+                    false
+                }
+            })
+            .map(str::trim);
+
         let address = splits.next().ok_or("maps malformed: No address found")?;
         let perms = splits.next().ok_or("maps malformed: No perms found")?;
         let mut offset =
@@ -86,6 +105,14 @@ impl MappingInfo {
         let _dev = splits.next().ok_or("maps malformed: No dev found")?;
         let _inode = splits.next().ok_or("maps malformed: No inode found")?;
         let mut pathname = splits.next(); // Optional
+
+        // Due to our ugly `splitn_whitespace()` hack from above, we might have
+        // only trailing whitespaces as the name, so we it might still be "Some()"
+        if let Some(x) = pathname {
+            if x.is_empty() {
+                pathname = None;
+            }
+        }
 
         let mut addresses = address.split('-');
         let start_address = usize::from_str_radix(addresses.next().unwrap(), 16)?;
@@ -560,5 +587,65 @@ mod tests {
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
         assert_eq!(file_path, "/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so");
+    }
+
+    #[test]
+    fn test_whitespaces_in_maps() {
+        let lines = vec![
+"   7f0b97b6f000-7f0b97b70000 r--p 00000000 00:3e 27136458                   libmozgtk.so",
+"7f0b97b70000-7f0b97b71000 r-xp 00000000 00:3e 27136458                   libmozgtk.so    ",
+"7f0b97b71000-7f0b97b73000     r--p 00000000 00:3e 27136458\t\t\tlibmozgtk.so",
+        ];
+        let linux_gate_loc = 0x7ffe091bf000;
+        let mut mappings: Vec<MappingInfo> = Vec::new();
+        for line in lines {
+            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
+                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
+                Ok(MappingInfoParsingResult::SkipLine) => continue,
+                Err(x) => panic!(format!("{:?}", x)),
+            }
+        }
+        assert_eq!(mappings.len(), 1);
+
+        let expected_map = MappingInfo {
+            start_address: 0x7f0b97b6f000,
+            size: 16384,
+            system_mapping_info: SystemMappingInfo {
+                start_address: 0x7f0b97b6f000,
+                end_address: 0x7f0b97b73000,
+            },
+            offset: 0,
+            executable: true,
+            name: Some("libmozgtk.so".to_string()),
+        };
+
+        assert_eq!(expected_map, mappings[0]);
+    }
+
+    #[test]
+    fn test_whitespaces_in_name() {
+        let lines = vec![
+"10000000-20000000 r--p 00000000 00:3e 27136458                   libmoz    gtk.so",
+"20000000-30000000 r--p 00000000 00:3e 27136458                   libmozgtk.so (deleted)",
+"30000000-40000000 r--p 00000000 00:3e 27136458                   \"libmoz     gtk.so (deleted)\"",
+"30000000-40000000 r--p 00000000 00:3e 27136458                   ",
+        ];
+        let linux_gate_loc = 0x7ffe091bf000;
+        let mut mappings: Vec<MappingInfo> = Vec::new();
+        for line in lines {
+            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
+                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
+                Ok(MappingInfoParsingResult::SkipLine) => continue,
+                Err(_) => assert!(false),
+            }
+        }
+        assert_eq!(mappings.len(), 4);
+        assert_eq!(mappings[0].name, Some("libmoz    gtk.so".to_string()));
+        assert_eq!(mappings[1].name, Some("libmozgtk.so (deleted)".to_string()));
+        assert_eq!(
+            mappings[2].name,
+            Some("\"libmoz     gtk.so (deleted)\"".to_string())
+        );
+        assert_eq!(mappings[3].name, None);
     }
 }
