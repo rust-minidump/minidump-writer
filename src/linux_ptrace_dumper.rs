@@ -1,11 +1,11 @@
 // use libc::c_void;
 use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
 use crate::maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX};
+use crate::minidump_format::MDGUID;
 use crate::thread_info::{Pid, ThreadInfo};
 use crate::Result;
 use crate::LINUX_GATE_LIBRARY_NAME;
 use goblin::elf;
-use minidump_common::format::MDGUID;
 use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
 use std::collections::HashMap;

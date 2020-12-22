@@ -1,5 +1,5 @@
+use crate::minidump_format::*;
 use crate::Result;
-use minidump_common::format::*;
 use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::path;
@@ -34,13 +34,13 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     // processor_architecture should always be set, do this first
     if cfg!(target_arch = "mips") {
-        sys_info.processor_architecture = MD_CPU_ARCHITECTURE_MIPS as u16;
+        sys_info.processor_architecture = MDCPUArchitecture::Mips as u16;
     } else if cfg!(target_arch = "mips64") {
-        sys_info.processor_architecture = MD_CPU_ARCHITECTURE_MIPS64 as u16;
+        sys_info.processor_architecture = MDCPUArchitecture::Mips64 as u16;
     } else if cfg!(target_arch = "x86") {
-        sys_info.processor_architecture = MD_CPU_ARCHITECTURE_X86 as u16;
+        sys_info.processor_architecture = MDCPUArchitecture::X86 as u16;
     } else {
-        sys_info.processor_architecture = MD_CPU_ARCHITECTURE_AMD64 as u16;
+        sys_info.processor_architecture = MDCPUArchitecture::Amd64 as u16;
     }
 
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
@@ -105,8 +105,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     }
     if !vendor_id.is_empty() {
         let mut slice = vendor_id.as_bytes();
-
-        for id_part in unsafe { (*(sys_info.cpu.x86_cpu_info())).vendor_id.iter_mut() } {
+        for id_part in sys_info.cpu.vendor_id.iter_mut() {
             let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
             slice = rest;
             *id_part = match int_bytes.try_into() {

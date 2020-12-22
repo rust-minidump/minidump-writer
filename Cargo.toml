@@ -15,6 +15,7 @@ memoffset = "0.5.1"
 byteorder = "1.3.2"
 memmap = "0.7.0"
 goblin = "0.1.2"
-minidump-common = "0.1.0"
+
+[dev-dependencies]
 minidump = {git = "https://github.com/luser/rust-minidump" }
-bytemuck = "1.2.0"
+minidump-common = {git = "https://github.com/luser/rust-minidump" }

@@ -1,9 +1,9 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::MappingInfo;
+use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
 use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
 use crate::Result;
-use minidump_common::format::*;
 
 /// Write information about the mappings in effect. Because we are using the
 /// minidump format, the information about the mappings is pretty limited.
@@ -28,7 +28,7 @@ pub fn write(
     let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, num_output_mappings as u32)?;
 
     let mut dirent = MDRawDirectory {
-        stream_type: MD_MODULE_LIST_STREAM,
+        stream_type: MDStreamType::ModuleListStream as u32,
         location: list_header.location(),
     };
 

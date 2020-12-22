@@ -5,8 +5,8 @@ pub mod memory_list_stream;
 pub mod systeminfo_stream;
 pub mod thread_list_stream;
 
+use crate::minidump_format::*;
 use crate::Result;
-use minidump_common::format::*;
 use std::convert::TryInto;
 use std::io::{Cursor, Write};
 

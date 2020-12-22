@@ -1,9 +1,9 @@
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_cpu::RawContextCPU;
+use crate::minidump_format::*;
 use crate::minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter};
 use crate::sections::{MemoryArrayWriter, MemoryWriter};
 use crate::Result;
-use minidump_common::format::*;
 use std::convert::TryInto;
 use std::io::Write;
 
@@ -41,7 +41,7 @@ pub fn write(
     let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, num_threads as u32)?;
 
     let mut dirent = MDRawDirectory {
-        stream_type: MD_THREAD_LIST_STREAM,
+        stream_type: MDStreamType::ThreadListStream as u32,
         location: list_header.location(),
     };
 

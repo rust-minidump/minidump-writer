@@ -1,12 +1,11 @@
 use super::CrashContext;
+use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
-use crate::minidump_cpu::*;
-use bytemuck;
+use crate::thread_info::to_u128;
 use libc::{
     greg_t, REG_CSGSFS, REG_EFL, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15, REG_R8,
     REG_R9, REG_RAX, REG_RBP, REG_RBX, REG_RCX, REG_RDI, REG_RDX, REG_RIP, REG_RSI, REG_RSP,
 };
-use minidump_common::format::uint128_struct;
 
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> greg_t {
@@ -46,35 +45,25 @@ impl CrashContext {
 
         out.rip = self.context.uc_mcontext.gregs[REG_RIP as usize] as u64;
 
-        unsafe {
-            (*out.flt_save()).control_word = self.float_state.cwd;
-            (*out.flt_save()).status_word = self.float_state.swd;
-            (*out.flt_save()).tag_word = self.float_state.ftw as u8;
-            (*out.flt_save()).error_opcode = self.float_state.fop;
-            (*out.flt_save()).error_offset = self.float_state.rip as u32;
-            (*out.flt_save()).data_offset = self.float_state.rdp as u32;
-            (*out.flt_save()).error_selector = 0; // We don't have this.
-            (*out.flt_save()).data_selector = 0; // We don't have this.
-            (*out.flt_save()).mx_csr = self.float_state.mxcsr;
-            (*out.flt_save()).mx_csr_mask = self.float_state.mxcr_mask;
+        out.flt_save.control_word = self.float_state.cwd;
+        out.flt_save.status_word = self.float_state.swd;
+        out.flt_save.tag_word = self.float_state.ftw as u8;
+        out.flt_save.error_opcode = self.float_state.fop;
+        out.flt_save.error_offset = self.float_state.rip as u32;
+        out.flt_save.data_offset = self.float_state.rdp as u32;
+        out.flt_save.error_selector = 0; // We don't have this.
+        out.flt_save.data_selector = 0; // We don't have this.
+        out.flt_save.mx_csr = self.float_state.mxcsr;
+        out.flt_save.mx_csr_mask = self.float_state.mxcr_mask;
 
-            let st_space = bytemuck::try_cast_slice::<u32, u64>(&self.float_state.st_space)
-                .unwrap_or_default();
-            for (idx, vals) in st_space.chunks_exact(2).enumerate() {
-                (*out.flt_save()).float_registers[idx] = uint128_struct {
-                    high: vals[0],
-                    low: vals[1],
-                };
-            }
+        let data = to_u128(&self.float_state.st_space);
+        for idx in 0..data.len() {
+            out.flt_save.float_registers[idx] = data[idx];
+        }
 
-            let xmm_space = bytemuck::try_cast_slice::<u32, u64>(&self.float_state.xmm_space)
-                .unwrap_or_default();
-            for (idx, vals) in xmm_space.chunks_exact(2).enumerate() {
-                (*out.flt_save()).xmm_registers[idx] = uint128_struct {
-                    high: vals[0],
-                    low: vals[1],
-                };
-            }
+        let data = to_u128(&self.float_state.xmm_space);
+        for idx in 0..data.len() {
+            out.flt_save.xmm_registers[idx] = data[idx];
         }
     }
 }
