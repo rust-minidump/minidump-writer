@@ -308,8 +308,8 @@ impl MappingInfo {
             Err(_) => {
                 //   file_path := /path/to/libname.so
                 //   file_name := libname.so
-                let split: Vec<_> = file_path.rsplitn(1, "/").collect();
-                file_name = split.last().unwrap().to_string();
+                let split: Vec<_> = file_path.rsplitn(2, "/").collect();
+                file_name = split.first().unwrap().to_string();
                 return Ok((file_path, file_name));
             }
         };
