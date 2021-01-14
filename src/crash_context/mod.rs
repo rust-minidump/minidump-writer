@@ -27,6 +27,11 @@ pub type fpstate_t = libc::fpsimd_context; // Currently not part of libc! This w
     target_arch = "mips",
     target_arch = "arm-eabi"
 )))]
+
+#[cfg(target_arch = "x86")]
+#[allow(non_camel_case_types)]
+pub type fpstate_t = libc::_libc_fpstate;
+#[cfg(target_arch = "x86_64")]
 #[allow(non_camel_case_types)]
 pub type fpstate_t = libc::user_fpregs_struct;
 

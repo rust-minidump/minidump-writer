@@ -23,6 +23,9 @@ pub struct LinuxPtraceDumper {
     pub mappings: Vec<MappingInfo>,
 }
 
+#[cfg(target_arch = "x86")]
+pub const AT_SYSINFO_EHDR: u32 = 33;
+#[cfg(target_arch = "x86_64")]
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
 impl Drop for LinuxPtraceDumper {
@@ -294,10 +297,14 @@ impl LinuxPtraceDumper {
         // 3) We precompute a bitfield based upon bits 32:32-n of the start and
         //    stop addresses, and use that to short circuit any values that can
         //    not be pointers. (n=11)
-        let defaced = if cfg!(target_pointer_width = "64") {
-            0x0defaced0defacedusize.to_ne_bytes()
-        } else {
-            0x0defacedusize.to_ne_bytes()
+        let defaced;
+        #[cfg(target_pointer_width = "64")]
+        {
+            defaced = 0x0defaced0defacedusize.to_ne_bytes()
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            defaced = 0x0defacedusize.to_ne_bytes()
         };
         // the bitfield length is 2^test_bits long.
         let test_bits = 11;

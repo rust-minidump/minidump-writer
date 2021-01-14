@@ -111,7 +111,7 @@ pub fn write_dso_debug_stream(
         return Err("Could not find dyn_addr".into());
     }
 
-    dyn_addr += base as u64;
+    dyn_addr += base as ElfAddr;
 
     let dyn_size = std::mem::size_of::<goblin::elf::Dyn>();
     let mut r_debug = 0usize;
@@ -210,7 +210,7 @@ pub fn write_dso_debug_stream(
             let entry = MDRawLinkMap {
                 addr: map.l_addr,
                 name: location.rva,
-                ld: map.l_ld as u64,
+                ld: map.l_ld as ElfAddr,
             };
 
             linkmap.set_value_at(buffer, entry, idx)?;

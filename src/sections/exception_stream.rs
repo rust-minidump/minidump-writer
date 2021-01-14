@@ -63,7 +63,7 @@ pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawD
             exception_code: MDExceptionCodeLinux::MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED as u32,
             exception_flags: 0,
             exception_record: 0,
-            exception_address: addr,
+            exception_address: addr as u64,
             number_parameters: 0,
             __align: 0,
             exception_information: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
