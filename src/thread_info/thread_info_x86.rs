@@ -1,6 +1,7 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
 use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
+#[cfg(target_arch = "x86_64")]
 use crate::thread_info::to_u128;
 use crate::Result;
 use core::mem::size_of_val;
@@ -9,6 +10,8 @@ use libc::user;
 use memoffset;
 use nix::sys::ptrace;
 use nix::unistd;
+#[cfg(target_arch = "x86")]
+use std::convert::TryInto;
 
 const NUM_DEBUG_REGISTERS: usize = 8;
 
@@ -86,7 +89,7 @@ impl ThreadInfoX86 {
             if cfg!(target_feature = "fxsr") {
                 fpxregs = Self::getfpxregs(tid)?;
             } else {
-                fpxregs = unsafe { mem::zeroed() };
+                fpxregs = unsafe { std::mem::zeroed() };
             }
         }
 
@@ -102,7 +105,14 @@ impl ThreadInfoX86 {
                 tid,
                 (debug_offset + idx * elem_offset) as ptrace::AddressType,
             )?;
-            dregs[idx] = chunk as u64; // libc / ptrace is very messy wrt int types used...
+            #[cfg(target_arch = "x86_64")]
+            {
+                dregs[idx] = chunk as u64; // libc / ptrace is very messy wrt int types used...
+            }
+            #[cfg(target_arch = "x86")]
+            {
+                dregs[idx] = chunk as i32; // libc / ptrace is very messy wrt int types used...
+            }
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -123,13 +133,13 @@ impl ThreadInfoX86 {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn get_instruction_pointer(&self) -> libc::c_ulonglong {
-        self.regs.rip
+    pub fn get_instruction_pointer(&self) -> usize {
+        self.regs.rip as usize
     }
 
     #[cfg(target_arch = "x86")]
-    pub fn get_instruction_pointer(&self) -> libc::c_ulonglong {
-        self.regs.eip
+    pub fn get_instruction_pointer(&self) -> usize {
+        self.regs.eip as usize
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -204,41 +214,41 @@ impl ThreadInfoX86 {
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
         out.context_flags = MD_CONTEXT_X86_ALL;
 
-        out.dr0 = self.dregs[0];
-        out.dr1 = self.dregs[1];
-        out.dr2 = self.dregs[2];
-        out.dr3 = self.dregs[3];
+        out.dr0 = self.dregs[0] as u32;
+        out.dr3 = self.dregs[3] as u32;
+        out.dr1 = self.dregs[1] as u32;
+        out.dr2 = self.dregs[2] as u32;
         // 4 and 5 deliberatly omitted because they aren't included in the minidump
         // format.
-        out.dr6 = self.dregs[6];
-        out.dr7 = self.dregs[7];
+        out.dr6 = self.dregs[6] as u32;
+        out.dr7 = self.dregs[7] as u32;
 
-        out.gs = self.regs.xgs;
-        out.fs = self.regs.xfs;
-        out.es = self.regs.xes;
-        out.ds = self.regs.xds;
+        out.gs = self.regs.xgs as u32;
+        out.fs = self.regs.xfs as u32;
+        out.es = self.regs.xes as u32;
+        out.ds = self.regs.xds as u32;
 
-        out.edi = self.regs.edi;
-        out.esi = self.regs.esi;
-        out.ebx = self.regs.ebx;
-        out.edx = self.regs.edx;
-        out.ecx = self.regs.ecx;
-        out.eax = self.regs.eax;
+        out.edi = self.regs.edi as u32;
+        out.esi = self.regs.esi as u32;
+        out.ebx = self.regs.ebx as u32;
+        out.edx = self.regs.edx as u32;
+        out.ecx = self.regs.ecx as u32;
+        out.eax = self.regs.eax as u32;
 
-        out.ebp = self.regs.ebp;
-        out.eip = self.regs.eip;
-        out.cs = self.regs.xcs;
-        out.eflags = self.regs.eflags;
-        out.esp = self.regs.esp;
-        out.ss = self.regs.xss;
+        out.ebp = self.regs.ebp as u32;
+        out.eip = self.regs.eip as u32;
+        out.cs = self.regs.xcs as u32;
+        out.eflags = self.regs.eflags as u32;
+        out.esp = self.regs.esp as u32;
+        out.ss = self.regs.xss as u32;
 
-        out.float_save.control_word = self.fpregs.cwd;
-        out.float_save.status_word = self.fpregs.swd;
-        out.float_save.tag_word = self.fpregs.twd;
-        out.float_save.error_offset = self.fpregs.fip;
-        out.float_save.error_selector = self.fpregs.fcs;
-        out.float_save.data_offset = self.fpregs.foo;
-        out.float_save.data_selector = self.fpregs.fos;
+        out.float_save.control_word = self.fpregs.cwd as u32;
+        out.float_save.status_word = self.fpregs.swd as u32;
+        out.float_save.tag_word = self.fpregs.twd as u32;
+        out.float_save.error_offset = self.fpregs.fip as u32;
+        out.float_save.error_selector = self.fpregs.fcs as u32;
+        out.float_save.data_offset = self.fpregs.foo as u32;
+        out.float_save.data_selector = self.fpregs.fos as u32;
 
         // 8 registers * 10 bytes per register.
         // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
@@ -255,40 +265,58 @@ impl ThreadInfoX86 {
             .unwrap(); // Which has to work as we know the numbers work out
 
         // This matches the Intel fpsave format.
-        let values = (
-            self.fpregs.cwd as u16,
-            self.fpregs.swd as u16,
-            self.fpregs.twd as u16,
-            self.fpxregs.fop as u16,
-            self.fpxregs.fip as u32,
-            self.fpxregs.fcs as u16,
-            self.fpregs.foo as u32,
-            self.fpregs.fos as u16,
-            self.fpxregs.mxcsr as u32,
-        );
-
         let mut idx = 0;
-        for val in values {
-            for byte in val.to_ne_bytes() {
-                out.extended_registers[idx] = byte;
-                idx += 1;
-            }
+        for val in &(self.fpregs.cwd as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpregs.swd as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpregs.twd as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpxregs.fop as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpxregs.fip as u32).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpxregs.fcs as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpregs.foo as u32).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpregs.fos as u16).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
+        }
+        for val in &(self.fpxregs.mxcsr as u32).to_ne_bytes() {
+            out.extended_registers[idx] = *val;
+            idx += 1;
         }
 
         // my_memcpy(out->extended_registers + 32, &fpxregs.st_space, 128);
         idx = 32;
-        for val in self.fpxregs.st_space {
-            for byte in val.to_ne_bytes() {
-                out.extended_registers[idx] = byte;
+        for val in &self.fpxregs.st_space {
+            for byte in &val.to_ne_bytes() {
+                out.extended_registers[idx] = *byte;
                 idx += 1;
             }
         }
 
         // my_memcpy(out->extended_registers + 160, &fpxregs.xmm_space, 128);
         idx = 160;
-        for val in self.fpxregs.xmm_space {
-            for byte in val.to_ne_bytes() {
-                out.extended_registers[idx] = byte;
+        for val in &self.fpxregs.xmm_space {
+            for byte in &val.to_ne_bytes() {
+                out.extended_registers[idx] = *byte;
                 idx += 1;
             }
         }

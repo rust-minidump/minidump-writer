@@ -1,7 +1,7 @@
 pub const MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE: usize = 80;
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct MDFloatingSaveAreaX86 {
     pub control_word: u32,
     pub status_word: u32,
@@ -17,11 +17,31 @@ pub struct MDFloatingSaveAreaX86 {
     pub cr0_npx_state: u32,
 }
 
+// The std library doesn't provide "Default" for all
+// array-lengths. Only up to 32. So we have to implement
+// our own default, because of `reserved4: [u8; 96]`
+impl Default for MDFloatingSaveAreaX86 {
+    #[inline]
+    fn default() -> Self {
+        MDFloatingSaveAreaX86 {
+            control_word: 0,
+            status_word: 0,
+            tag_word: 0,
+            error_offset: 0,
+            error_selector: 0,
+            data_offset: 0,
+            data_selector: 0,
+            register_area: [0; MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE],
+            cr0_npx_state: 0,
+        }
+    }
+}
+
 const MD_CONTEXT_X86_EXTENDED_REGISTERS_SIZE: usize = 512;
 /* MAXIMUM_SUPPORTED_EXTENSION */
 
 #[repr(C)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct MDRawContextX86 {
     /* The next field determines the layout of the structure, and which parts
      * of it are populated */
@@ -67,31 +87,64 @@ pub struct MDRawContextX86 {
     pub extended_registers: [u8; MD_CONTEXT_X86_EXTENDED_REGISTERS_SIZE],
 }
 
+impl Default for MDRawContextX86 {
+    #[inline]
+    fn default() -> Self {
+        MDRawContextX86 {
+            context_flags: 0,
+            dr0: 0,
+            dr1: 0,
+            dr2: 0,
+            dr3: 0,
+            dr6: 0,
+            dr7: 0,
+            float_save: Default::default(),
+            gs: 0,
+            fs: 0,
+            es: 0,
+            ds: 0,
+            edi: 0,
+            esi: 0,
+            ebx: 0,
+            edx: 0,
+            ecx: 0,
+            eax: 0,
+            ebp: 0,
+            eip: 0,
+            cs: 0,
+            eflags: 0,
+            esp: 0,
+            ss: 0,
+            extended_registers: [0; MD_CONTEXT_X86_EXTENDED_REGISTERS_SIZE],
+        }
+    }
+}
+
 /* For (MDRawContextX86).context_flags.  These values indicate the type of
  * context stored in the structure.  The high 24 bits identify the CPU, the
  * low 8 bits identify the type of context saved. */
-const MD_CONTEXT_X86: u32 = 0x00010000;
+pub const MD_CONTEXT_X86: u32 = 0x00010000;
 /* CONTEXT_i386, CONTEXT_i486: identifies CPU */
-const MD_CONTEXT_X86_CONTROL: u32 = MD_CONTEXT_X86 | 0x00000001;
+pub const MD_CONTEXT_X86_CONTROL: u32 = MD_CONTEXT_X86 | 0x00000001;
 /* CONTEXT_CONTROL */
-const MD_CONTEXT_X86_INTEGER: u32 = MD_CONTEXT_X86 | 0x00000002;
+pub const MD_CONTEXT_X86_INTEGER: u32 = MD_CONTEXT_X86 | 0x00000002;
 /* CONTEXT_INTEGER */
-const MD_CONTEXT_X86_SEGMENTS: u32 = MD_CONTEXT_X86 | 0x00000004;
+pub const MD_CONTEXT_X86_SEGMENTS: u32 = MD_CONTEXT_X86 | 0x00000004;
 /* CONTEXT_SEGMENTS */
-const MD_CONTEXT_X86_FLOATING_POINT: u32 = MD_CONTEXT_X86 | 0x00000008;
+pub const MD_CONTEXT_X86_FLOATING_POINT: u32 = MD_CONTEXT_X86 | 0x00000008;
 /* CONTEXT_FLOATING_POINT */
-const MD_CONTEXT_X86_DEBUG_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000010;
+pub const MD_CONTEXT_X86_DEBUG_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000010;
 /* CONTEXT_DEBUG_REGISTERS */
-const MD_CONTEXT_X86_EXTENDED_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000020;
+pub const MD_CONTEXT_X86_EXTENDED_REGISTERS: u32 = MD_CONTEXT_X86 | 0x00000020;
 /* CONTEXT_EXTENDED_REGISTERS */
-const MD_CONTEXT_X86_XSTATE: u32 = MD_CONTEXT_X86 | 0x00000040;
+pub const MD_CONTEXT_X86_XSTATE: u32 = MD_CONTEXT_X86 | 0x00000040;
 /* CONTEXT_XSTATE */
 
-const MD_CONTEXT_X86_FULL: u32 =
+pub const MD_CONTEXT_X86_FULL: u32 =
     MD_CONTEXT_X86_CONTROL | MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_SEGMENTS;
 /* CONTEXT_FULL */
 
-const MD_CONTEXT_X86_ALL: u32 = MD_CONTEXT_X86_FULL
+pub const MD_CONTEXT_X86_ALL: u32 = MD_CONTEXT_X86_FULL
     | MD_CONTEXT_X86_FLOATING_POINT
     | MD_CONTEXT_X86_DEBUG_REGISTERS
     | MD_CONTEXT_X86_EXTENDED_REGISTERS;

@@ -90,7 +90,7 @@ where
 pub enum CrashingThreadContext {
     None,
     CrashContext(MDLocationDescriptor),
-    CrashContextPlusAddress((MDLocationDescriptor, u64)),
+    CrashContextPlusAddress((MDLocationDescriptor, usize)),
 }
 
 pub struct MinidumpWriter {
