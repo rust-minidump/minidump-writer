@@ -501,9 +501,18 @@ fn test_skip_if_requested_helper(context: Context) {
         tmp.set_crash_context(crash_context);
     }
 
+    let pr_mapping_addr;
+    #[cfg(target_pointer_width = "64")]
+    {
+        pr_mapping_addr = 0x0102030405060708;
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        pr_mapping_addr = 0x010203040;
+    };
     let res = tmp
         .skip_stacks_if_mapping_unreferenced()
-        .set_principal_mapping_address(0x0102030405060708)
+        .set_principal_mapping_address(pr_mapping_addr)
         .dump(&mut tmpfile);
     child.kill().expect("Failed to kill process");
 
@@ -556,10 +565,14 @@ fn test_sanitized_stacks_helper(context: Context) {
     let thread_list: MinidumpThreadList =
         dump.get_stream().expect("Couldn't find MinidumpThreadList");
 
-    let defaced = if cfg!(target_pointer_width = "64") {
-        0x0defaced0defacedusize.to_ne_bytes()
-    } else {
-        0x0defacedusize.to_ne_bytes()
+    let defaced;
+    #[cfg(target_pointer_width = "64")]
+    {
+        defaced = 0x0defaced0defacedusize.to_ne_bytes();
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        defaced = 0x0defacedusize.to_ne_bytes()
     };
 
     for thread in thread_list.threads {
