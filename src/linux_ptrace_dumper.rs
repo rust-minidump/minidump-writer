@@ -23,9 +23,9 @@ pub struct LinuxPtraceDumper {
     pub mappings: Vec<MappingInfo>,
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub const AT_SYSINFO_EHDR: u32 = 33;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
 impl Drop for LinuxPtraceDumper {
@@ -92,7 +92,8 @@ impl LinuxPtraceDumper {
                 Err(_) => continue,
             }
         }
-        if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
             // On x86, the stack pointer is NULL or -1, when executing trusted code in
             // the seccomp sandbox. Not only does this cause difficulties down the line
             // when trying to dump the thread's stack, it also results in the minidumps
@@ -203,7 +204,17 @@ impl LinuxPtraceDumper {
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
-        let entry_point_loc = *self.auxv.get(&libc::AT_ENTRY).unwrap_or(&0);
+        let at_entry;
+        #[cfg(target_arch = "arm")]
+        {
+            at_entry = 9;
+        }
+        #[cfg(not(target_arch = "arm"))]
+        {
+            at_entry = libc::AT_ENTRY;
+        }
+
+        let entry_point_loc = *self.auxv.get(&at_entry).unwrap_or(&0);
 
         let auxv_path = path::PathBuf::from(format!("/proc/{}/maps", self.pid));
         let auxv_file = std::fs::File::open(auxv_path)?;
