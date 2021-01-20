@@ -1,7 +1,9 @@
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer_linux::app_memory::AppMemory;
-use minidump_writer_linux::crash_context::{fpstate_t, CrashContext};
+use minidump_writer_linux::crash_context::CrashContext;
+#[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
+use minidump_writer_linux::crash_context::fpstate_t;
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
@@ -24,6 +26,7 @@ enum Context {
     Without,
 }
 
+#[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 fn get_ucontext() -> Result<libc::ucontext_t> {
     let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
     let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
@@ -32,14 +35,28 @@ fn get_ucontext() -> Result<libc::ucontext_t> {
 }
 
 fn get_crash_context(tid: Pid) -> CrashContext {
-    let context = get_ucontext().expect("Failed to get ucontext");
     let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
-    let float_state: fpstate_t = unsafe { std::mem::zeroed() };
-    CrashContext {
-        siginfo,
-        tid,
-        context,
-        float_state,
+    #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
+    {
+        let context = get_ucontext().expect("Failed to get ucontext");
+        let float_state: fpstate_t = unsafe { std::mem::zeroed() };
+        CrashContext {
+            siginfo,
+            tid,
+            context,
+            float_state,
+        }
+    }
+    #[cfg(any(target_arch = "mips", target_arch = "arm"))]
+    {
+        // TODO: `libc` doesn't provide `getcontext()` for ARM and mips, so
+        //       for now I just use zeroes. But this should be filled in properly!
+        let context: libc::ucontext_t = unsafe { std::mem::zeroed() };
+        CrashContext {
+            siginfo,
+            tid,
+            context,
+        }
     }
 }
 
