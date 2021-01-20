@@ -137,7 +137,7 @@ fn test_merged_mappings() {
             file.as_raw_fd(),
             // Map a different offset just to
             // better test real-world conditions.
-            page_size.try_into().unwrap(), // try_into() in order to work for 32 and 64 bit 
+            page_size.try_into().unwrap(), // try_into() in order to work for 32 and 64 bit
         )
     };
 

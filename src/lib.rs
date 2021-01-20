@@ -17,5 +17,7 @@ pub mod minidump_format;
 pub mod minidump_writer;
 mod sections;
 pub mod thread_info;
+#[cfg(target_os = "android")]
+mod android;
 
 pub use maps_reader::LINUX_GATE_LIBRARY_NAME;

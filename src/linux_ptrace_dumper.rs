@@ -13,6 +13,8 @@ use std::convert::TryInto;
 use std::ffi::c_void;
 use std::io::{BufRead, BufReader};
 use std::path;
+#[cfg(target_os = "android")]
+use crate::android::late_process_mappings;
 
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
@@ -57,6 +59,15 @@ impl LinuxPtraceDumper {
         self.enumerate_mappings()?;
         Ok(())
     }
+
+    pub fn late_init(&mut self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            late_process_mappings(self.pid, &mut self.mappings)?;
+        }
+        Ok(())
+    }
+
     /// Copies content of |length| bytes from a given process |child|,
     /// starting from |src|, into |dest|. This method uses ptrace to extract
     /// the content from the target process. Always returns true.

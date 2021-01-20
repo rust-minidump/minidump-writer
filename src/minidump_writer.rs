@@ -176,7 +176,7 @@ impl MinidumpWriter {
         let mut dumper = LinuxPtraceDumper::new(self.process_id)?;
         dumper.suspend_threads()?;
         // TODO: Doesn't exist yet
-        //self.dumper.late_init()?;
+        dumper.late_init()?;
 
         if self.skip_stacks_if_mapping_unreferenced {
             if let Some(address) = self.principal_mapping_address {
