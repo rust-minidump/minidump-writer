@@ -476,29 +476,22 @@ impl LinuxPtraceDumper {
                     }
                     if section.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0 {
                         if section.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0 {
-                            unsafe {
-                                let ptr = mem_slice.as_ptr().offset(section.sh_offset.try_into()?);
-                                let text_section = std::slice::from_raw_parts(
-                                    ptr as *const u8,
-                                    section.sh_size.try_into()?,
-                                );
-
-                                // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
-                                // function backwards-compatible.
-                                let max_len = std::cmp::min(text_section.len(), 4096);
-                                let mut result = vec![0u8; std::mem::size_of::<MDGUID>()];
-                                let mut offset = 0;
-                                while offset < max_len {
-                                    for idx in 0..std::mem::size_of::<MDGUID>() {
-                                        if offset + idx >= text_section.len() {
-                                            break;
-                                        }
-                                        result[idx] ^= text_section[offset + idx];
+                            let text_section = &mem_slice[section.sh_offset as usize..][..section.sh_size as usize];
+                            // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
+                            // function backwards-compatible.
+                            let max_len = std::cmp::min(text_section.len(), 4096);
+                            let mut result = vec![0u8; std::mem::size_of::<MDGUID>()];
+                            let mut offset = 0;
+                            while offset < max_len {
+                                for idx in 0..std::mem::size_of::<MDGUID>() {
+                                    if offset + idx >= text_section.len() {
+                                        break;
                                     }
-                                    offset += std::mem::size_of::<MDGUID>();
+                                    result[idx] ^= text_section[offset + idx];
                                 }
-                                return Ok(result);
+                                offset += std::mem::size_of::<MDGUID>();
                             }
+                            return Ok(result);
                         }
                     }
                 }
