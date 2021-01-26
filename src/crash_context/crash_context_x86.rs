@@ -1,16 +1,16 @@
 use super::CrashContext;
 use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
-use libc::{greg_t, REG_EIP, REG_ESP, REG_GS, REG_FS, REG_ES, REG_DS,
+use libc::{REG_EIP, REG_ESP, REG_GS, REG_FS, REG_ES, REG_DS,
 	REG_EDI, REG_ESI, REG_EBX, REG_EDX, REG_ECX, REG_EAX, REG_EBP, REG_CS,
 	REG_EFL, REG_UESP, REG_SS};
 impl CrashContext {
-    pub fn get_instruction_pointer(&self) -> greg_t {
-        self.context.uc_mcontext.gregs[REG_EIP as usize]
+    pub fn get_instruction_pointer(&self) -> usize {
+        self.context.uc_mcontext.gregs[REG_EIP as usize] as usize
     }
 
-    pub fn get_stack_pointer(&self) -> greg_t {
-        self.context.uc_mcontext.gregs[REG_ESP as usize]
+    pub fn get_stack_pointer(&self) -> usize {
+        self.context.uc_mcontext.gregs[REG_ESP as usize] as usize
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {

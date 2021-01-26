@@ -223,7 +223,7 @@ impl MinidumpWriter {
             .get_instruction_pointer();
         let stack_pointer = self.crash_context.as_ref().unwrap().get_stack_pointer();
 
-        if pc >= low_addr as libc::greg_t && pc < high_addr as libc::greg_t {
+        if pc >= low_addr && pc < high_addr {
             return true;
         }
 

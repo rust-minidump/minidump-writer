@@ -1,15 +1,14 @@
 use super::CrashContext;
 use crate::minidump_cpu::RawContextCPU;
 use crate::minidump_cpu::imp::*;
-use libc::greg_t;
 
 impl CrashContext {
-    pub fn get_instruction_pointer(&self) -> greg_t {
-        self.context.uc_mcontext.arm_pc as greg_t
+    pub fn get_instruction_pointer(&self) -> usize {
+        self.context.uc_mcontext.arm_pc as usize
     }
 
-    pub fn get_stack_pointer(&self) -> greg_t {
-        self.context.uc_mcontext.arm_sp as greg_t
+    pub fn get_stack_pointer(&self) -> usize {
+        self.context.uc_mcontext.arm_sp as usize
     }
 
 	pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
