@@ -1,4 +1,6 @@
 // use libc::c_void;
+#[cfg(target_os = "android")]
+use crate::android::late_process_mappings;
 use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
 use crate::maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX};
 use crate::minidump_format::MDGUID;
@@ -13,8 +15,6 @@ use std::convert::TryInto;
 use std::ffi::c_void;
 use std::io::{BufRead, BufReader};
 use std::path;
-#[cfg(target_os = "android")]
-use crate::android::late_process_mappings;
 
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
@@ -177,16 +177,17 @@ impl LinuxPtraceDumper {
     fn enumerate_threads(&mut self) -> Result<()> {
         let task_path = path::PathBuf::from(format!("/proc/{}/task", self.pid));
         if task_path.is_dir() {
-            for entry in std::fs::read_dir(task_path)? {
-                let name = entry?
-                    .file_name()
-                    .to_str()
-                    .ok_or("Unparsable filename")?
-                    .parse::<Pid>();
-                if let Ok(tid) = name {
-                    self.threads.push(tid);
-                }
-            }
+            std::fs::read_dir(task_path)?
+                .into_iter()
+                .filter_map(|entry| entry.ok()) // Filter out bad entries
+                .filter_map(|entry| {
+                    entry
+                        .file_name() // Parse name to Pid, filter out those that are unparsable
+                        .to_str()
+                        .and_then(|name| name.parse::<Pid>().ok())
+                })
+                .map(|tid| self.threads.push(tid)) // Push the resulting Pids
+                .count(); // Execute iterator
         }
         Ok(())
     }
@@ -196,11 +197,14 @@ impl LinuxPtraceDumper {
         let auxv_file = std::fs::File::open(auxv_path)?;
         let input = BufReader::new(auxv_file);
         let reader = ProcfsAuxvIter::new(input);
+        let mut res = Err("Found no auxv entry".into());
         for item in reader {
-            let item = item?;
-            self.auxv.insert(item.key, item.value);
+            if let Ok(item) = item {
+                self.auxv.insert(item.key, item.value);
+                res = Ok(())
+            }
         }
-        Ok(())
+        res
     }
 
     fn enumerate_mappings(&mut self) -> Result<()> {
@@ -227,10 +231,10 @@ impl LinuxPtraceDumper {
 
         let entry_point_loc = *self.auxv.get(&at_entry).unwrap_or(&0);
 
-        let auxv_path = path::PathBuf::from(format!("/proc/{}/maps", self.pid));
-        let auxv_file = std::fs::File::open(auxv_path)?;
+        let maps_path = path::PathBuf::from(format!("/proc/{}/maps", self.pid));
+        let maps_file = std::fs::File::open(maps_path)?;
 
-        for line in BufReader::new(auxv_file).lines() {
+        for line in BufReader::new(maps_file).lines() {
             // /proc/<pid>/maps looks like this
             // 7fe34a863000-7fe34a864000 rw-p 00009000 00:31 4746408                    /usr/lib64/libogg.so.0.8.4
             let line = line?;
@@ -476,7 +480,8 @@ impl LinuxPtraceDumper {
                     }
                     if section.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0 {
                         if section.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0 {
-                            let text_section = &mem_slice[section.sh_offset as usize..][..section.sh_size as usize];
+                            let text_section = &mem_slice[section.sh_offset as usize..]
+                                [..section.sh_size as usize];
                             // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
                             // function backwards-compatible.
                             let max_len = std::cmp::min(text_section.len(), 4096);
