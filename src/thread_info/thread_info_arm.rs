@@ -1,5 +1,5 @@
 use super::{CommonThreadInfo, Pid};
-use crate::minidump_cpu::imp::{MD_CONTEXT_ARM_GPR_COUNT, MD_CONTEXT_ARM_FULL};
+use crate::minidump_cpu::imp::{MD_CONTEXT_ARM_FULL, MD_CONTEXT_ARM_GPR_COUNT};
 use crate::minidump_cpu::RawContextCPU;
 use crate::Result;
 use libc;
@@ -29,18 +29,18 @@ use nix::sys::ptrace;
 #[repr(C)]
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Default)]
 pub struct user_fpregs {
-  // fpregs: [fp_reg; 8],
-  fpregs: [u32; 8*3], // Fields not used, so shortening the struct to 3 x u32
-  fpsr: u32,
-  fpcr: u32,
-  ftype: [u8; 8],
-  init_flag: u32,
+    // fpregs: [fp_reg; 8],
+    fpregs: [u32; 8 * 3], // Fields not used, so shortening the struct to 3 x u32
+    fpsr: u32,
+    fpcr: u32,
+    ftype: [u8; 8],
+    init_flag: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Default)]
 pub struct user_regs {
-  uregs: [libc::c_long; 18],
+    uregs: [libc::c_long; 18],
 }
 
 #[derive(Debug)]
@@ -55,7 +55,6 @@ pub struct ThreadInfoArm {
 impl CommonThreadInfo for ThreadInfoArm {}
 
 impl ThreadInfoArm {
-
     // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
     fn getfpregs(pid: Pid) -> Result<user_fpregs> {
         Self::ptrace_get_data::<user_fpregs>(
@@ -73,7 +72,6 @@ impl ThreadInfoArm {
             nix::unistd::Pid::from_raw(pid),
         )
     }
-
 
     pub fn get_instruction_pointer(&self) -> usize {
         self.regs.uregs[15] as usize

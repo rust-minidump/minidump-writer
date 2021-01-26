@@ -1,9 +1,9 @@
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer_linux::app_memory::AppMemory;
-use minidump_writer_linux::crash_context::CrashContext;
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 use minidump_writer_linux::crash_context::fpstate_t;
+use minidump_writer_linux::crash_context::CrashContext;
 use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;

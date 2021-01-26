@@ -59,7 +59,9 @@ pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawD
                 si_addr: *mut libc::c_void,
             }
 
-            sig_addr = unsafe { (*(&context.siginfo as *const libc::siginfo_t as *const siginfo_sigfault)).si_addr } as u64;
+            sig_addr = unsafe {
+                (*(&context.siginfo as *const libc::siginfo_t as *const siginfo_sigfault)).si_addr
+            } as u64;
         }
         #[cfg(not(target_arch = "arm"))]
         {

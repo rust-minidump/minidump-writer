@@ -1,24 +1,23 @@
-use crate::maps_reader::MappingInfo;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-#[cfg(target_pointer_width = "64")]
-use goblin::elf::header::header64 as elf_header;
+use crate::maps_reader::MappingInfo;
 #[cfg(target_pointer_width = "32")]
-use goblin::elf::header::header32 as elf_header;
-#[cfg(target_pointer_width = "64")]
-use goblin::elf::program_header::program_header64::ProgramHeader;
-#[cfg(target_pointer_width = "32")]
-use goblin::elf::program_header::program_header32::ProgramHeader;
+use goblin::elf::dynamic::dyn32::{Dyn, SIZEOF_DYN};
 #[cfg(target_pointer_width = "64")]
 use goblin::elf::dynamic::dyn64::{Dyn, SIZEOF_DYN};
 #[cfg(target_pointer_width = "32")]
-use goblin::elf::dynamic::dyn32::{Dyn, SIZEOF_DYN};
+use goblin::elf::header::header32 as elf_header;
+#[cfg(target_pointer_width = "64")]
+use goblin::elf::header::header64 as elf_header;
+#[cfg(target_pointer_width = "32")]
+use goblin::elf::program_header::program_header32::ProgramHeader;
+#[cfg(target_pointer_width = "64")]
+use goblin::elf::program_header::program_header64::ProgramHeader;
 
 use crate::thread_info::Pid;
 use crate::Result;
 use goblin::elf;
 use std::convert::TryInto;
 use std::ffi::c_void;
-
 
 // From /usr/include/elf.h of the android SDK
 // #define DT_ANDROID_REL (DT_LOOS + 2)
@@ -35,9 +34,9 @@ const DT_ANDROID_REL: u32 = (elf::dynamic::DT_LOOS + 2) as u32;
 const DT_ANDROID_RELA: u32 = (elf::dynamic::DT_LOOS + 4) as u32;
 
 struct DynVaddresses {
-    min_vaddr : usize,
-    dyn_vaddr : usize,
-    dyn_count : usize,
+    min_vaddr: usize,
+    dyn_vaddr: usize,
+    dyn_count: usize,
 }
 
 fn has_android_packed_relocations(pid: Pid, load_bias: usize, vaddrs: DynVaddresses) -> Result<()> {
@@ -46,13 +45,13 @@ fn has_android_packed_relocations(pid: Pid, load_bias: usize, vaddrs: DynVaddres
         let addr = (dyn_addr + SIZEOF_DYN * idx) as *mut c_void;
         let dyn_data = LinuxPtraceDumper::copy_from_process(pid, addr, SIZEOF_DYN as isize)?;
         // TODO: Couldn't find a nice way to use goblin for that, to avoid the unsafe-block
-        let dyn_obj : Dyn;
-        unsafe  {
+        let dyn_obj: Dyn;
+        unsafe {
             dyn_obj = std::mem::transmute::<[u8; SIZEOF_DYN], Dyn>(dyn_data.as_slice().try_into()?);
         }
 
         if dyn_obj.d_tag == DT_ANDROID_REL || dyn_obj.d_tag == DT_ANDROID_RELA {
-            return Ok(())
+            return Ok(());
         }
     }
     Err("no Android rel found".into())
@@ -74,14 +73,21 @@ fn get_effective_load_bias(pid: Pid, ehdr: &elf_header::Header, address: usize) 
     address
 }
 
-fn parse_loaded_elf_program_headers(pid: Pid, ehdr: &elf_header::Header, address: usize) -> DynVaddresses {
+fn parse_loaded_elf_program_headers(
+    pid: Pid,
+    ehdr: &elf_header::Header,
+    address: usize,
+) -> DynVaddresses {
     let phdr_addr = address + ehdr.e_phoff as usize;
     let mut min_vaddr = usize::MAX;
     let mut dyn_vaddr = 0;
     let mut dyn_count = 0;
 
-    let phdr_opt = LinuxPtraceDumper::copy_from_process(pid, phdr_addr as *mut c_void,
-                                                    elf_header::SIZEOF_EHDR as isize * ehdr.e_phnum as isize);
+    let phdr_opt = LinuxPtraceDumper::copy_from_process(
+        pid,
+        phdr_addr as *mut c_void,
+        elf_header::SIZEOF_EHDR as isize * ehdr.e_phnum as isize,
+    );
     if let Ok(ph_data) = phdr_opt {
         // TODO: The original C code doesn't have error-handling here at all.
         //       We silently ignore "not parsable" for now, but might bubble it up.
@@ -98,7 +104,6 @@ fn parse_loaded_elf_program_headers(pid: Pid, ehdr: &elf_header::Header, address
                 dyn_count = phdr.p_memsz as usize / SIZEOF_DYN;
             }
         }
-
     }
 
     DynVaddresses {
@@ -111,12 +116,17 @@ fn parse_loaded_elf_program_headers(pid: Pid, ehdr: &elf_header::Header, address
 pub fn late_process_mappings(pid: Pid, mappings: &mut [MappingInfo]) -> Result<()> {
     // Only consider exec mappings that indicate a file path was mapped, and
     // where the ELF header indicates a mapped shared library.
-    for mut map in mappings.iter_mut().filter(|m| m.executable
-                                           && m.name.as_ref().map_or(false, |n| n.starts_with("/"))) {
-        let ehdr_opt = LinuxPtraceDumper::copy_from_process(pid, map.start_address as *mut c_void,
-                                                        elf_header::SIZEOF_EHDR as isize)
-                                                                    .ok()
-                                                                    .and_then(|x| elf_header::Header::parse(&x).ok() );
+    for mut map in mappings
+        .iter_mut()
+        .filter(|m| m.executable && m.name.as_ref().map_or(false, |n| n.starts_with("/")))
+    {
+        let ehdr_opt = LinuxPtraceDumper::copy_from_process(
+            pid,
+            map.start_address as *mut c_void,
+            elf_header::SIZEOF_EHDR as isize,
+        )
+        .ok()
+        .and_then(|x| elf_header::Header::parse(&x).ok());
 
         if let Some(ehdr) = ehdr_opt {
             if ehdr.e_type == elf_header::ET_DYN {

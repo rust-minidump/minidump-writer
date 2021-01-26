@@ -1,8 +1,7 @@
 pub const MD_CONTEXT_ARM_GPR_COUNT: usize = 16;
 
-
-pub const MD_FLOATINGSAVEAREA_ARM_FPR_COUNT : usize = 32;
-pub const MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT: usize =  8;
+pub const MD_FLOATINGSAVEAREA_ARM_FPR_COUNT: usize = 32;
+pub const MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT: usize = 8;
 /*
  * Note that these structures *do not* map directly to the CONTEXT
  * structure defined in WinNT.h in the Windows Mobile SDK. That structure
@@ -10,9 +9,9 @@ pub const MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT: usize =  8;
  * wild anyway, as Windows CE only seems to produce "cedumps" which
  * are not exactly minidumps.
  */
- #[repr(C)]
+#[repr(C)]
 pub struct MDFloatingSaveAreaARM {
-    pub fpscr: u64,      /* FPU status register */
+    pub fpscr: u64, /* FPU status register */
 
     /* 32 64-bit floating point registers, d0 .. d31. */
     pub regs: [u64; MD_FLOATINGSAVEAREA_ARM_FPR_COUNT],
@@ -27,12 +26,12 @@ pub struct MDFloatingSaveAreaARM {
 impl Default for MDFloatingSaveAreaARM {
     #[inline]
     fn default() -> Self {
-    	MDFloatingSaveAreaARM {
-    		fpscr: 0,
-    		regs: [0; MD_FLOATINGSAVEAREA_ARM_FPR_COUNT],
-    		extra: [0; MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT],
-    	}
-	}
+        MDFloatingSaveAreaARM {
+            fpscr: 0,
+            regs: [0; MD_FLOATINGSAVEAREA_ARM_FPR_COUNT],
+            extra: [0; MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT],
+        }
+    }
 }
 
 #[repr(C)]
@@ -51,12 +50,12 @@ pub struct MDRawContextARM {
     pub iregs: [u32; MD_CONTEXT_ARM_GPR_COUNT],
 
     /* CPSR (flags, basically): 32 bits:
-          bit 31 - N (negative)
-          bit 30 - Z (zero)
-          bit 29 - C (carry)
-          bit 28 - V (overflow)
-          bit 27 - Q (saturation flag, sticky)
-       All other fields -- ignore */
+       bit 31 - N (negative)
+       bit 30 - Z (zero)
+       bit 29 - C (carry)
+       bit 28 - V (overflow)
+       bit 27 - Q (saturation flag, sticky)
+    All other fields -- ignore */
     pub cpsr: u32,
 
     /* The next field is included with MD_CONTEXT_ARM_FLOATING_POINT */
@@ -66,13 +65,13 @@ pub struct MDRawContextARM {
 impl Default for MDRawContextARM {
     #[inline]
     fn default() -> Self {
-    	MDRawContextARM {
-    		context_flags: 0,
-    		iregs: [0; MD_CONTEXT_ARM_GPR_COUNT],
-    		cpsr: 0,
-    		float_save: Default::default(),
-    	}
-	}
+        MDRawContextARM {
+            context_flags: 0,
+            iregs: [0; MD_CONTEXT_ARM_GPR_COUNT],
+            cpsr: 0,
+            float_save: Default::default(),
+        }
+    }
 }
 
 /* Indices into iregs for registers with a dedicated or conventional
@@ -94,11 +93,11 @@ impl Default for MDRawContextARM {
  * are a whole parallel minidump file format for Windows CE.
  * Therefore, Breakpad defines its own value for ARM CPUs.
  */
-pub const MD_CONTEXT_ARM_OLD : u32 =  0x00000040;
+pub const MD_CONTEXT_ARM_OLD: u32 = 0x00000040;
 /* This value was chosen to avoid likely conflicts with MD_CONTEXT_*
  * for other CPUs. */
-pub const MD_CONTEXT_ARM : u32 = 0x40000000;
-pub const MD_CONTEXT_ARM_INTEGER : u32 = MD_CONTEXT_ARM | 0x00000002;
-pub const MD_CONTEXT_ARM_FLOATING_POINT : u32 = MD_CONTEXT_ARM | 0x00000004;
-pub const MD_CONTEXT_ARM_FULL : u32 = MD_CONTEXT_ARM_INTEGER | MD_CONTEXT_ARM_FLOATING_POINT;
-pub const MD_CONTEXT_ARM_ALL : u32 = MD_CONTEXT_ARM_INTEGER | MD_CONTEXT_ARM_FLOATING_POINT;
+pub const MD_CONTEXT_ARM: u32 = 0x40000000;
+pub const MD_CONTEXT_ARM_INTEGER: u32 = MD_CONTEXT_ARM | 0x00000002;
+pub const MD_CONTEXT_ARM_FLOATING_POINT: u32 = MD_CONTEXT_ARM | 0x00000004;
+pub const MD_CONTEXT_ARM_FULL: u32 = MD_CONTEXT_ARM_INTEGER | MD_CONTEXT_ARM_FLOATING_POINT;
+pub const MD_CONTEXT_ARM_ALL: u32 = MD_CONTEXT_ARM_INTEGER | MD_CONTEXT_ARM_FLOATING_POINT;
