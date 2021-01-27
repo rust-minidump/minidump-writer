@@ -197,14 +197,16 @@ impl LinuxPtraceDumper {
         let auxv_file = std::fs::File::open(auxv_path)?;
         let input = BufReader::new(auxv_file);
         let reader = ProcfsAuxvIter::new(input);
-        let mut res = Err("Found no auxv entry".into());
-        for item in reader {
-            if let Ok(item) = item {
-                self.auxv.insert(item.key, item.value);
-                res = Ok(())
-            }
+        self.auxv = reader
+            .filter_map(Result::ok)
+            .map(|x| (x.key, x.value))
+            .collect();
+
+        if self.auxv.is_empty() {
+            Err("Found no auxv entry".into())
+        } else {
+            Ok(())
         }
-        res
     }
 
     fn enumerate_mappings(&mut self) -> Result<()> {
