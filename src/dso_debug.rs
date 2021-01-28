@@ -1,11 +1,13 @@
 use crate::auxv_reader::AuxvType;
+use crate::errors::SectionDsoDebugError;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_format::*;
 use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
-use crate::Result;
 use libc;
 use std::collections::HashMap;
 use std::io::Cursor;
+
+type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 
 #[cfg(all(target_pointer_width = "64", target_arch = "arm"))]
 type ElfPhdr = u64;
@@ -89,8 +91,12 @@ pub fn write_dso_debug_stream(
         at_phdr = libc::AT_PHDR;
         at_phnum = libc::AT_PHNUM;
     }
-    let phnum_max = *auxv.get(&at_phnum).ok_or("Could not find AT_PHNUM")? as usize;
-    let phdr = *auxv.get(&at_phdr).ok_or("Could not find AT_PHDR")? as usize;
+    let phnum_max = *auxv
+        .get(&at_phnum)
+        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM"))? as usize;
+    let phdr = *auxv
+        .get(&at_phdr)
+        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR"))? as usize;
 
     let phdr_size = std::mem::size_of::<ElfPhdr>();
     let ph = LinuxPtraceDumper::copy_from_process(
@@ -128,7 +134,7 @@ pub fn write_dso_debug_stream(
     }
 
     if dyn_addr == 0 {
-        return Err("Could not find dyn_addr".into());
+        return Err(SectionDsoDebugError::CouldNotFind("dyn_addr"));
     }
 
     dyn_addr += base as ElfAddr;

@@ -1,9 +1,11 @@
+use crate::errors::SectionMappingsError;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::MappingInfo;
 use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
 use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
-use crate::Result;
+
+type Result<T> = std::result::Result<T, SectionMappingsError>;
 
 /// Write information about the mappings in effect. Because we are using the
 /// minidump format, the information about the mappings is pretty limited.

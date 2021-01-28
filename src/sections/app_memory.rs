@@ -1,9 +1,11 @@
+use crate::errors::SectionAppMemoryError;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_format::*;
 use crate::minidump_writer::{DumpBuf, MinidumpWriter};
 use crate::sections::MemoryArrayWriter;
-use crate::Result;
 use std::convert::TryInto;
+
+type Result<T> = std::result::Result<T, SectionAppMemoryError>;
 
 /// Write application-provided memory regions.
 pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<()> {

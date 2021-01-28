@@ -8,7 +8,6 @@ use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
 use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
 use minidump_writer_linux::minidump_writer::MinidumpWriter;
 use minidump_writer_linux::thread_info::Pid;
-use minidump_writer_linux::Result;
 use nix::errno::Errno;
 use nix::sys::signal::Signal;
 use std::convert::TryInto;

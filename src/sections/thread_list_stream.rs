@@ -1,11 +1,13 @@
+use crate::errors::SectionThreadListError;
 use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::minidump_cpu::RawContextCPU;
 use crate::minidump_format::*;
 use crate::minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter};
 use crate::sections::{MemoryArrayWriter, MemoryWriter};
-use crate::Result;
 use std::convert::TryInto;
 use std::io::Write;
+
+type Result<T> = std::result::Result<T, SectionThreadListError>;
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
