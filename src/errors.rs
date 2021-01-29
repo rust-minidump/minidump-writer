@@ -23,25 +23,25 @@ pub enum MapsReaderError {
     LinuxGateNotConvertable(#[from] std::num::TryFromIntError),
 
     // get_mmap()
-    #[error("Not safe to open mapping")] // TODO: Add info
-    NotSafeToOpenMapping,
+    #[error("Not safe to open mapping {0}")]
+    NotSafeToOpenMapping(String),
     #[error("IO Error")]
     FileError(#[from] std::io::Error),
     #[error("Mmapped file empty or not an ELF file")]
     MmapSanityCheckFailed,
-    #[error("Symlink does not match")] // TODO: add info
-    SymlinkError,
+    #[error("Symlink does not match ({0} vs. {1}")]
+    SymlinkError(std::path::PathBuf, std::path::PathBuf),
 
     // handle_deleted_file_in_mapping()
     #[error("Couldn't parse as ELF file")]
     ELFParsingFailed(#[from] goblin::error::Error),
-    #[error("No soname found")] // TODO: Add info
-    NoSoName,
+    #[error("No soname found (filename: {0}")]
+    NoSoName(String),
 }
 
 #[derive(Debug, Error)]
 pub enum AuxvReaderError {
-    #[error("Invalid auxv format")] // TODO: Add info
+    #[error("Invalid auxv format (should not hit EOF before AT_NULL)")]
     InvalidFormat,
     #[error("IO Error")]
     FileError(#[from] std::io::Error),
@@ -59,8 +59,8 @@ pub enum CpuInfoError {
 pub enum ThreadInfoError {
     #[error("Index out of bounds: Got {0}, only have {1}")]
     IndexOutOfBounds(usize, usize),
-    #[error("Invalid ppid or tgid")] // TODO: Add info
-    InvalidPid,
+    #[error("Either ppid ({1}) or tgid {2} not found in {0}")] // TODO: Add info
+    InvalidPid(String, Pid, Pid),
     #[error("IO error")]
     IOError(#[from] std::io::Error),
     #[error("Couldn't parse address")]
@@ -87,16 +87,16 @@ pub enum DumperError {
     DetachSkippedThread(Pid),
     #[error("No threads left to suspend")]
     SuspendNoThreadsLeft,
-    #[error("No mapping for stack pointer found")] // TODO: Add info
+    #[error("No mapping for stack pointer found")]
     NoStackPointerMapping,
     #[error("Failed slice conversion")]
     TryFromSliceError(#[from] std::array::TryFromSliceError),
     #[error("Couldn't parse as ELF file")]
     ELFParsingFailed(#[from] goblin::error::Error),
-    #[error("No build-id found")] // TODO: Add info
+    #[error("No build-id found")]
     NoBuildIDFound,
-    #[error("Not safe to open mapping")] // TODO: Add info
-    NotSafeToOpenMapping,
+    #[error("Not safe to open mapping: {0}")]
+    NotSafeToOpenMapping(String),
     #[error("Failed integer conversion")]
     TryFromIntError(#[from] std::num::TryFromIntError),
     #[error("Maps reader error")]
@@ -165,7 +165,7 @@ pub enum SectionThreadListError {
 pub enum SectionDsoDebugError {
     #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
-    #[error("Could not find: {0}")] // TODO: Add info
+    #[error("Could not find: {0}")]
     CouldNotFind(&'static str),
     #[error("Failed to copy memory from process")]
     CopyFromProcessError(#[from] DumperError),

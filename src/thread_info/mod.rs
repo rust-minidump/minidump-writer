@@ -77,7 +77,11 @@ trait CommonThreadInfo {
             }
         }
         if ppid == -1 || tgid == -1 {
-            return Err(ThreadInfoError::InvalidPid);
+            return Err(ThreadInfoError::InvalidPid(
+                format!("/proc/{}/status", tid),
+                ppid,
+                tgid,
+            ));
         }
         Ok((ppid, tgid))
     }

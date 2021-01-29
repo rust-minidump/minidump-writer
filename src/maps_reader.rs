@@ -200,7 +200,9 @@ impl MappingInfo {
 
     pub fn get_mmap(name: &Option<String>, offset: usize) -> Result<Mmap> {
         if !MappingInfo::is_mapped_file_safe_to_open(&name) {
-            return Err(MapsReaderError::NotSafeToOpenMapping);
+            return Err(MapsReaderError::NotSafeToOpenMapping(
+                name.clone().unwrap_or_default(),
+            ));
         }
 
         // Not doing this as root_prefix is always "" at the moment
@@ -234,7 +236,10 @@ impl MappingInfo {
         //   return false;
 
         if link_path != PathBuf::from(path) {
-            return Err(MapsReaderError::SymlinkError);
+            return Err(MapsReaderError::SymlinkError(
+                PathBuf::from(path),
+                link_path,
+            ));
         }
 
         // Check to see if someone actually named their executable 'foo (deleted)'.
@@ -302,7 +307,9 @@ impl MappingInfo {
 
         let elf_obj = elf::Elf::parse(&mapped_file)?;
 
-        let soname = elf_obj.soname.ok_or(MapsReaderError::NoSoName)?;
+        let soname = elf_obj.soname.ok_or(MapsReaderError::NoSoName(
+            self.name.clone().unwrap_or("None".to_string()),
+        ))?;
         Ok(soname.to_string())
     }
 

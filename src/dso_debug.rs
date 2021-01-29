@@ -93,10 +93,11 @@ pub fn write_dso_debug_stream(
     }
     let phnum_max = *auxv
         .get(&at_phnum)
-        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM"))? as usize;
+        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM in auxv"))?
+        as usize;
     let phdr = *auxv
         .get(&at_phdr)
-        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR"))? as usize;
+        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;
 
     let phdr_size = std::mem::size_of::<ElfPhdr>();
     let ph = LinuxPtraceDumper::copy_from_process(
@@ -134,7 +135,9 @@ pub fn write_dso_debug_stream(
     }
 
     if dyn_addr == 0 {
-        return Err(SectionDsoDebugError::CouldNotFind("dyn_addr"));
+        return Err(SectionDsoDebugError::CouldNotFind(
+            "dyn_addr in program headers",
+        ));
     }
 
     dyn_addr += base as ElfAddr;

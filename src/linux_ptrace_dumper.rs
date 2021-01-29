@@ -513,7 +513,9 @@ impl LinuxPtraceDumper {
         pid: Pid,
     ) -> Result<Vec<u8>, DumperError> {
         if !MappingInfo::is_mapped_file_safe_to_open(&mapping.name) {
-            return Err(DumperError::NotSafeToOpenMapping);
+            return Err(DumperError::NotSafeToOpenMapping(
+                mapping.name.clone().unwrap_or_default(),
+            ));
         }
 
         // Special-case linux-gate because it's not a real file.
