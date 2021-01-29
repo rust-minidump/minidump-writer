@@ -245,7 +245,7 @@ impl MinidumpWriter {
         let stack_copy = match LinuxPtraceDumper::copy_from_process(
             self.blamed_thread,
             stack_ptr as *mut libc::c_void,
-            stack_len as isize,
+            stack_len,
         ) {
             Ok(x) => x,
             Err(_) => {

@@ -113,8 +113,6 @@ pub enum MemoryWriterError {
 
 #[derive(Debug, Error)]
 pub enum SectionAppMemoryError {
-    #[error("Failed integer conversion")]
-    TryFromIntError(#[from] std::num::TryFromIntError),
     #[error("Failed to copy memory from process")]
     CopyFromProcessError(#[from] DumperError),
     #[error("Failed write memory")]

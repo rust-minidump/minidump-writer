@@ -75,15 +75,15 @@ impl LinuxPtraceDumper {
     pub fn copy_from_process(
         child: Pid,
         src: *mut c_void,
-        num_of_bytes: isize,
+        num_of_bytes: usize,
     ) -> Result<Vec<u8>, DumperError> {
         let pid = nix::unistd::Pid::from_raw(child);
         let mut res = Vec::new();
-        let mut idx = 0isize;
+        let mut idx = 0usize;
         while idx < num_of_bytes {
-            let word = ptrace::read(pid, unsafe { src.offset(idx) })?;
+            let word = ptrace::read(pid, (src as usize + idx) as *mut c_void)?;
             res.append(&mut word.to_ne_bytes().to_vec());
-            idx += std::mem::size_of::<libc::c_long>() as isize;
+            idx += std::mem::size_of::<libc::c_long>();
         }
         Ok(res)
     }
@@ -527,7 +527,7 @@ impl LinuxPtraceDumper {
                 let mem_slice = Self::copy_from_process(
                     pid,
                     mapping.start_address as *mut libc::c_void,
-                    mapping.size.try_into()?,
+                    mapping.size,
                 )?;
                 return Self::elf_file_identifier_from_mapped_file(&mem_slice);
             }

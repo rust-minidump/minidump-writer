@@ -102,7 +102,7 @@ pub fn write_dso_debug_stream(
     let ph = LinuxPtraceDumper::copy_from_process(
         blamed_thread,
         phdr as *mut libc::c_void,
-        (phdr_size * phnum_max) as isize,
+        phdr_size * phnum_max,
     )?;
     let program_headers;
     #[cfg(target_pointer_width = "64")]
@@ -150,7 +150,7 @@ pub fn write_dso_debug_stream(
         let dyn_data = LinuxPtraceDumper::copy_from_process(
             blamed_thread,
             (dyn_addr as usize + dynamic_length) as *mut libc::c_void,
-            dyn_size as isize,
+            dyn_size,
         )?;
         dynamic_length += dyn_size;
 
@@ -183,7 +183,7 @@ pub fn write_dso_debug_stream(
     let debug_entry_data = LinuxPtraceDumper::copy_from_process(
         blamed_thread,
         r_debug as *mut libc::c_void,
-        std::mem::size_of::<RDebug>() as isize,
+        std::mem::size_of::<RDebug>(),
     )?;
 
     // goblin::elf::Dyn doesn't have padding bytes
@@ -198,7 +198,7 @@ pub fn write_dso_debug_stream(
         let link_map_data = LinuxPtraceDumper::copy_from_process(
             blamed_thread,
             curr_map as *mut libc::c_void,
-            std::mem::size_of::<LinkMap>() as isize,
+            std::mem::size_of::<LinkMap>(),
         )?;
 
         // LinkMap is repr(C) and doesn't have padding bytes, so this should be safe
@@ -263,7 +263,7 @@ pub fn write_dso_debug_stream(
     let dso_debug_data = LinuxPtraceDumper::copy_from_process(
         blamed_thread,
         dyn_addr as *mut libc::c_void,
-        dynamic_length as isize,
+        dynamic_length,
     )?;
     MemoryArrayWriter::<u8>::alloc_from_array(buffer, &dso_debug_data)?;
 
