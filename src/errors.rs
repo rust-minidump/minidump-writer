@@ -1,13 +1,14 @@
+use crate::maps_reader::MappingInfo;
 use crate::thread_info::Pid;
 use goblin;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum InitError {
-    #[error("IO error")]
-    FileError(#[from] std::io::Error),
-    #[error("No auxv entry found")]
-    NoAuxvEntryFound,
+    #[error("IO error for file {0}")]
+    IOError(String, #[source] std::io::Error),
+    #[error("No auxv entry found for PID {0}")]
+    NoAuxvEntryFound(Pid),
     #[error("crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
 }
@@ -44,12 +45,12 @@ pub enum AuxvReaderError {
     #[error("Invalid auxv format (should not hit EOF before AT_NULL)")]
     InvalidFormat,
     #[error("IO Error")]
-    FileError(#[from] std::io::Error),
+    IOError(#[from] std::io::Error),
 }
 
 #[derive(Debug, Error)]
 pub enum CpuInfoError {
-    #[error("IO error")]
+    #[error("IO error for file /proc/cpuinfo")]
     IOError(#[from] std::io::Error),
     #[error("Not all entries of /proc/cpuinfo found!")]
     NotAllProcEntriesFound,
@@ -59,7 +60,7 @@ pub enum CpuInfoError {
 pub enum ThreadInfoError {
     #[error("Index out of bounds: Got {0}, only have {1}")]
     IndexOutOfBounds(usize, usize),
-    #[error("Either ppid ({1}) or tgid {2} not found in {0}")] // TODO: Add info
+    #[error("Either ppid ({1}) or tgid ({2}) not found in {0}")]
     InvalidPid(String, Pid, Pid),
     #[error("IO error")]
     IOError(#[from] std::io::Error),
@@ -81,8 +82,16 @@ pub enum CpuSetError {
 
 #[derive(Debug, Error)]
 pub enum DumperError {
-    #[error("nix::ptrace() error")]
-    PtraceError(#[from] nix::Error),
+    #[error("Failed to get PAGE_SIZE from system")]
+    SysConfError(#[from] nix::Error),
+    #[error("wait::waitpid(Pid={0}) failed")]
+    WaitPidError(Pid, #[source] nix::Error),
+    #[error("nix::ptrace::attach(Pid={0}) failed")]
+    PtraceAttachError(Pid, #[source] nix::Error),
+    #[error("nix::ptrace::detach(Pid={0}) failed")]
+    PtraceDetachError(Pid, #[source] nix::Error),
+    #[error("Copy from process {0} failed (source {1}, offset: {2}, length: {3})")]
+    CopyFromProcessError(Pid, usize, usize, usize, #[source] nix::Error),
     #[error("Skipped thread {0} due to it being part of the seccomp sandbox's trusted code")]
     DetachSkippedThread(Pid),
     #[error("No threads left to suspend")]
@@ -105,7 +114,7 @@ pub enum DumperError {
 
 #[derive(Debug, Error)]
 pub enum MemoryWriterError {
-    #[error("IO error")]
+    #[error("IO error when writing to DumpBuf")]
     IOError(#[from] std::io::Error),
     #[error("Failed integer conversion")]
     TryFromIntError(#[from] std::num::TryFromIntError),
@@ -115,33 +124,33 @@ pub enum MemoryWriterError {
 pub enum SectionAppMemoryError {
     #[error("Failed to copy memory from process")]
     CopyFromProcessError(#[from] DumperError),
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
 }
 
 #[derive(Debug, Error)]
 pub enum SectionExceptionStreamError {
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
 }
 
 #[derive(Debug, Error)]
 pub enum SectionMappingsError {
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
-    #[error("Failed to get effective path of mapping")]
-    GetEffectivePathError(#[from] MapsReaderError),
+    #[error("Failed to get effective path of mapping ({0:?})")]
+    GetEffectivePathError(MappingInfo, #[source] MapsReaderError),
 }
 
 #[derive(Debug, Error)]
 pub enum SectionMemListError {
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
 }
 
 #[derive(Debug, Error)]
 pub enum SectionSystemInfoError {
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
     #[error("Failed to get CPU Info")]
     CpuInfoError(#[from] CpuInfoError),
@@ -149,7 +158,7 @@ pub enum SectionSystemInfoError {
 
 #[derive(Debug, Error)]
 pub enum SectionThreadListError {
-    #[error("Failed write memory")]
+    #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
     #[error("Failed integer conversion")]
     TryFromIntError(#[from] std::num::TryFromIntError),
@@ -157,7 +166,7 @@ pub enum SectionThreadListError {
     CopyFromProcessError(#[from] DumperError),
     #[error("Failed to get thread info")]
     ThreadInfoError(#[from] ThreadInfoError),
-    #[error("Failed to write to buffer")]
+    #[error("Failed to write to memory buffer")]
     IOError(#[from] std::io::Error),
 }
 

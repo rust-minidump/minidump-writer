@@ -91,7 +91,9 @@ fn fill_raw_module(
         cv_record = sig_section.location();
     }
 
-    let (file_path, _) = mapping.get_mapping_effective_name_and_path()?;
+    let (file_path, _) = mapping
+        .get_mapping_effective_name_and_path()
+        .map_err(|e| SectionMappingsError::GetEffectivePathError(mapping.clone(), e))?;
     let name_header = write_string_to_location(buffer, &file_path)?;
 
     Ok(MDRawModule {

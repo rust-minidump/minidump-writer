@@ -77,11 +77,13 @@ impl LinuxPtraceDumper {
         src: *mut c_void,
         num_of_bytes: usize,
     ) -> Result<Vec<u8>, DumperError> {
+        use DumperError::CopyFromProcessError as CFPE;
         let pid = nix::unistd::Pid::from_raw(child);
         let mut res = Vec::new();
         let mut idx = 0usize;
         while idx < num_of_bytes {
-            let word = ptrace::read(pid, (src as usize + idx) as *mut c_void)?;
+            let word = ptrace::read(pid, (src as usize + idx) as *mut c_void)
+                .map_err(|e| CFPE(child, src as usize, idx, num_of_bytes, e))?;
             res.append(&mut word.to_ne_bytes().to_vec());
             idx += std::mem::size_of::<libc::c_long>();
         }
@@ -90,15 +92,18 @@ impl LinuxPtraceDumper {
 
     /// Suspends a thread by attaching to it.
     pub fn suspend_thread(child: Pid) -> Result<(), DumperError> {
+        use DumperError::PtraceAttachError as AttachErr;
+        use DumperError::PtraceDetachError as DetachErr;
+
         let pid = nix::unistd::Pid::from_raw(child);
         // This may fail if the thread has just died or debugged.
-        ptrace::attach(pid)?;
+        ptrace::attach(pid).map_err(|e| AttachErr(child, e))?;
         loop {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
                 Err(e @ nix::Error::Sys(Errno::EINTR)) => {
-                    ptrace::detach(pid)?;
-                    return Err(DumperError::PtraceError(e));
+                    ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+                    return Err(DumperError::WaitPidError(child, e));
                 }
                 Err(_) => continue,
             }
@@ -127,7 +132,7 @@ impl LinuxPtraceDumper {
                 skip_thread = true;
             }
             if skip_thread {
-                ptrace::detach(pid)?;
+                ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
                 return Err(DumperError::DetachSkippedThread(child));
             }
         }
@@ -136,8 +141,9 @@ impl LinuxPtraceDumper {
 
     /// Resumes a thread by detaching from it.
     pub fn resume_thread(child: Pid) -> Result<(), DumperError> {
+        use DumperError::PtraceDetachError as DetachErr;
         let pid = nix::unistd::Pid::from_raw(child);
-        ptrace::detach(pid)?;
+        ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
         Ok(())
     }
 
@@ -175,9 +181,11 @@ impl LinuxPtraceDumper {
     /// Parse /proc/$pid/task to list all the threads of the process identified by
     /// pid.
     fn enumerate_threads(&mut self) -> Result<(), InitError> {
-        let task_path = path::PathBuf::from(format!("/proc/{}/task", self.pid));
+        let filename = format!("/proc/{}/task", self.pid);
+        let task_path = path::PathBuf::from(&filename);
         if task_path.is_dir() {
-            std::fs::read_dir(task_path)?
+            std::fs::read_dir(task_path)
+                .map_err(|e| InitError::IOError(filename, e))?
                 .into_iter()
                 .filter_map(|entry| entry.ok()) // Filter out bad entries
                 .filter_map(|entry| {
@@ -193,8 +201,10 @@ impl LinuxPtraceDumper {
     }
 
     fn read_auxv(&mut self) -> Result<(), InitError> {
-        let auxv_path = path::PathBuf::from(format!("/proc/{}/auxv", self.pid));
-        let auxv_file = std::fs::File::open(auxv_path)?;
+        let filename = format!("/proc/{}/auxv", self.pid);
+        let auxv_path = path::PathBuf::from(&filename);
+        let auxv_file =
+            std::fs::File::open(auxv_path).map_err(|e| InitError::IOError(filename, e))?;
         let input = BufReader::new(auxv_file);
         let reader = ProcfsAuxvIter::new(input);
         self.auxv = reader
@@ -203,7 +213,7 @@ impl LinuxPtraceDumper {
             .collect();
 
         if self.auxv.is_empty() {
-            Err(InitError::NoAuxvEntryFound)
+            Err(InitError::NoAuxvEntryFound(self.pid))
         } else {
             Ok(())
         }
@@ -232,14 +242,15 @@ impl LinuxPtraceDumper {
         }
 
         let entry_point_loc = *self.auxv.get(&at_entry).unwrap_or(&0);
-
-        let maps_path = path::PathBuf::from(format!("/proc/{}/maps", self.pid));
-        let maps_file = std::fs::File::open(maps_path)?;
+        let filename = format!("/proc/{}/maps", self.pid);
+        let errmap = |e| InitError::IOError(filename.clone(), e);
+        let maps_path = path::PathBuf::from(&filename);
+        let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
 
         for line in BufReader::new(maps_file).lines() {
             // /proc/<pid>/maps looks like this
             // 7fe34a863000-7fe34a864000 rw-p 00009000 00:31 4746408                    /usr/lib64/libogg.so.0.8.4
-            let line = line?;
+            let line = line.map_err(errmap)?;
             match MappingInfo::parse_from_line(&line, linux_gate_loc, self.mappings.last_mut()) {
                 Ok(MappingInfoParsingResult::Success(map)) => self.mappings.push(map),
                 Ok(MappingInfoParsingResult::SkipLine) => continue,
