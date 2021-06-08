@@ -17,11 +17,17 @@ use std::io::{BufRead, BufReader};
 use std::path;
 use std::result::Result;
 
+#[derive(Debug, Clone)]
+pub struct Thread {
+    pub tid: Pid,
+    pub name: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct LinuxPtraceDumper {
     pub pid: Pid,
     threads_suspended: bool,
-    pub threads: Vec<Pid>,
+    pub threads: Vec<Thread>,
     pub auxv: HashMap<AuxvType, AuxvType>,
     pub mappings: Vec<MappingInfo>,
 }
@@ -152,7 +158,7 @@ impl LinuxPtraceDumper {
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(|&x| Self::suspend_thread(x).is_ok());
+        self.threads.retain(|x| Self::suspend_thread(x.tid).is_ok());
 
         if self.threads.is_empty() {
             Err(DumperError::SuspendNoThreadsLeft)
@@ -166,7 +172,7 @@ impl LinuxPtraceDumper {
         let mut result = Ok(());
         if self.threads_suspended {
             for thread in &self.threads {
-                match Self::resume_thread(*thread) {
+                match Self::resume_thread(thread.tid) {
                     Ok(_) => {}
                     x => {
                         result = x;
@@ -181,7 +187,8 @@ impl LinuxPtraceDumper {
     /// Parse /proc/$pid/task to list all the threads of the process identified by
     /// pid.
     fn enumerate_threads(&mut self) -> Result<(), InitError> {
-        let filename = format!("/proc/{}/task", self.pid);
+        let pid = self.pid;
+        let filename = format!("/proc/{}/task", pid);
         let task_path = path::PathBuf::from(&filename);
         if task_path.is_dir() {
             std::fs::read_dir(task_path)
@@ -194,7 +201,13 @@ impl LinuxPtraceDumper {
                         .to_str()
                         .and_then(|name| name.parse::<Pid>().ok())
                 })
-                .map(|tid| self.threads.push(tid)) // Push the resulting Pids
+                .map(|tid| {
+                    // Read the thread-name (if there is any)
+                    let name =
+                        std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid)).ok();
+                    (tid, name)
+                })
+                .map(|(tid, name)| self.threads.push(Thread { tid, name })) // Push the resulting Pids
                 .count(); // Execute iterator
         }
         Ok(())
@@ -289,8 +302,7 @@ impl LinuxPtraceDumper {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        let tid = self.threads[index];
-        ThreadInfo::create(self.pid, tid)
+        ThreadInfo::create(self.pid, self.threads[index].tid)
     }
 
     // Get information about the stack, given the stack pointer. We don't try to
