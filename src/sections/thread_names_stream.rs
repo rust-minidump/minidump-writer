@@ -26,10 +26,11 @@ pub fn write(buffer: &mut DumpBuf, dumper: &LinuxPtraceDumper) -> Result<MDRawDi
 
     for (idx, item) in dumper.threads.iter().enumerate() {
         if let Some(name) = &item.name {
-            let mut thread = MDRawThreadName::default();
-            thread.thread_id = item.tid.try_into()?;
             let pos = write_string_to_location(buffer, &name)?;
-            thread.thread_name_rva = pos.rva.into();
+            let thread = MDRawThreadName {
+                thread_id: item.tid.try_into()?,
+                thread_name_rva: pos.rva.into(),
+            };
             thread_list.set_value_at(buffer, thread, idx)?;
         }
     }

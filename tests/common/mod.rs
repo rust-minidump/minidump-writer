@@ -71,7 +71,7 @@ pub fn wait_for_threads(child: &mut Child, num: usize) {
                 }
             }
             Err(e) => {
-                panic!(e);
+                std::panic::panic_any(e);
             }
         }
     }

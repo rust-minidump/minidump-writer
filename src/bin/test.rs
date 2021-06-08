@@ -31,7 +31,7 @@ fn test_setup() -> Result<()> {
 fn test_thread_list() -> Result<()> {
     let ppid = getppid();
     let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
-    test!(dumper.threads.len() >= 1, "No threads")?;
+    test!(!dumper.threads.is_empty(), "No threads")?;
     test!(
         dumper
             .threads
@@ -133,7 +133,7 @@ fn test_linux_gate_mapping_id() -> Result<()> {
             break;
         }
     }
-    test!(found_linux_gate == true, "found no linux_gate")?;
+    test!(found_linux_gate, "found no linux_gate")?;
     Ok(())
 }
 
@@ -163,7 +163,7 @@ fn test_mappings_include_linux_gate() -> Result<()> {
             break;
         }
     }
-    test!(found_linux_gate == true, "found no linux_gate")?;
+    test!(found_linux_gate, "found no linux_gate")?;
     Ok(())
 }
 

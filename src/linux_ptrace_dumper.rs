@@ -181,7 +181,7 @@ impl LinuxPtraceDumper {
             }
         }
         self.threads_suspended = false;
-        return result;
+        result
     }
 
     /// Parse /proc/$pid/task to list all the threads of the process identified by
@@ -207,8 +207,7 @@ impl LinuxPtraceDumper {
                         std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid)).ok();
                     (tid, name)
                 })
-                .map(|(tid, name)| self.threads.push(Thread { tid, name })) // Push the resulting Pids
-                .count(); // Execute iterator
+                .for_each(|(tid, name)| self.threads.push(Thread { tid, name }))
         }
         Ok(())
     }
@@ -439,7 +438,7 @@ impl LinuxPtraceDumper {
     }
 
     // Find the mapping which the given memory address falls in.
-    pub fn find_mapping<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+    pub fn find_mapping(&self, address: usize) -> Option<&MappingInfo> {
         for map in &self.mappings {
             if address >= map.start_address && address - map.start_address < map.size {
                 return Some(&map);
@@ -451,7 +450,7 @@ impl LinuxPtraceDumper {
     // Find the mapping which the given memory address falls in. Uses the
     // unadjusted mapping address range from the kernel, rather than the
     // biased range.
-    pub fn find_mapping_no_bias<'a>(&'a self, address: usize) -> Option<&'a MappingInfo> {
+    pub fn find_mapping_no_bias(&self, address: usize) -> Option<&MappingInfo> {
         for map in &self.mappings {
             if address >= map.system_mapping_info.start_address
                 && address < map.system_mapping_info.end_address
@@ -487,9 +486,7 @@ impl LinuxPtraceDumper {
         let elf_obj = elf::Elf::parse(mem_slice)?;
         match Self::parse_build_id(&elf_obj, mem_slice) {
             // Look for a build id note first.
-            Some(build_id) => {
-                return Ok(build_id.to_vec());
-            }
+            Some(build_id) => Ok(build_id.to_vec()),
             // Fall back on hashing the first page of the text section.
             None => {
                 // Attempt to locate the .text section of an ELF binary and generate
@@ -528,7 +525,7 @@ impl LinuxPtraceDumper {
     pub fn elf_identifier_for_mapping_index(&mut self, idx: usize) -> Result<Vec<u8>, DumperError> {
         assert!(idx < self.mappings.len());
 
-        return Self::elf_identifier_for_mapping(&mut self.mappings[idx], self.pid);
+        Self::elf_identifier_for_mapping(&mut self.mappings[idx], self.pid)
     }
 
     pub fn elf_identifier_for_mapping(
@@ -578,6 +575,6 @@ impl LinuxPtraceDumper {
                 );
             }
         }
-        return Ok(build_id);
+        Ok(build_id)
     }
 }
