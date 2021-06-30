@@ -717,9 +717,9 @@ fn test_named_threads_helper(context: Context) {
         .map(|cow| cow.into_owned())
         .collect();
     let mut expected = HashSet::new();
-    expected.insert("test\n".to_string());
+    expected.insert("test".to_string());
     for id in 1..num_of_threads {
-        expected.insert(format!("thread_{}\n", id));
+        expected.insert(format!("thread_{}", id));
     }
     assert_eq!(expected, names);
 }

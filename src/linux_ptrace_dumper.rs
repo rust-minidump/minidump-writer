@@ -203,8 +203,10 @@ impl LinuxPtraceDumper {
                 })
                 .map(|tid| {
                     // Read the thread-name (if there is any)
-                    let name =
-                        std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid)).ok();
+                    let name = std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid))
+                        // NOTE: This is a bit wasteful as it does two allocations in order to trim, but leaving it for now
+                        .map(|s| s.trim_end().to_string())
+                        .ok();
                     (tid, name)
                 })
                 .for_each(|(tid, name)| self.threads.push(Thread { tid, name }))
