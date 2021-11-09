@@ -37,7 +37,7 @@ fn get_ucontext() -> Result<libc::ucontext_t> {
 
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 fn get_crash_context(tid: Pid) -> CrashContext {
-    let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
     let float_state: fpstate_t = unsafe { std::mem::zeroed() };
     CrashContext {

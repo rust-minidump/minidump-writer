@@ -67,11 +67,11 @@ pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawD
         }
         #[cfg(not(target_arch = "arm"))]
         {
-            sig_addr = unsafe { context.siginfo.si_addr() } as u64;
+            sig_addr = context.siginfo.ssi_addr as u64;
         }
         MDException {
-            exception_code: context.siginfo.si_signo as u32,
-            exception_flags: context.siginfo.si_code as u32,
+            exception_code: context.siginfo.ssi_signo as u32,
+            exception_flags: context.siginfo.ssi_code as u32,
             exception_record: 0,
             exception_address: sig_addr,
             number_parameters: 0,

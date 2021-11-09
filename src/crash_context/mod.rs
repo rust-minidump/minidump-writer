@@ -53,7 +53,7 @@ pub type fpstate_t = libc::user_fpregs_struct;
 #[repr(C)]
 #[derive(Clone)]
 pub struct CrashContext {
-    pub siginfo: libc::siginfo_t,
+    pub siginfo: nix::sys::signalfd::siginfo,
     pub tid: libc::pid_t, // the crashing thread.
     pub context: libc::ucontext_t,
     // #ifdef this out because FP state is not part of user ABI for Linux ARM.
