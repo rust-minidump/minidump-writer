@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 #[cfg(target_os = "android")]
 mod android;
 pub mod app_memory;

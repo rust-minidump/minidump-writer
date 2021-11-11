@@ -2,21 +2,21 @@
 name = "minidump_writer_linux"
 version = "0.1.0"
 authors = ["Martin Sirringhaus"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-tempfile = "3.1.0"
-nix = "0.15"
-libc = "0.2.74"
-memoffset = "0.5.1"
 byteorder = "1.3.2"
-memmap2 = "0.2.2"
-goblin = "0.1.2"
+exception-handler = { path = "../crash-handling/exception-handler" }
+goblin = "0.4"
+libc = "0.2.74"
+memmap2 = "0.5"
+memoffset = "0.6"
+nix = "0.23"
+tempfile = "3.1.0"
 thiserror = "1.0.21"
+uctx = { path = "../crash-handling/uctx" }
 
 [dev-dependencies]
-minidump = {git = "https://github.com/luser/rust-minidump", rev="9652b3b" }
-minidump-common = {git = "https://github.com/luser/rust-minidump", rev="9652b3b" }
+minidump = { git = "https://github.com/luser/rust-minidump", rev = "9652b3b" }
+minidump-common = { git = "https://github.com/luser/rust-minidump", rev = "9652b3b" }

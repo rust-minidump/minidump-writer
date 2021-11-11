@@ -1,21 +1,23 @@
 // use libc::c_void;
 #[cfg(target_os = "android")]
 use crate::android::late_process_mappings;
-use crate::auxv_reader::{AuxvType, ProcfsAuxvIter};
-use crate::errors::{DumperError, InitError, ThreadInfoError};
-use crate::maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX};
-use crate::minidump_format::MDGUID;
-use crate::thread_info::{Pid, ThreadInfo};
-use crate::LINUX_GATE_LIBRARY_NAME;
+use crate::{
+    auxv_reader::{AuxvType, ProcfsAuxvIter},
+    errors::{DumperError, InitError, ThreadInfoError},
+    maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX},
+    minidump_format::MDGUID,
+    thread_info::{Pid, ThreadInfo},
+    LINUX_GATE_LIBRARY_NAME,
+};
 use goblin::elf;
-use nix::errno::Errno;
 use nix::sys::{ptrace, wait};
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::ffi::c_void;
-use std::io::{BufRead, BufReader};
-use std::path;
-use std::result::Result;
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    io::{BufRead, BufReader},
+    path,
+    result::Result,
+};
 
 #[derive(Debug, Clone)]
 pub struct Thread {
@@ -107,8 +109,8 @@ impl LinuxPtraceDumper {
         loop {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
-                Err(e @ nix::Error::Sys(Errno::EINTR)) => {
-                    ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+                Err(e @ nix::Error::EINTR) => {
+                    ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
                     return Err(DumperError::WaitPidError(child, e));
                 }
                 Err(_) => continue,
@@ -138,7 +140,7 @@ impl LinuxPtraceDumper {
                 skip_thread = true;
             }
             if skip_thread {
-                ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+                ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
                 return Err(DumperError::DetachSkippedThread(child));
             }
         }
@@ -149,7 +151,7 @@ impl LinuxPtraceDumper {
     pub fn resume_thread(child: Pid) -> Result<(), DumperError> {
         use DumperError::PtraceDetachError as DetachErr;
         let pid = nix::unistd::Pid::from_raw(child);
-        ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+        ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
         Ok(())
     }
 
