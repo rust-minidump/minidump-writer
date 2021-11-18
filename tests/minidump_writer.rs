@@ -1,22 +1,21 @@
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
-use minidump_writer_linux::app_memory::AppMemory;
-#[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
-use minidump_writer_linux::crash_context::fpstate_t;
-use minidump_writer_linux::crash_context::CrashContext;
-use minidump_writer_linux::errors::*;
-use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
-use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
-use minidump_writer_linux::minidump_writer::MinidumpWriter;
-use minidump_writer_linux::thread_info::Pid;
-use nix::errno::Errno;
-use nix::sys::signal::Signal;
-use std::collections::HashSet;
-use std::convert::TryInto;
-use std::io::{BufRead, BufReader};
-use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, Stdio};
-use std::str::FromStr;
+use minidump_writer_linux::{
+    app_memory::AppMemory,
+    crash_context::CrashContext,
+    errors::*,
+    linux_ptrace_dumper::LinuxPtraceDumper,
+    maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
+    minidump_writer::MinidumpWriter,
+    thread_info::Pid,
+};
+use nix::{errno::Errno, sys::signal::Signal};
+use std::{
+    collections::HashSet,
+    io::{BufRead, BufReader},
+    os::unix::process::ExitStatusExt,
+    process::{Command, Stdio},
+};
 
 mod common;
 use common::*;

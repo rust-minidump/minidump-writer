@@ -1,10 +1,12 @@
-use crate::errors::SectionThreadListError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_cpu::RawContextCPU;
-use crate::minidump_format::*;
-use crate::minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter};
-use crate::sections::{MemoryArrayWriter, MemoryWriter};
-use std::convert::TryInto;
+use crate::{
+    crash_context::CpuContext,
+    errors::SectionThreadListError,
+    linux_ptrace_dumper::LinuxPtraceDumper,
+    minidump_cpu::RawContextCPU,
+    minidump_format::*,
+    minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter},
+    sections::{MemoryArrayWriter, MemoryWriter},
+};
 use std::io::Write;
 
 type Result<T> = std::result::Result<T, SectionThreadListError>;

@@ -1,12 +1,14 @@
-use crate::app_memory::AppMemoryList;
-use crate::crash_context::CrashContext;
-use crate::dso_debug;
-use crate::errors::{FileWriterError, InitError, MemoryWriterError, WriterError};
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::maps_reader::{MappingInfo, MappingList};
-use crate::minidump_format::*;
-use crate::sections::*;
-use crate::thread_info::Pid;
+use crate::{
+    app_memory::AppMemoryList,
+    crash_context::{CpuContext, CrashContext},
+    dso_debug,
+    errors::{FileWriterError, InitError, MemoryWriterError, WriterError},
+    linux_ptrace_dumper::LinuxPtraceDumper,
+    maps_reader::{MappingInfo, MappingList},
+    minidump_format::*,
+    sections::*,
+    thread_info::Pid,
+};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 pub type DumpBuf = Cursor<Vec<u8>>;
