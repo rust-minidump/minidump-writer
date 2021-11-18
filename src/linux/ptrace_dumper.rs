@@ -1,13 +1,15 @@
 // use libc::c_void;
 #[cfg(target_os = "android")]
-use crate::android::late_process_mappings;
+use crate::linux::android::late_process_mappings;
 use crate::{
-    auxv_reader::{AuxvType, ProcfsAuxvIter},
-    errors::{DumperError, InitError, ThreadInfoError},
-    maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX},
+    linux::{
+        auxv_reader::{AuxvType, ProcfsAuxvIter},
+        errors::{DumperError, InitError, ThreadInfoError},
+        maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX},
+        thread_info::{Pid, ThreadInfo},
+        LINUX_GATE_LIBRARY_NAME,
+    },
     minidump_format::MDGUID,
-    thread_info::{Pid, ThreadInfo},
-    LINUX_GATE_LIBRARY_NAME,
 };
 use goblin::elf;
 use nix::sys::{ptrace, wait};
@@ -26,7 +28,7 @@ pub struct Thread {
 }
 
 #[derive(Debug)]
-pub struct LinuxPtraceDumper {
+pub struct PtraceDumper {
     pub pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Thread>,
@@ -39,18 +41,18 @@ pub const AT_SYSINFO_EHDR: u32 = 33;
 #[cfg(target_pointer_width = "64")]
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
-impl Drop for LinuxPtraceDumper {
+impl Drop for PtraceDumper {
     fn drop(&mut self) {
         // Always try to resume all threads (e.g. in case of error)
         let _ = self.resume_threads();
     }
 }
 
-impl LinuxPtraceDumper {
+impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
     pub fn new(pid: Pid) -> Result<Self, InitError> {
-        let mut dumper = LinuxPtraceDumper {
+        let mut dumper = Self {
             pid,
             threads_suspended: false,
             threads: Vec::new(),

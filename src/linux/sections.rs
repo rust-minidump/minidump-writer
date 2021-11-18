@@ -6,8 +6,14 @@ pub mod systeminfo_stream;
 pub mod thread_list_stream;
 pub mod thread_names_stream;
 
-use crate::errors::MemoryWriterError;
-use crate::minidump_format::*;
+use crate::{
+    errors::{self, MemoryWriterError},
+    linux::{
+        minidump_writer::{self, DumpBuf, MinidumpWriter},
+        ptrace_dumper::PtraceDumper,
+    },
+    minidump_format::*,
+};
 use std::io::{Cursor, Write};
 
 type Result<T> = std::result::Result<T, MemoryWriterError>;

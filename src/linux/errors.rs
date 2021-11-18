@@ -1,6 +1,4 @@
-use crate::maps_reader::MappingInfo;
-use crate::thread_info::Pid;
-use goblin;
+use crate::{maps_reader::MappingInfo, thread_info::Pid};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -11,6 +9,7 @@ pub enum InitError {
     NoAuxvEntryFound(Pid),
     #[error("crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
+    #[cfg(target_os = "android")]
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
 }
@@ -78,6 +77,7 @@ pub enum ThreadInfoError {
     InvalidProcStatusFile(Pid, String),
 }
 
+#[cfg(target_os = "android")]
 #[derive(Debug, Error)]
 pub enum AndroidError {
     #[error("Failed to copy memory from process")]

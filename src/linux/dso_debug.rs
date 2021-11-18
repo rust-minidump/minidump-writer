@@ -1,11 +1,13 @@
-use crate::auxv_reader::AuxvType;
-use crate::errors::SectionDsoDebugError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_format::*;
-use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
-use libc;
-use std::collections::HashMap;
-use std::io::Cursor;
+use crate::{
+    linux::{
+        auxv_reader::AuxvType,
+        errors::SectionDsoDebugError,
+        ptrace_dumper::PtraceDumper,
+        sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter},
+    },
+    minidump_format::*,
+};
+use std::{collections::HashMap, io::Cursor};
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 
@@ -95,7 +97,7 @@ pub fn write_dso_debug_stream(
         .get(&at_phdr)
         .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;
 
-    let ph = LinuxPtraceDumper::copy_from_process(
+    let ph = PtraceDumper::copy_from_process(
         blamed_thread,
         phdr as *mut libc::c_void,
         SIZEOF_PHDR * phnum_max,
@@ -145,7 +147,7 @@ pub fn write_dso_debug_stream(
     // DSOs loaded into the program. If this information is indeed available,
     // dump it to a MD_LINUX_DSO_DEBUG stream.
     loop {
-        let dyn_data = LinuxPtraceDumper::copy_from_process(
+        let dyn_data = PtraceDumper::copy_from_process(
             blamed_thread,
             (dyn_addr as usize + dynamic_length) as *mut libc::c_void,
             dyn_size,
@@ -178,7 +180,7 @@ pub fn write_dso_debug_stream(
     // See <link.h> for a more detailed discussion of the how the dynamic
     // loader communicates with debuggers.
 
-    let debug_entry_data = LinuxPtraceDumper::copy_from_process(
+    let debug_entry_data = PtraceDumper::copy_from_process(
         blamed_thread,
         r_debug as *mut libc::c_void,
         std::mem::size_of::<RDebug>(),
@@ -193,7 +195,7 @@ pub fn write_dso_debug_stream(
     let mut dso_vec = Vec::new();
     let mut curr_map = debug_entry.r_map;
     while curr_map != 0 {
-        let link_map_data = LinuxPtraceDumper::copy_from_process(
+        let link_map_data = PtraceDumper::copy_from_process(
             blamed_thread,
             curr_map as *mut libc::c_void,
             std::mem::size_of::<LinkMap>(),
@@ -219,7 +221,7 @@ pub fn write_dso_debug_stream(
         for (idx, map) in dso_vec.iter().enumerate() {
             let mut filename = String::new();
             if map.l_name > 0 {
-                let filename_data = LinuxPtraceDumper::copy_from_process(
+                let filename_data = PtraceDumper::copy_from_process(
                     blamed_thread,
                     map.l_name as *mut libc::c_void,
                     256,
@@ -258,7 +260,7 @@ pub fn write_dso_debug_stream(
     };
 
     dirent.location.data_size += dynamic_length as u32;
-    let dso_debug_data = LinuxPtraceDumper::copy_from_process(
+    let dso_debug_data = PtraceDumper::copy_from_process(
         blamed_thread,
         dyn_addr as *mut libc::c_void,
         dynamic_length,

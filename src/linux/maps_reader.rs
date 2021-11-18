@@ -1,12 +1,8 @@
-use crate::auxv_reader::AuxvType;
-use crate::errors::MapsReaderError;
-use crate::thread_info::Pid;
+use crate::linux::{auxv_reader::AuxvType, errors::MapsReaderError, thread_info::Pid};
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
 use memmap2::{Mmap, MmapOptions};
-use std::fs::File;
-use std::mem::size_of;
-use std::path::PathBuf;
+use std::{fs::File, mem::size_of, path::PathBuf};
 
 pub const LINUX_GATE_LIBRARY_NAME: &str = "linux-gate.so";
 pub const DELETED_SUFFIX: &str = " (deleted)";
@@ -57,6 +53,7 @@ pub enum MappingInfoParsingResult {
     Success(MappingInfo),
 }
 
+#[inline]
 fn is_mapping_a_path(pathname: Option<&str>) -> bool {
     match pathname {
         Some(x) => x.contains('/'),
@@ -300,7 +297,6 @@ impl MappingInfo {
 
     pub fn get_mapping_effective_name_and_path(&self) -> Result<(String, String)> {
         let mut file_path = self.name.clone().unwrap_or_default();
-        let file_name;
 
         // Tools such as minidump_stackwalk use the name of the module to look up
         // symbols produced by dump_syms. dump_syms will prefer to use a module's
@@ -313,8 +309,7 @@ impl MappingInfo {
             Err(_) => {
                 //   file_path := /path/to/libname.so
                 //   file_name := libname.so
-                let split: Vec<_> = file_path.rsplitn(2, '/').collect();
-                file_name = split.first().unwrap().to_string();
+                let file_name = file_path.rsplitn(2, '/').next().unwrap().to_owned();
                 return Ok((file_path, file_name));
             }
         };

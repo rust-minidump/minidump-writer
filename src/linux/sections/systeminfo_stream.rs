@@ -1,10 +1,7 @@
-use crate::dumper_cpu_info::{write_cpu_information, write_os_information};
-use crate::errors::SectionSystemInfoError;
-use crate::minidump_format::*;
-use crate::minidump_writer::DumpBuf;
-use crate::sections::MemoryWriter;
+use super::*;
+use crate::linux::dumper_cpu_info::{write_cpu_information, write_os_information};
 
-type Result<T> = std::result::Result<T, SectionSystemInfoError>;
+type Result<T> = std::result::Result<T, errors::SectionSystemInfoError>;
 
 pub fn write(buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
     let mut info_section = MemoryWriter::<MDRawSystemInfo>::alloc(buffer)?;

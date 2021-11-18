@@ -1,5 +1,5 @@
 [package]
-name = "minidump_writer_linux"
+name = "minidump-writer"
 version = "0.1.0"
 authors = ["Martin Sirringhaus"]
 edition = "2021"

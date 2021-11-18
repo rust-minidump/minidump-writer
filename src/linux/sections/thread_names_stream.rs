@@ -1,13 +1,8 @@
-use crate::errors::SectionThreadNamesError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_format::*;
-use crate::minidump_writer::DumpBuf;
-use crate::sections::write_string_to_location;
-use crate::sections::{MemoryArrayWriter, MemoryWriter};
+use super::*;
 
-type Result<T> = std::result::Result<T, SectionThreadNamesError>;
+type Result<T> = std::result::Result<T, errors::SectionThreadNamesError>;
 
-pub fn write(buffer: &mut DumpBuf, dumper: &LinuxPtraceDumper) -> Result<MDRawDirectory> {
+pub fn write(buffer: &mut DumpBuf, dumper: &PtraceDumper) -> Result<MDRawDirectory> {
     // Only count threads that have a name
     let num_threads = dumper.threads.iter().filter(|t| t.name.is_some()).count();
     // Memory looks like this:

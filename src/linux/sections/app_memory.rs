@@ -1,15 +1,12 @@
-use crate::errors::SectionAppMemoryError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::minidump_format::*;
-use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::sections::MemoryArrayWriter;
-
-type Result<T> = std::result::Result<T, SectionAppMemoryError>;
+use super::*;
 
 /// Write application-provided memory regions.
-pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<()> {
+pub fn write(
+    config: &mut MinidumpWriter,
+    buffer: &mut DumpBuf,
+) -> std::result::Result<(), crate::linux::errors::SectionAppMemoryError> {
     for app_memory in &config.app_memory {
-        let data_copy = LinuxPtraceDumper::copy_from_process(
+        let data_copy = PtraceDumper::copy_from_process(
             config.blamed_thread,
             app_memory.ptr as *mut libc::c_void,
             app_memory.length,

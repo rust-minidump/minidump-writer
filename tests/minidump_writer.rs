@@ -1,12 +1,12 @@
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
-use minidump_writer_linux::{
+use minidump_writer::{
     app_memory::AppMemory,
     crash_context::CrashContext,
     errors::*,
-    linux_ptrace_dumper::LinuxPtraceDumper,
     maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
     minidump_writer::MinidumpWriter,
+    ptrace_dumper::PtraceDumper,
     thread_info::Pid,
 };
 use nix::{errno::Errno, sys::signal::Signal};
@@ -448,7 +448,7 @@ fn test_with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let build_id = LinuxPtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
+    let build_id = PtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
         .expect("Failed to get build_id");
 
     let guid = GUID {

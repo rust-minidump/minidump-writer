@@ -1,15 +1,20 @@
+// use crate::{
+//     crash_context::CpuContext,
+//     errors::SectionThreadListError,
+//     linux_ptrace_dumper::LinuxPtraceDumper,
+//     minidump_cpu::RawContextCPU,
+//     minidump_format::*,
+//     minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter},
+//     sections::{MemoryArrayWriter, MemoryWriter},
+// };
+use super::*;
 use crate::{
-    crash_context::CpuContext,
-    errors::SectionThreadListError,
-    linux_ptrace_dumper::LinuxPtraceDumper,
-    minidump_cpu::RawContextCPU,
-    minidump_format::*,
-    minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter},
-    sections::{MemoryArrayWriter, MemoryWriter},
+    linux::crash_context::CpuContext, minidump_cpu::RawContextCPU,
+    minidump_writer::CrashingThreadContext,
 };
 use std::io::Write;
 
-type Result<T> = std::result::Result<T, SectionThreadListError>;
+type Result<T> = std::result::Result<T, errors::SectionThreadListError>;
 
 // The following kLimit* constants are for when minidump_size_limit_ is set
 // and the minidump size might exceed it.
@@ -36,7 +41,7 @@ enum MaxStackLen {
 pub fn write(
     config: &mut MinidumpWriter,
     buffer: &mut DumpBuf,
-    dumper: &LinuxPtraceDumper,
+    dumper: &PtraceDumper,
 ) -> Result<MDRawDirectory> {
     let num_threads = dumper.threads.len();
     // Memory looks like this:
@@ -118,7 +123,7 @@ pub fn write(
                 ip_memory_d.memory.data_size =
                     (end_of_range - ip_memory_d.start_of_memory_range) as u32;
 
-                let memory_copy = LinuxPtraceDumper::copy_from_process(
+                let memory_copy = PtraceDumper::copy_from_process(
                     thread.thread_id as i32,
                     ip_memory_d.start_of_memory_range as *mut libc::c_void,
                     ip_memory_d.memory.data_size as usize,
@@ -180,7 +185,7 @@ pub fn write(
 fn fill_thread_stack(
     config: &mut MinidumpWriter,
     buffer: &mut DumpBuf,
-    dumper: &LinuxPtraceDumper,
+    dumper: &PtraceDumper,
     thread: &mut MDRawThread,
     instruction_ptr: usize,
     stack_ptr: usize,
@@ -205,7 +210,7 @@ fn fill_thread_stack(
             }
         }
 
-        let mut stack_bytes = LinuxPtraceDumper::copy_from_process(
+        let mut stack_bytes = PtraceDumper::copy_from_process(
             thread.thread_id.try_into()?,
             stack as *mut libc::c_void,
             stack_len,

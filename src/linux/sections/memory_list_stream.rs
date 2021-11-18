@@ -1,9 +1,6 @@
-use crate::errors::SectionMemListError;
-use crate::minidump_format::*;
-use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::sections::{MemoryArrayWriter, MemoryWriter};
+use super::*;
 
-type Result<T> = std::result::Result<T, SectionMemListError>;
+type Result<T> = std::result::Result<T, crate::errors::SectionMemListError>;
 
 pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
     let list_header =

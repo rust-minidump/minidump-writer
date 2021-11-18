@@ -1,35 +1,29 @@
 use crate::errors::ThreadInfoError;
-use nix::errno::Errno;
-use nix::sys::ptrace;
-use nix::unistd;
-use std::io::{self, BufRead};
-use std::path;
+use nix::{errno::Errno, sys::ptrace, unistd};
+use std::{
+    io::{self, BufRead},
+    path,
+};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
 pub type Pid = i32;
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[path = "thread_info_x86.rs"]
-mod imp;
-#[cfg(target_arch = "arm")]
-#[path = "thread_info_arm.rs"]
-mod imp;
-#[cfg(target_arch = "aarch64")]
-#[path = "thread_info_aarch64.rs"]
-mod imp;
-#[cfg(target_arch = "mips")]
-#[path = "thread_info_mips.rs"]
-mod imp;
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub type ThreadInfo = imp::ThreadInfoX86;
-#[cfg(target_arch = "arm")]
-pub type ThreadInfo = imp::ThreadInfoArm;
-#[cfg(target_arch = "aarch64")]
-pub type ThreadInfo = imp::ThreadInfoAarch64;
-#[cfg(target_arch = "mips")]
-pub type ThreadInfo = imp::ThreadInfoMips;
+cfg_if::cfg_if! {
+    if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+        mod x86;
+        pub type ThreadInfo = x86::ThreadInfoX86;
+    } else if #[cfg(target_arch = "arm")] {
+        mod arm;
+        pub type ThreadInfo = arm::ThreadInfoArm;
+    } else if #[cfg(target_arch = "aarch64")] {
+        mod aarch64;
+        pub type ThreadInfo = aarch64::ThreadInfoAarch64;
+    } else if #[cfg(target_arch = "mips")] {
+        mod mips;
+        pub type ThreadInfo = mips::ThreadInfoMips;
+    }
+}
 
 #[derive(Debug)]
 #[allow(non_camel_case_types)]

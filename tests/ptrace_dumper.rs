@@ -1,4 +1,4 @@
-use minidump_writer_linux::linux_ptrace_dumper;
+use minidump_writer::ptrace_dumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
 use std::io::{BufRead, BufReader};
@@ -25,8 +25,7 @@ fn test_thread_list_from_parent() {
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
-    let mut dumper =
-        linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
+    let mut dumper = ptrace_dumper::PtraceDumper::new(pid).expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
     dumper.suspend_threads().expect("Could not suspend threads");
 
@@ -195,8 +194,7 @@ fn test_sanitize_stack_copy() {
     let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
 
-    let mut dumper =
-        linux_ptrace_dumper::LinuxPtraceDumper::new(pid).expect("Couldn't init dumper");
+    let mut dumper = ptrace_dumper::PtraceDumper::new(pid).expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
     dumper.suspend_threads().expect("Could not suspend threads");
     let thread_info = dumper
