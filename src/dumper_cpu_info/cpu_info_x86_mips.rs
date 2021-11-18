@@ -1,6 +1,5 @@
 use crate::errors::CpuInfoError;
 use crate::minidump_format::*;
-use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::path;
 

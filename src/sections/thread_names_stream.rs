@@ -4,7 +4,6 @@ use crate::minidump_format::*;
 use crate::minidump_writer::DumpBuf;
 use crate::sections::write_string_to_location;
 use crate::sections::{MemoryArrayWriter, MemoryWriter};
-use std::convert::TryInto;
 
 type Result<T> = std::result::Result<T, SectionThreadNamesError>;
 

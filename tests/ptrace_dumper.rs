@@ -1,7 +1,6 @@
 use minidump_writer_linux::linux_ptrace_dumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
-use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;

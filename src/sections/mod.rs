@@ -8,7 +8,6 @@ pub mod thread_names_stream;
 
 use crate::errors::MemoryWriterError;
 use crate::minidump_format::*;
-use std::convert::TryInto;
 use std::io::{Cursor, Write};
 
 type Result<T> = std::result::Result<T, MemoryWriterError>;

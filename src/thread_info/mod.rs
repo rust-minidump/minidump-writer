@@ -2,7 +2,6 @@ use crate::errors::ThreadInfoError;
 use nix::errno::Errno;
 use nix::sys::ptrace;
 use nix::unistd;
-use std::convert::TryInto;
 use std::io::{self, BufRead};
 use std::path;
 

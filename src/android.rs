@@ -15,7 +15,6 @@ use goblin::elf::header::header64 as elf_header;
 use goblin::elf::program_header::program_header32::ProgramHeader;
 #[cfg(target_pointer_width = "64")]
 use goblin::elf::program_header::program_header64::ProgramHeader;
-use std::convert::TryInto;
 use std::ffi::c_void;
 
 type Result<T> = std::result::Result<T, AndroidError>;

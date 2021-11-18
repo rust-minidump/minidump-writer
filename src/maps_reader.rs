@@ -4,7 +4,6 @@ use crate::thread_info::Pid;
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
 use memmap2::{Mmap, MmapOptions};
-use std::convert::TryInto;
 use std::fs::File;
 use std::mem::size_of;
 use std::path::PathBuf;

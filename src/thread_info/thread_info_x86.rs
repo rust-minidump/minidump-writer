@@ -10,8 +10,6 @@ use libc::user;
 use memoffset;
 use nix::sys::ptrace;
 use nix::unistd;
-#[cfg(target_arch = "x86")]
-use std::convert::TryInto;
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 

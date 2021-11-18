@@ -4,7 +4,6 @@ use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_E
 use minidump_writer_linux::{linux_ptrace_dumper, LINUX_GATE_LIBRARY_NAME};
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::unistd::getppid;
-use std::convert::TryInto;
 use std::env;
 use std::error;
 use std::result;
