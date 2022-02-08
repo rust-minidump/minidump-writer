@@ -107,8 +107,8 @@ impl LinuxPtraceDumper {
         loop {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
-                Err(e @ nix::Error::Sys(Errno::EINTR)) => {
-                    ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+                Err(e @ Errno::EINTR) => {
+                    ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
                     return Err(DumperError::WaitPidError(child, e));
                 }
                 Err(_) => continue,
@@ -138,7 +138,7 @@ impl LinuxPtraceDumper {
                 skip_thread = true;
             }
             if skip_thread {
-                ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+                ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
                 return Err(DumperError::DetachSkippedThread(child));
             }
         }
@@ -149,7 +149,7 @@ impl LinuxPtraceDumper {
     pub fn resume_thread(child: Pid) -> Result<(), DumperError> {
         use DumperError::PtraceDetachError as DetachErr;
         let pid = nix::unistd::Pid::from_raw(child);
-        ptrace::detach(pid).map_err(|e| DetachErr(child, e))?;
+        ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
         Ok(())
     }
 
