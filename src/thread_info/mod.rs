@@ -166,7 +166,7 @@ trait CommonThreadInfo {
             )
         };
         match Errno::result(ret) {
-            Ok(..) | Err(nix::Error::Sys(Errno::UnknownErrno)) => Ok(ret),
+            Ok(..) | Err(Errno::UnknownErrno) => Ok(ret),
             err @ Err(..) => err,
         }
     }
