@@ -16,6 +16,7 @@ pub mod imp;
 // pub mod imp;
 #[cfg(target_arch = "arm")]
 use crate::minidump_cpu::RawContextCPU;
+use crate::minidump_cpu::imp::libc_user_fpsimd_struct;
 #[cfg(target_arch = "arm")]
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> usize {
@@ -37,7 +38,8 @@ pub mod imp;
 pub mod imp;
 
 #[cfg(target_arch = "aarch64")]
-pub type fpstate_t = libc::fpsimd_context; // Currently not part of libc! This will produce an error.
+#[allow(non_camel_case_types)]
+pub type fpstate_t = libc_user_fpsimd_struct; // Currently not part of libc! This will produce an error.
 #[cfg(not(any(
     target_arch = "aarch64",
     target_arch = "mips",

@@ -152,7 +152,7 @@ pub fn write(
                 dumper,
                 &mut thread,
                 instruction_ptr,
-                info.stack_pointer,
+                info.stack_pointer as usize,
                 max_stack_len,
             )?;
 
@@ -166,7 +166,7 @@ pub fn write(
                 // while the instruction pointer is already here.
                 config.crashing_thread_context = CrashingThreadContext::CrashContextPlusAddress((
                     cpu_section.location(),
-                    info.get_instruction_pointer(),
+                    info.get_instruction_pointer() as usize,
                 ));
             }
         }

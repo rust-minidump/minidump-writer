@@ -38,7 +38,7 @@ fn test_thread_list_from_parent() {
             .get_thread_info_by_index(idx)
             .expect("Could not get thread info by index");
         let (_stack_ptr, stack_len) = dumper
-            .get_stack_info(info.stack_pointer)
+            .get_stack_info(info.stack_pointer as usize)
             .expect("Could not get stack_pointer");
         assert!(stack_len > 0);
 
@@ -221,7 +221,7 @@ fn test_sanitize_stack_copy() {
     dumper
         .sanitize_stack_copy(
             &mut simulated_stack,
-            thread_info.stack_pointer,
+            thread_info.stack_pointer as usize,
             size_of::<usize>(),
         )
         .expect("Could not sanitize stack");
@@ -238,7 +238,7 @@ fn test_sanitize_stack_copy() {
         simulated_stack = vec![0u8; 2 * size_of::<usize>()];
         simulated_stack[0..size_of::<usize>()].copy_from_slice(&(ii as usize).to_ne_bytes());
         dumper
-            .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+            .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer as usize, 0)
             .expect("Failed to sanitize with small integers");
         assert!(simulated_stack[size_of::<usize>()..] != defaced);
     }
@@ -254,7 +254,7 @@ fn test_sanitize_stack_copy() {
     simulated_stack = vec![0u8; 2 * size_of::<usize>()];
     simulated_stack[size_of::<usize>()..].copy_from_slice(&instr_ptr.to_ne_bytes());
     dumper
-        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer as usize, 0)
         .expect("Failed to sanitize with instr_ptr");
     assert!(simulated_stack[0..size_of::<usize>()] != defaced);
     assert!(simulated_stack[size_of::<usize>()..] != defaced);
@@ -263,7 +263,7 @@ fn test_sanitize_stack_copy() {
     let junk = "abcdefghijklmnop".as_bytes();
     simulated_stack.copy_from_slice(&junk[0..2 * size_of::<usize>()]);
     dumper
-        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer as usize, 0)
         .expect("Failed to sanitize with junk");
     assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
     assert_eq!(simulated_stack[size_of::<usize>()..], defaced);
@@ -289,7 +289,7 @@ fn test_sanitize_stack_copy() {
 
     simulated_stack[0..size_of::<usize>()].copy_from_slice(&heap_addr.to_ne_bytes());
     dumper
-        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer, 0)
+        .sanitize_stack_copy(&mut simulated_stack, thread_info.stack_pointer as usize, 0)
         .expect("Failed to sanitize with heap addr");
 
     assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);

@@ -1,7 +1,9 @@
-use super::Pid;
+use super::{Pid, CommonThreadInfo};
 use crate::errors::ThreadInfoError;
-use crate::minidump_cpu::imp::{MDARM64RegisterNumbers, MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT};
+use crate::minidump_cpu::imp::{MDARM64RegisterNumbers, MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT, libc_user_fpsimd_struct, MD_CONTEXT_ARM64_OLD, MD_CONTEXT_ARM64_ALL_OLD};
+use crate::minidump_cpu::RawContextCPU;
 use libc;
+use nix::sys::ptrace;
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -12,37 +14,60 @@ pub struct ThreadInfoAarch64 {
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
     pub regs: libc::user_regs_struct,
-    pub fpregs: libc::user_fpsimd_struct,
+    pub fpregs: libc_user_fpsimd_struct,
 }
 
+impl CommonThreadInfo for ThreadInfoAarch64 {}
+
 impl ThreadInfoAarch64 {
+    // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
+    fn getfpregs(pid: Pid) -> Result<libc_user_fpsimd_struct> {
+        Self::ptrace_get_data::<libc_user_fpsimd_struct>(
+            ptrace::Request::PTRACE_GETFPREGS,
+            None,
+            nix::unistd::Pid::from_raw(pid),
+        )
+    }
+
+    // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
+    fn getregs(pid: Pid) -> Result<libc::user_regs_struct> {
+        Self::ptrace_get_data::<libc::user_regs_struct>(
+            ptrace::Request::PTRACE_GETFPREGS,
+            None,
+            nix::unistd::Pid::from_raw(pid),
+        )
+    }
+
     pub fn get_instruction_pointer(&self) -> libc::c_ulonglong {
         self.regs.pc
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        // out->context_flags = MD_CONTEXT_ARM64_FULL_OLD;
+        out.context_flags = MD_CONTEXT_ARM64_ALL_OLD;
         out.cpsr = self.regs.pstate as u32;
-        for idx in 0..MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_SP {
+        for idx in 0..MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_SP as usize {
             out.iregs[idx] = self.regs.regs[idx];
         }
-        out.iregs[MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_SP] = self.regs.sp;
-        out.iregs[MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_PC] = self.regs.pc;
-        out.float_save.fpsr = self.fpregs.fpsr;
+        out.iregs[MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_SP as usize] = self.regs.sp;
+        out.iregs[MDARM64RegisterNumbers::MD_CONTEXT_ARM64_REG_PC as usize] = self.regs.pc;
+        out.pc = self.regs.pc;
         out.float_save.fpcr = self.fpregs.fpcr;
+        out.float_save.fpsr = self.fpregs.fpsr;
+        out.float_save.regs = self.fpregs.regs;
+    }
+    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
+        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+        let regs = Self::getregs(tid)?;
+        let fpregs = Self::getfpregs(tid)?;
 
-        // my_memcpy(&out->float_save.regs, &fpregs.vregs,
-        //     MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16);
-        out.float_save.regs = self
-            .fpregs
-            .vregs
-            .iter()
-            .map(|x| x.to_ne_bytes().to_vec())
-            .flatten()
-            .take(MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT * 16)
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into() // Make slice into fixed size array
-            .unwrap(); // Which has to work as we know the numbers work out
+        let stack_pointer = regs.uregs[13] as usize;
+
+        Ok(ThreadInfoAarch64 {
+            stack_pointer,
+            tgid,
+            ppid,
+            regs,
+            fpregs,
+        })
     }
 }

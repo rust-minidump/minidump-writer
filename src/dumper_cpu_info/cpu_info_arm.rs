@@ -86,10 +86,10 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     // The ELF hwcaps are listed in the "Features" entry as textual tags.
     // This table is used to rebuild them.
-    let cpu_features_entries;
+    let cpu_features_entries: &[CpuFeaturesEntry];
     #[cfg(target_arch = "arm")]
     {
-        cpu_features_entries = [
+        cpu_features_entries = &[
             CpuFeaturesEntry::new("swp", MDCPUInformationARMElfHwCaps::Swp as u32),
             CpuFeaturesEntry::new("half", MDCPUInformationARMElfHwCaps::Half as u32),
             CpuFeaturesEntry::new("thumb", MDCPUInformationARMElfHwCaps::Thumb as u32),
@@ -119,7 +119,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     #[cfg(target_arch = "aarch64")]
     {
         // No hwcaps on aarch64.
-        cpu_features_entries = [];
+        cpu_features_entries = &[];
     }
 
     // processor_architecture should always be set, do this first
@@ -251,7 +251,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             if let Some(val) = value {
                 // Parse each space-separated tag.
                 for tag in val.split_whitespace() {
-                    for entry in &cpu_features_entries {
+                    for entry in cpu_features_entries {
                         if entry.tag == tag {
                             sys_info.cpu.elf_hwcaps |= entry.hwcaps;
                             break;

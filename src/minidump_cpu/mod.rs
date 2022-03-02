@@ -21,6 +21,6 @@ pub type RawContextCPU = imp::MDRawContextX86;
 #[cfg(target_arch = "arm")]
 pub type RawContextCPU = imp::MDRawContextARM;
 #[cfg(target_arch = "aarch64")]
-pub type RawContextCPU = imp::MDRawContextX86;
+pub type RawContextCPU = imp::MDRawContextARM64Old;
 #[cfg(target_arch = "mips")]
 pub type RawContextCPU = i32;

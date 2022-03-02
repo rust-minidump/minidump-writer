@@ -27,13 +27,26 @@ enum Context {
     Without,
 }
 
-#[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
+#[cfg(not(any(target_arch = "mips", target_arch = "arm", target_arch = "aarch64")))]
 fn get_ucontext() -> Result<libc::ucontext_t> {
     let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
     let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
     Errno::result(res)?;
     unsafe { Ok(context.assume_init()) }
 }
+
+#[cfg(target_arch = "aarch64")]
+fn get_ucontext() -> Result<libc::ucontext_t> {
+    // Libc doesn't define this for arm64 because of the u128 thing
+    extern "C" {
+        pub fn getcontext(ucp: *mut libc::ucontext_t) -> libc::c_int;
+    }
+    let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
+    let res = unsafe { getcontext(context.as_mut_ptr()) };
+    Errno::result(res)?;
+    unsafe { Ok(context.assume_init()) }
+}
+
 
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 fn get_crash_context(tid: Pid) -> CrashContext {
