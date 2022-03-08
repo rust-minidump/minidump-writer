@@ -181,7 +181,7 @@ impl MappingInfo {
     }
 
     pub fn get_mmap(name: &Option<String>, offset: usize) -> Result<Mmap> {
-        if !MappingInfo::is_mapped_file_safe_to_open(&name) {
+        if !MappingInfo::is_mapped_file_safe_to_open(name) {
             return Err(MapsReaderError::NotSafeToOpenMapping(
                 name.clone().unwrap_or_default(),
             ));
@@ -304,14 +304,13 @@ impl MappingInfo {
         // filesystem name of the module.
 
         // Just use the filesystem name if no SONAME is present.
-        let file_name = match self.elf_file_so_name() {
-            Ok(name) => name,
-            Err(_) => {
-                //   file_path := /path/to/libname.so
-                //   file_name := libname.so
-                let file_name = file_path.rsplitn(2, '/').next().unwrap().to_owned();
-                return Ok((file_path, file_name));
-            }
+        let file_name = if let Ok(name) = self.elf_file_so_name() {
+            name
+        } else {
+            //   file_path := /path/to/libname.so
+            //   file_name := libname.so
+            let file_name = file_path.rsplit('/').next().unwrap().to_owned();
+            return Ok((file_path, file_name));
         };
 
         if self.executable && self.offset != 0 {

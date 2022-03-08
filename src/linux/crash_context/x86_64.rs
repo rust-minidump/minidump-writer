@@ -1,6 +1,6 @@
 use crate::minidump_cpu::imp::*;
 
-use crate::thread_info::to_u128;
+use crate::thread_info::copy_u32_registers;
 use libc::{
     REG_CSGSFS, REG_EFL, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15, REG_R8, REG_R9,
     REG_RAX, REG_RBP, REG_RBX, REG_RCX, REG_RDI, REG_RDX, REG_RIP, REG_RSI, REG_RSP,
@@ -61,15 +61,8 @@ impl super::CpuContext for super::CrashContext {
             out.flt_save.mx_csr = fs.mxcsr;
             out.flt_save.mx_csr_mask = fs.mxcr_mask;
 
-            let data = to_u128(&fs.st_space);
-            for idx in 0..data.len() {
-                out.flt_save.float_registers[idx] = data[idx];
-            }
-
-            let data = to_u128(&fs.xmm_space);
-            for idx in 0..data.len() {
-                out.flt_save.xmm_registers[idx] = data[idx];
-            }
+            copy_u32_registers(&mut out.flt_save.float_registers, &fs.st_space);
+            copy_u32_registers(&mut out.flt_save.xmm_registers, &fs.xmm_space);
         }
     }
 }

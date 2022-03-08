@@ -94,8 +94,8 @@ pub fn write(
     };
 
     let thread_context = match config.crashing_thread_context {
-        CrashingThreadContext::CrashContextPlusAddress((ctx, _)) => ctx,
-        CrashingThreadContext::CrashContext(ctx) => ctx,
+        CrashingThreadContext::CrashContextPlusAddress((ctx, _))
+        | CrashingThreadContext::CrashContext(ctx) => ctx,
         CrashingThreadContext::None => MDLocationDescriptor {
             data_size: 0,
             rva: 0,

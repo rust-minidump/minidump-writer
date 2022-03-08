@@ -3,7 +3,7 @@ use crate::errors::ThreadInfoError;
 use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
 #[cfg(target_arch = "x86_64")]
-use crate::thread_info::to_u128;
+use crate::thread_info::copy_u32_registers;
 use core::mem::size_of_val;
 use libc;
 use libc::user;
@@ -100,18 +100,18 @@ impl ThreadInfoX86 {
 
         let debug_offset = memoffset::offset_of!(user, u_debugreg);
         let elem_offset = size_of_val(&dregs[0]);
-        for idx in 0..NUM_DEBUG_REGISTERS {
+        for (idx, dreg) in dregs.iter_mut().enumerate() {
             let chunk = Self::peek_user(
                 tid,
                 (debug_offset + idx * elem_offset) as ptrace::AddressType,
             )?;
             #[cfg(target_arch = "x86_64")]
             {
-                dregs[idx] = chunk as u64; // libc / ptrace is very messy wrt int types used...
+                *dreg = chunk as u64; // libc / ptrace is very messy wrt int types used...
             }
             #[cfg(target_arch = "x86")]
             {
-                dregs[idx] = chunk as i32; // libc / ptrace is very messy wrt int types used...
+                *dreg = chunk as i32; // libc / ptrace is very messy wrt int types used...
             }
         }
 
@@ -197,17 +197,8 @@ impl ThreadInfoX86 {
         out.flt_save.mx_csr = self.fpregs.mxcsr;
         out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
 
-        let data = to_u128(&self.fpregs.st_space);
-        for idx in 0..data.len() {
-            out.flt_save.float_registers[idx] = data[idx];
-        }
-
-        let data = to_u128(&self.fpregs.xmm_space);
-        for idx in 0..data.len() {
-            out.flt_save.xmm_registers[idx] = data[idx];
-        }
-        // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
-        // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
+        copy_u32_registers(&mut out.flt_save.float_registers, &self.fpregs.st_space);
+        copy_u32_registers(&mut out.flt_save.xmm_registers, &self.fpregs.xmm_space);
     }
 
     #[cfg(target_arch = "x86")]

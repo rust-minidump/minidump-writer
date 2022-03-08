@@ -34,7 +34,7 @@ where
         // Get position of this value (e.g. before we add ourselves there)
         let position = buffer.position();
         let size = std::mem::size_of::<T>();
-        let bytes = unsafe { std::slice::from_raw_parts(&val as *const T as *const u8, size) };
+        let bytes = unsafe { std::slice::from_raw_parts((&val as *const T).cast(), size) };
         buffer.write_all(bytes)?;
 
         Ok(MemoryWriter {
@@ -62,7 +62,7 @@ where
         // was determined by `alloc()` into the buffer
         buffer.set_position(self.position as u64);
         let bytes = unsafe {
-            std::slice::from_raw_parts(&val as *const T as *const u8, std::mem::size_of::<T>())
+            std::slice::from_raw_parts((&val as *const T).cast(), std::mem::size_of::<T>())
         };
         let res = buffer.write_all(bytes);
 
@@ -99,7 +99,7 @@ where
         let position = buffer.position();
         for val in array {
             let bytes = unsafe {
-                std::slice::from_raw_parts(val as *const T as *const u8, std::mem::size_of::<T>())
+                std::slice::from_raw_parts((val as *const T).cast(), std::mem::size_of::<T>())
             };
             buffer.write_all(bytes)?;
         }
@@ -121,7 +121,7 @@ where
             // Filling out the buffer with default-values
             let val: T = Default::default();
             let bytes = unsafe {
-                std::slice::from_raw_parts(&val as *const T as *const u8, std::mem::size_of::<T>())
+                std::slice::from_raw_parts((&val as *const T).cast(), std::mem::size_of::<T>())
             };
             buffer.write_all(bytes)?;
         }
@@ -147,7 +147,7 @@ where
         // was determined by `alloc()` into the buffer
         buffer.set_position(self.position as u64 + (std::mem::size_of::<T>() * index) as u64);
         let bytes = unsafe {
-            std::slice::from_raw_parts(&val as *const T as *const u8, std::mem::size_of::<T>())
+            std::slice::from_raw_parts((&val as *const T).cast(), std::mem::size_of::<T>())
         };
         let res = buffer.write_all(bytes);
 

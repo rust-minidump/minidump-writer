@@ -67,7 +67,7 @@ pub const MD_HEADER_SIGNATURE: u32 = 0x504d444d; /* 'PMDM' */
 pub const MD_HEADER_VERSION: u32 = 0x0000a793; /* 42899 */
 /* MINIDUMP_VERSION */
 
-/// The name of a thread, found in the ThreadNamesStream.
+/// The name of a thread, found in the [`MDStreamType::ThreadNamesStream`].
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MDRawThreadName {

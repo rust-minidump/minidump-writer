@@ -11,7 +11,7 @@ use crate::{
     },
     minidump_format::*,
 };
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Seek, SeekFrom, Write};
 
 pub type DumpBuf = Cursor<Vec<u8>>;
 
@@ -297,7 +297,7 @@ impl MinidumpWriter {
         // we should have a mostly-intact dump
         dir_section.write_to_file(buffer, None)?;
 
-        let dirent = thread_list_stream::write(self, buffer, &dumper)?;
+        let dirent = thread_list_stream::write(self, buffer, dumper)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
@@ -305,7 +305,7 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let _ = app_memory::write(self, buffer)?;
+        app_memory::write(self, buffer)?;
         // Write section to file
         dir_section.write_to_file(buffer, None)?;
 
@@ -411,14 +411,13 @@ impl MinidumpWriter {
         Ok(())
     }
 
+    #[allow(clippy::unused_self)]
     fn write_file(
         &self,
         buffer: &mut DumpBuf,
         filename: &str,
     ) -> std::result::Result<MDLocationDescriptor, MemoryWriterError> {
-        let mut file = std::fs::File::open(std::path::PathBuf::from(filename))?;
-        let mut content = Vec::new();
-        file.read_to_end(&mut content)?;
+        let content = std::fs::read(filename)?;
 
         let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
         Ok(section.location())

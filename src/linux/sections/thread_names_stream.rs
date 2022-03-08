@@ -20,7 +20,7 @@ pub fn write(buffer: &mut DumpBuf, dumper: &PtraceDumper) -> Result<MDRawDirecto
 
     for (idx, item) in dumper.threads.iter().enumerate() {
         if let Some(name) = &item.name {
-            let pos = write_string_to_location(buffer, &name)?;
+            let pos = write_string_to_location(buffer, name)?;
             let thread = MDRawThreadName {
                 thread_id: item.tid.try_into()?,
                 thread_name_rva: pos.rva.into(),

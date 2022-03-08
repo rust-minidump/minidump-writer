@@ -46,7 +46,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
 
-    let mut vendor_id = String::new();
+    let mut vendor_id = None;
     for line in BufReader::new(cpuinfo_file).lines() {
         let line = line?;
         // Expected format: <field-name> <space>+ ':' <space> <value>
@@ -83,8 +83,8 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             }
 
             // special case for vendor_id
-            if field == vendor_id_name && value.is_some() && !value.unwrap().is_empty() {
-                vendor_id = value.unwrap().to_string();
+            if field == vendor_id_name {
+                vendor_id = value.filter(|v| !v.is_empty()).map(|v| (*v).to_owned());
             }
         }
     }
@@ -104,7 +104,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         sys_info.processor_revision =
             (cpu_info_table[1].value << 8 | cpu_info_table[2].value) as u16;
     }
-    if !vendor_id.is_empty() {
+    if let Some(vendor_id) = vendor_id {
         let mut slice = vendor_id.as_bytes();
         for id_part in sys_info.cpu.vendor_id.iter_mut() {
             let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
