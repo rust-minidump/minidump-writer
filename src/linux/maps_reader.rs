@@ -418,10 +418,11 @@ mod tests {
         let (lines, linux_gate_loc) = get_lines_and_loc();
         // Only /usr/bin/cat and [heap]
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("unexpected parse failure")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 23);
@@ -434,10 +435,11 @@ mod tests {
         let (lines, linux_gate_loc) = get_lines_and_loc();
         // Only /usr/bin/cat and [heap]
         for line in lines[0..=6].iter() {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("unexpected parse failure")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
 
@@ -575,10 +577,11 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("unexpected parse failure")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 1);
@@ -600,7 +603,7 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut()) {
                 Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
                 Ok(MappingInfoParsingResult::SkipLine) => continue,
                 Err(x) => panic!("{:?}", x),
@@ -634,10 +637,11 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("unexpected parse failure")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 4);

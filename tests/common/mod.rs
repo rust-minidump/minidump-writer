@@ -86,7 +86,7 @@ pub fn start_child_and_return(command: &str) -> Child {
         .arg("--bin")
         .arg("test")
         .arg("--")
-        .arg(format!("{}", command))
+        .arg(command)
         .stdout(Stdio::piped())
         .spawn()
         .expect("failed to execute child");
