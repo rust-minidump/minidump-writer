@@ -1,5 +1,5 @@
+use super::minidump_writer::CrashingThreadContext;
 use super::*;
-use minidump_writer::CrashingThreadContext;
 
 #[allow(non_camel_case_types, unused)]
 #[repr(u32)]
