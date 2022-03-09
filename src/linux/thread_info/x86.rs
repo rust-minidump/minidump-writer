@@ -1,15 +1,12 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
 use crate::errors::ThreadInfoError;
-use crate::minidump_cpu::imp::*;
 use crate::minidump_cpu::RawContextCPU;
 #[cfg(target_arch = "x86_64")]
 use crate::thread_info::copy_u32_registers;
 use core::mem::size_of_val;
-use libc;
-use libc::user;
+use libc::{self, user};
 use memoffset;
-use nix::sys::ptrace;
-use nix::unistd;
+use nix::{sys::ptrace, unistd};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -144,7 +141,9 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86_64")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS;
+        out.context_flags = crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_FULL
+            .bits()
+            | crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_SEGMENTS.bits();
 
         out.cs = self.regs.cs as u16; // TODO: This is u64, do we loose information by doing this?
 
@@ -186,19 +185,31 @@ impl ThreadInfoX86 {
 
         out.rip = self.regs.rip;
 
-        out.flt_save.control_word = self.fpregs.cwd;
-        out.flt_save.status_word = self.fpregs.swd;
-        out.flt_save.tag_word = self.fpregs.ftw as u8; // TODO: This is u16, do we loose information by doing this?
-        out.flt_save.error_opcode = self.fpregs.fop;
-        out.flt_save.error_offset = self.fpregs.rip as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.error_selector = 0; // We don't have this.
-        out.flt_save.data_offset = self.fpregs.rdp as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.data_selector = 0; // We don't have this.
-        out.flt_save.mx_csr = self.fpregs.mxcsr;
-        out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
+        {
+            let fs = self.fpregs;
+            let mut float_save = crate::minidump_cpu::FloatStateCPU {
+                control_word: fs.cwd,
+                status_word: fs.swd,
+                tag_word: fs.ftw as u8,
+                error_opcode: fs.fop,
+                error_offset: fs.rip as u32,
+                data_offset: fs.rdp as u32,
+                error_selector: 0, // We don't have this.
+                data_selector: 0,  // We don't have this.
+                mx_csr: fs.mxcsr,
+                mx_csr_mask: fs.mxcr_mask,
+                ..Default::default()
+            };
 
-        copy_u32_registers(&mut out.flt_save.float_registers, &self.fpregs.st_space);
-        copy_u32_registers(&mut out.flt_save.xmm_registers, &self.fpregs.xmm_space);
+            copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
+            copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
+
+            use scroll::Pwrite;
+            // TODO: handle errors
+            out.float_save
+                .pwrite_with(float_save, 0, scroll::Endian::Little)
+                .unwrap();
+        }
     }
 
     #[cfg(target_arch = "x86")]

@@ -5,48 +5,28 @@ use std::path;
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
 
-struct CpuInfoEntry {
-    info_name: &'static str,
-    value: i32,
-    found: bool,
-}
-
-impl CpuInfoEntry {
-    fn new(info_name: &'static str, value: i32, found: bool) -> Self {
-        CpuInfoEntry {
-            info_name,
-            value,
-            found,
-        }
-    }
-}
-
 pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
-    let vendor_id_name = "vendor_id";
-    let mut cpu_info_table = [
-        CpuInfoEntry::new("processor", -1, false),
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-        CpuInfoEntry::new("model", 0, false),
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-        CpuInfoEntry::new("stepping", 0, false),
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-        CpuInfoEntry::new("cpu family", 0, false),
-    ];
-
     // processor_architecture should always be set, do this first
-    if cfg!(target_arch = "mips") {
-        sys_info.processor_architecture = MDCPUArchitecture::Mips as u16;
+    sys_info.processor_architecture = if cfg!(target_arch = "mips") {
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS
     } else if cfg!(target_arch = "mips64") {
-        sys_info.processor_architecture = MDCPUArchitecture::Mips64 as u16;
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS64
     } else if cfg!(target_arch = "x86") {
-        sys_info.processor_architecture = MDCPUArchitecture::X86 as u16;
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_INTEL
     } else {
-        sys_info.processor_architecture = MDCPUArchitecture::Amd64 as u16;
-    }
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64
+    } as u16;
 
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
 
+    let mut processor = None;
+    // x86/_64 specific
     let mut vendor_id = None;
+    let mut model = None;
+    let mut stepping = None;
+    let mut family = None;
+    //
+
     for line in BufReader::new(cpuinfo_file).lines() {
         let line = line?;
         // Expected format: <field-name> <space>+ ':' <space> <value>
@@ -58,63 +38,71 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             continue;
         }
 
-        let split: Vec<_> = line.split(':').map(|x| x.trim()).collect();
-        let field = split[0];
-        let value = split.get(1); // Option, might be missing
+        let mut liter = line.split(':').map(|x| x.trim());
+        let field = liter.next().unwrap(); // guaranteed to have at least one item
+        let value = if let Some(val) = liter.next() {
+            val
+        } else {
+            continue;
+        };
 
-        let mut is_first_entry = true;
-        for mut entry in cpu_info_table.iter_mut() {
-            if !is_first_entry && entry.found {
-                // except for the 'processor' field, ignore repeated values.
+        let entry = match field {
+            "processor" => &mut processor,
+            "model" => &mut model,
+            "stepping" => &mut stepping,
+            "cpu family" => &mut family,
+            "vendor_id" => {
+                if vendor_id.is_none() && !value.is_empty() {
+                    vendor_id = Some(value.to_owned());
+                }
                 continue;
             }
-            is_first_entry = false;
-            if field == entry.info_name {
-                if let Some(val) = value {
-                    if let Ok(v) = val.parse() {
-                        entry.value = v;
-                        entry.found = true;
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-            }
+            _ => continue,
+        };
 
-            // special case for vendor_id
-            if field == vendor_id_name {
-                vendor_id = value.filter(|v| !v.is_empty()).map(|v| (*v).to_owned());
-            }
+        if entry.is_some() && field != "processor" {
+            continue;
+        }
+
+        if let Ok(v) = value.parse::<i32>() {
+            *entry = Some(v);
         }
     }
-    // make sure we got everything we wanted
-    if !cpu_info_table.iter().all(|x| x.found) {
-        return Err(CpuInfoError::NotAllProcEntriesFound);
-    }
-    // cpu_info_table[0] holds the last cpu id listed in /proc/cpuinfo,
-    // assuming this is the highest id, change it to the number of CPUs
-    // by adding one.
-    cpu_info_table[0].value += 1;
 
-    sys_info.number_of_processors = cpu_info_table[0].value as u8; // TODO: might not work on special machines with LOTS of CPUs
+    // This holds the highest processor id which start from 0 so add 1 to get the actual count
+    // This field is only a u8 which means it will not work great in high (artificially or otherwise)
+    // contexts
+    sys_info.number_of_processors = std::cmp::max(
+        (processor.ok_or(CpuInfoError::NotAllProcEntriesFound)? + 1) as u8,
+        u8::MAX,
+    );
+
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     {
-        sys_info.processor_level = cpu_info_table[3].value as u16;
-        sys_info.processor_revision =
-            (cpu_info_table[1].value << 8 | cpu_info_table[2].value) as u16;
-    }
-    if let Some(vendor_id) = vendor_id {
-        let mut slice = vendor_id.as_bytes();
-        for id_part in sys_info.cpu.vendor_id.iter_mut() {
-            let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
-            slice = rest;
-            *id_part = match int_bytes.try_into() {
-                Ok(x) => u32::from_ne_bytes(x),
-                Err(_) => {
-                    continue;
-                }
-            };
+        sys_info.processor_level = family.ok_or(CpuInfoError::NotAllProcEntriesFound)? as u16;
+        sys_info.processor_revision = (model.ok_or(CpuInfoError::NotAllProcEntriesFound)? << 8
+            | stepping.ok_or(CpuInfoError::NotAllProcEntriesFound)?)
+            as u16;
+
+        if let Some(vendor_id) = vendor_id {
+            let mut slice = vendor_id.as_bytes();
+
+            // SAFETY: CPU_INFORMATION is a block of bytes, which is actually
+            // a union, including the X86 information that we actually want to
+            // set
+            let cpu_info: &mut MDCPUInformation =
+                unsafe { &mut *sys_info.cpu.data.as_mut_ptr().cast() };
+
+            for id_part in cpu_info.vendor_id.iter_mut() {
+                let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
+                slice = rest;
+                *id_part = match int_bytes.try_into() {
+                    Ok(x) => u32::from_ne_bytes(x),
+                    Err(_) => {
+                        continue;
+                    }
+                };
+            }
         }
     }
 

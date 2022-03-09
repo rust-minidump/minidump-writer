@@ -1,8 +1,7 @@
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
-        pub mod amd64;
-        pub use amd64 as imp;
-        pub type RawContextCPU = amd64::MDRawContextAMD64;
+        pub type RawContextCPU = minidump_common::format::CONTEXT_AMD64;
+        pub type FloatStateCPU = minidump_common::format::XMM_SAVE_AREA32;
     } else if #[cfg(target_arch = "x86")] {
         pub mod x86;
         pub use x86 as imp;

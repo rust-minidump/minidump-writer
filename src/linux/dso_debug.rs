@@ -3,11 +3,11 @@ use crate::{
         auxv_reader::AuxvType,
         errors::SectionDsoDebugError,
         ptrace_dumper::PtraceDumper,
-        sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter},
+        sections::{write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter},
     },
     minidump_format::*,
 };
-use std::{collections::HashMap, io::Cursor};
+use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 
@@ -73,7 +73,7 @@ pub struct RDebug {
 }
 
 pub fn write_dso_debug_stream(
-    buffer: &mut Cursor<Vec<u8>>,
+    buffer: &mut Buffer,
     blamed_thread: i32,
     auxv: &HashMap<AuxvType, AuxvType>,
 ) -> Result<MDRawDirectory> {
@@ -265,7 +265,7 @@ pub fn write_dso_debug_stream(
         dyn_addr as *mut libc::c_void,
         dynamic_length,
     )?;
-    MemoryArrayWriter::<u8>::alloc_from_array(buffer, &dso_debug_data)?;
+    MemoryArrayWriter::write_bytes(buffer, &dso_debug_data);
 
     Ok(dirent)
 }

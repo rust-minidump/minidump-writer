@@ -12,7 +12,7 @@ pub fn write(
             app_memory.length,
         )?;
 
-        let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &data_copy)?;
+        let section = MemoryArrayWriter::write_bytes(buffer, &data_copy);
         let desc = MDMemoryDescriptor {
             start_of_memory_range: app_memory.ptr as u64,
             memory: section.location(),

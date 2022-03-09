@@ -20,36 +20,26 @@ cfg_if::cfg_if! {
 
 pub use imp::write_cpu_information;
 
-use crate::{
-    errors::MemoryWriterError,
-    linux::sections::write_string_to_location,
-    minidump_format::{MDOSPlatform, MDRawSystemInfo},
-};
+use crate::minidump_format::PlatformId;
 use nix::sys::utsname::uname;
-use std::io::Cursor;
 
-type Result<T> = std::result::Result<T, MemoryWriterError>;
-
-pub fn write_os_information(
-    buffer: &mut Cursor<Vec<u8>>,
-    sys_info: &mut MDRawSystemInfo,
-) -> Result<()> {
+/// Retrieves the [`MDOSPlatform`] and synthesized version information
+pub fn os_information() -> (PlatformId, String) {
     let info = uname();
-    if cfg!(target_os = "android") {
-        sys_info.platform_id = MDOSPlatform::Android as u32;
-    } else {
-        sys_info.platform_id = MDOSPlatform::Linux as u32;
-    }
-    let merged = vec![
+    let vers = format!(
+        "{} {} {} {}",
         info.sysname(),
         info.release(),
         info.version(),
-        info.machine(),
-    ]
-    .join(" ");
+        info.machine()
+    );
 
-    let location = write_string_to_location(buffer, &merged)?;
-    sys_info.csd_version_rva = location.rva;
-
-    Ok(())
+    (
+        if cfg!(target_os = "android") {
+            PlatformId::Android
+        } else {
+            PlatformId::Linux
+        },
+        vers,
+    )
 }

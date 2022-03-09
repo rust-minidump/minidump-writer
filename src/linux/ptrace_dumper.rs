@@ -9,7 +9,7 @@ use crate::{
         thread_info::{Pid, ThreadInfo},
         LINUX_GATE_LIBRARY_NAME,
     },
-    minidump_format::MDGUID,
+    minidump_format::GUID,
 };
 use goblin::elf;
 use nix::sys::{ptrace, wait};
@@ -505,16 +505,16 @@ impl PtraceDumper {
                     // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
                     // function backwards-compatible.
                     let max_len = std::cmp::min(text_section.len(), 4096);
-                    let mut result = vec![0u8; std::mem::size_of::<MDGUID>()];
+                    let mut result = vec![0u8; std::mem::size_of::<GUID>()];
                     let mut offset = 0;
                     while offset < max_len {
-                        for idx in 0..std::mem::size_of::<MDGUID>() {
+                        for idx in 0..std::mem::size_of::<GUID>() {
                             if offset + idx >= text_section.len() {
                                 break;
                             }
                             result[idx] ^= text_section[offset + idx];
                         }
-                        offset += std::mem::size_of::<MDGUID>();
+                        offset += std::mem::size_of::<GUID>();
                     }
                     return Ok(result);
                 }

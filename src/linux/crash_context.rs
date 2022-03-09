@@ -16,7 +16,7 @@ cfg_if::cfg_if! {
     }
 }
 
-use crate::minidump_cpu::RawContextCPU;
+use crate::minidump_cpu::{FloatStateCPU, RawContextCPU};
 pub use exception_handler::CrashContext;
 
 pub trait CpuContext {

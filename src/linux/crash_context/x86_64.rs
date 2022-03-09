@@ -1,5 +1,3 @@
-use crate::minidump_cpu::imp::*;
-
 use crate::thread_info::copy_u32_registers;
 use libc::{
     REG_CSGSFS, REG_EFL, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15, REG_R8, REG_R9,
@@ -16,7 +14,8 @@ impl super::CpuContext for super::CrashContext {
     }
 
     fn fill_cpu_context(&self, out: &mut super::RawContextCPU) {
-        out.context_flags = MD_CONTEXT_AMD64_FULL;
+        out.context_flags =
+            crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_FULL.bits();
 
         {
             let gregs = &self.context.uc_mcontext.gregs;
@@ -50,19 +49,29 @@ impl super::CpuContext for super::CrashContext {
 
         {
             let fs = &self.float_state;
-            out.flt_save.control_word = fs.cwd;
-            out.flt_save.status_word = fs.swd;
-            out.flt_save.tag_word = fs.ftw as u8;
-            out.flt_save.error_opcode = fs.fop;
-            out.flt_save.error_offset = fs.rip as u32;
-            out.flt_save.data_offset = fs.rdp as u32;
-            out.flt_save.error_selector = 0; // We don't have this.
-            out.flt_save.data_selector = 0; // We don't have this.
-            out.flt_save.mx_csr = fs.mxcsr;
-            out.flt_save.mx_csr_mask = fs.mxcr_mask;
 
-            copy_u32_registers(&mut out.flt_save.float_registers, &fs.st_space);
-            copy_u32_registers(&mut out.flt_save.xmm_registers, &fs.xmm_space);
+            let mut float_save = super::FloatStateCPU {
+                control_word: fs.cwd,
+                status_word: fs.swd,
+                tag_word: fs.ftw as u8,
+                error_opcode: fs.fop,
+                error_offset: fs.rip as u32,
+                data_offset: fs.rdp as u32,
+                error_selector: 0, // We don't have this.
+                data_selector: 0,  // We don't have this.
+                mx_csr: fs.mxcsr,
+                mx_csr_mask: fs.mxcr_mask,
+                ..Default::default()
+            };
+
+            copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
+            copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
+
+            use scroll::Pwrite;
+            // TODO: handle errors
+            out.float_save
+                .pwrite_with(float_save, 0, scroll::Endian::Little)
+                .unwrap();
         }
     }
 }

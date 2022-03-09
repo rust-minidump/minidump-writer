@@ -11,9 +11,9 @@ use crate::{
     },
     minidump_format::*,
 };
-use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 
-pub type DumpBuf = Cursor<Vec<u8>>;
+pub type DumpBuf = Buffer;
 
 #[derive(Debug)]
 pub struct DirSection<'a, W>
@@ -37,17 +37,18 @@ where
         index_length: u32,
         destination: &'a mut W,
     ) -> std::result::Result<Self, FileWriterError> {
-        let dir_section =
+        let section =
             MemoryArrayWriter::<MDRawDirectory>::alloc_array(buffer, index_length as usize)?;
         Ok(DirSection {
             curr_idx: 0,
-            section: dir_section,
+            section,
             destination_start_offset: destination.seek(SeekFrom::Current(0))?,
             destination,
             last_position_written_to_file: 0,
         })
     }
 
+    #[inline]
     fn position(&self) -> u32 {
         self.section.position
     }
@@ -66,16 +67,15 @@ where
         let idx_pos = self.section.location_of_index(self.curr_idx);
         self.curr_idx += 1;
 
-        self.destination.seek(std::io::SeekFrom::Start(
+        self.destination.seek(SeekFrom::Start(
             self.destination_start_offset + idx_pos.rva as u64,
         ))?;
         let start = idx_pos.rva as usize;
         let end = (idx_pos.rva + idx_pos.data_size) as usize;
-        self.destination.write_all(&buffer.get_ref()[start..end])?;
+        self.destination.write_all(&buffer[start..end])?;
 
         // Reset file-position
-        self.destination
-            .seek(std::io::SeekFrom::Start(curr_file_pos))?;
+        self.destination.seek(SeekFrom::Start(curr_file_pos))?;
 
         Ok(())
     }
@@ -93,7 +93,7 @@ where
         }
 
         let start_pos = self.last_position_written_to_file as usize;
-        self.destination.write_all(&buffer.get_ref()[start_pos..])?;
+        self.destination.write_all(&buffer[start_pos..])?;
         self.last_position_written_to_file = buffer.position();
         Ok(())
     }
@@ -201,14 +201,14 @@ impl MinidumpWriter {
             }
         }
 
-        let mut buffer = Cursor::new(Vec::new());
+        let mut buffer = Buffer::with_capacity(4 * 1024);
         self.generate_dump(&mut buffer, &mut dumper, destination)?;
 
         // dumper would resume threads in drop() automatically,
         // but in case there is an error, we want to catch it
         dumper.resume_threads()?;
 
-        Ok(buffer.into_inner())
+        Ok(buffer.into())
     }
 
     fn crash_thread_references_principal_mapping(&self, dumper: &PtraceDumper) -> bool {
@@ -282,7 +282,6 @@ impl MinidumpWriter {
             signature: MD_HEADER_SIGNATURE,
             version: MD_HEADER_VERSION,
             stream_count: num_writers,
-            //   header.get()->stream_directory_rva = dir.position();
             stream_directory_rva: dir_section.position(),
             checksum: 0, /* Can be 0.  In fact, that's all that's
                           * been found in minidump files. */
@@ -298,27 +297,21 @@ impl MinidumpWriter {
         dir_section.write_to_file(buffer, None)?;
 
         let dirent = thread_list_stream::write(self, buffer, dumper)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = mappings::write(self, buffer, dumper)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         app_memory::write(self, buffer)?;
-        // Write section to file
         dir_section.write_to_file(buffer, None)?;
 
         let dirent = memory_list_stream::write(self, buffer)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = exception_stream::write(self, buffer)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = systeminfo_stream::write(buffer)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, "/proc/cpuinfo") {
@@ -328,7 +321,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/status", self.blamed_thread))
@@ -339,7 +331,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self
@@ -352,7 +343,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread))
@@ -363,7 +353,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread))
@@ -374,7 +363,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
@@ -384,7 +372,6 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = match self.write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
@@ -394,16 +381,13 @@ impl MinidumpWriter {
             },
             Err(_) => Default::default(),
         };
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = dso_debug::write_dso_debug_stream(buffer, self.blamed_thread, &dumper.auxv)
             .unwrap_or_default();
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = thread_names_stream::write(buffer, dumper)?;
-        // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         // If you add more directory entries, don't forget to update kNumWriters,
@@ -419,7 +403,7 @@ impl MinidumpWriter {
     ) -> std::result::Result<MDLocationDescriptor, MemoryWriterError> {
         let content = std::fs::read(filename)?;
 
-        let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
+        let section = MemoryArrayWriter::write_bytes(buffer, &content);
         Ok(section.location())
     }
 }
