@@ -3,9 +3,8 @@ cfg_if::cfg_if! {
         pub type RawContextCPU = minidump_common::format::CONTEXT_AMD64;
         pub type FloatStateCPU = minidump_common::format::XMM_SAVE_AREA32;
     } else if #[cfg(target_arch = "x86")] {
-        pub mod x86;
-        pub use x86 as imp;
-        pub type RawContextCPU = amd64::MDRawContextX86;
+        pub type RawContextCPU = minidump_common::format::CONTEXT_X86;
+        pub type FloatStateCPU = minidump_common::format::FLOATING_SAVE_AREA_X86;
     } else if #[cfg(target_arch = "arm")] {
         pub mod arm;
         pub use arm as imp;

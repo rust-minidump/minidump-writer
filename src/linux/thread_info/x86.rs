@@ -214,7 +214,7 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_X86_ALL;
+        out.context_flags = crate::minidump_format::format::ContextFlagsX86::CONTEXT_X86_ALL.bits();
 
         out.dr0 = self.dregs[0] as u32;
         out.dr3 = self.dregs[3] as u32;
@@ -252,74 +252,54 @@ impl ThreadInfoX86 {
         out.float_save.data_offset = self.fpregs.foo as u32;
         out.float_save.data_selector = self.fpregs.fos as u32;
 
-        // 8 registers * 10 bytes per register.
-        // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
-        out.float_save.register_area = self
-            .fpregs
-            .st_space
-            .iter()
-            .map(|x| x.to_ne_bytes().to_vec())
-            .flatten()
-            .take(MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE)
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into() // Make slice into fixed size array
-            .unwrap(); // Which has to work as we know the numbers work out
+        use scroll::Pwrite;
+        {
+            let ra = &mut out.float_save.register_area;
+            // 8 registers * 10 bytes per register.
+            for (idx, block) in self.fpregs.st_space.iter().enumerate() {
+                let offset = idx * std::mem::size_of::<u32>();
+                if offset >= ra.len() {
+                    break;
+                }
 
-        // This matches the Intel fpsave format.
-        let mut idx = 0;
-        for val in &(self.fpregs.cwd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.swd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.twd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fop as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fip as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fcs as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.foo as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.fos as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.mxcsr as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-
-        // my_memcpy(out->extended_registers + 32, &fpxregs.st_space, 128);
-        idx = 32;
-        for val in &self.fpxregs.st_space {
-            for byte in &val.to_ne_bytes() {
-                out.extended_registers[idx] = *byte;
-                idx += 1;
+                ra.pwrite_with(block, offset, scroll::Endian::Little)
+                    .expect("checked");
             }
         }
 
-        // my_memcpy(out->extended_registers + 160, &fpxregs.xmm_space, 128);
-        idx = 160;
-        for val in &self.fpxregs.xmm_space {
-            for byte in &val.to_ne_bytes() {
-                out.extended_registers[idx] = *byte;
-                idx += 1;
+        #[allow(unused_assignments)]
+        {
+            let mut offset = 0;
+            macro_rules! write_er {
+                ($reg:expr) => {
+                    offset += out
+                        .extended_registers
+                        .pwrite_with($reg, offset, scroll::Endian::Little)
+                        .unwrap()
+                };
+            }
+
+            // This matches the Intel fpsave format.
+            write_er!(self.fpregs.cwd as u16);
+            write_er!(self.fpregs.swd as u16);
+            write_er!(self.fpregs.twd as u16);
+            write_er!(self.fpxregs.fop);
+            write_er!(self.fpxregs.fip);
+            write_er!(self.fpxregs.fcs);
+            write_er!(self.fpregs.foo);
+            write_er!(self.fpregs.fos);
+            write_er!(self.fpxregs.mxcsr);
+
+            offset = 32;
+
+            for val in &self.fpxregs.st_space {
+                write_er!(val);
+            }
+
+            debug_assert_eq!(offset, 160);
+
+            for val in &self.fpxregs.xmm_space {
+                write_er!(val);
             }
         }
     }
