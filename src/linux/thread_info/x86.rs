@@ -145,15 +145,16 @@ impl ThreadInfoX86 {
             .bits()
             | crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_SEGMENTS.bits();
 
-        out.cs = self.regs.cs as u16; // TODO: This is u64, do we loose information by doing this?
+        // TODO: These are all u64, do we lose information by doing this?
+        out.cs = self.regs.cs as u16;
 
-        out.ds = self.regs.ds as u16; // TODO: This is u64, do we loose information by doing this?
-        out.es = self.regs.es as u16; // TODO: This is u64, do we loose information by doing this?
-        out.fs = self.regs.fs as u16; // TODO: This is u64, do we loose information by doing this?
-        out.gs = self.regs.gs as u16; // TODO: This is u64, do we loose information by doing this?
+        out.ds = self.regs.ds as u16;
+        out.es = self.regs.es as u16;
+        out.fs = self.regs.fs as u16;
+        out.gs = self.regs.gs as u16;
 
-        out.ss = self.regs.ss as u16; // TODO: This is u64, do we loose information by doing this?
-        out.eflags = self.regs.eflags as u32; // TODO: This is u64, do we loose information by doing this?
+        out.ss = self.regs.ss as u16;
+        out.eflags = self.regs.eflags as u32;
 
         out.dr0 = self.dregs[0];
         out.dr1 = self.dregs[1];
@@ -205,10 +206,9 @@ impl ThreadInfoX86 {
             copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
 
             use scroll::Pwrite;
-            // TODO: handle errors
             out.float_save
                 .pwrite_with(float_save, 0, scroll::Endian::Little)
-                .unwrap();
+                .expect("this is impossible");
         }
     }
 

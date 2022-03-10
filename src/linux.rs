@@ -2,7 +2,6 @@
 mod android;
 pub mod app_memory;
 mod auxv_reader;
-pub mod crash_context;
 mod dso_debug;
 mod dumper_cpu_info;
 pub mod errors;

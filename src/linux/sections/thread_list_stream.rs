@@ -1,8 +1,6 @@
 use super::*;
-use crate::{
-    linux::crash_context::CpuContext, minidump_cpu::RawContextCPU,
-    minidump_writer::CrashingThreadContext,
-};
+use crate::{minidump_cpu::RawContextCPU, minidump_writer::CrashingThreadContext};
+use crash_context::CpuContext;
 
 type Result<T> = std::result::Result<T, errors::SectionThreadListError>;
 
@@ -79,8 +77,8 @@ pub fn write(
         // unhelpful.
         if config.crash_context.is_some() && thread.thread_id == config.blamed_thread as u32 {
             let crash_context = config.crash_context.as_ref().unwrap();
-            let instruction_ptr = crash_context.get_instruction_pointer() as usize;
-            let stack_pointer = crash_context.get_stack_pointer() as usize;
+            let instruction_ptr = crash_context.instruction_pointer();
+            let stack_pointer = crash_context.stack_pointer();
             fill_thread_stack(
                 config,
                 buffer,

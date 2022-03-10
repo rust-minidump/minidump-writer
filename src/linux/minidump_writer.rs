@@ -1,7 +1,6 @@
 use crate::{
     linux::{
         app_memory::AppMemoryList,
-        crash_context::{CpuContext, CrashContext},
         dso_debug,
         errors::{FileWriterError, InitError, MemoryWriterError, WriterError},
         maps_reader::{MappingInfo, MappingList},
@@ -11,6 +10,7 @@ use crate::{
     },
     minidump_format::*,
 };
+use crash_context::{CpuContext, CrashContext};
 use std::io::{Seek, SeekFrom, Write};
 
 pub type DumpBuf = Buffer;
@@ -229,12 +229,8 @@ impl MinidumpWriter {
             .system_mapping_info
             .end_address;
 
-        let pc = self
-            .crash_context
-            .as_ref()
-            .unwrap()
-            .get_instruction_pointer();
-        let stack_pointer = self.crash_context.as_ref().unwrap().get_stack_pointer();
+        let pc = self.crash_context.as_ref().unwrap().instruction_pointer();
+        let stack_pointer = self.crash_context.as_ref().unwrap().stack_pointer();
 
         if pc >= low_addr && pc < high_addr {
             return true;

@@ -1,8 +1,8 @@
+use crash_context::CrashContext;
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer::{
     app_memory::AppMemory,
-    crash_context::CrashContext,
     errors::*,
     maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
     minidump_writer::MinidumpWriter,
@@ -27,10 +27,10 @@ enum Context {
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
-fn get_ucontext() -> Result<uctx::ucontext_t> {
+fn get_ucontext() -> Result<crash_context::ucontext_t> {
     let mut context = std::mem::MaybeUninit::uninit();
     unsafe {
-        let res = uctx::getcontext(context.as_mut_ptr());
+        let res = crash_context::crash_context_getcontext(context.as_mut_ptr());
         Errno::result(res)?;
 
         Ok(context.assume_init())
