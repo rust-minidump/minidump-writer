@@ -97,14 +97,13 @@ impl ThreadInfoArm {
         }
     }
 
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create_impl(tid: Pid, ppid: Pid, tgid: Pid) -> Result<Self> {
         let regs = Self::getregs(tid)?;
         let fpregs = Self::getfpregs(tid)?;
 
         let stack_pointer = regs.uregs[13] as usize;
 
-        Ok(ThreadInfoArm {
+        Ok(Self {
             stack_pointer,
             tgid,
             ppid,

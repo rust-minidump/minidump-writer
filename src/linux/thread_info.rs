@@ -30,7 +30,7 @@ cfg_if::cfg_if! {
 enum NT_Elf {
     NT_NONE = 0,
     NT_PRSTATUS = 1,
-    NT_PRFPREG = 2,
+    NT_PRFPREGSET = 2,
     //NT_PRPSINFO = 3,
     //NT_TASKSTRUCT = 4,
     //NT_AUXV = 6,
@@ -81,13 +81,14 @@ trait CommonThreadInfo {
             }
         }
         if ppid == -1 || tgid == -1 {
-            return Err(ThreadInfoError::InvalidPid(
+            Err(ThreadInfoError::InvalidPid(
                 format!("/proc/{}/status", tid),
                 ppid,
                 tgid,
-            ));
+            ))
+        } else {
+            Ok((ppid, tgid))
         }
-        Ok((ppid, tgid))
     }
 
     /// SLIGHTLY MODIFIED COPY FROM CRATE nix
@@ -163,7 +164,8 @@ trait CommonThreadInfo {
     }
 }
 impl ThreadInfo {
-    pub fn create(pid: Pid, tid: Pid) -> std::result::Result<Self, ThreadInfoError> {
-        Self::create_impl(pid, tid)
+    pub fn create(_pid: Pid, tid: Pid) -> std::result::Result<Self, ThreadInfoError> {
+        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+        Self::create_impl(tid, ppid, tgid)
     }
 }

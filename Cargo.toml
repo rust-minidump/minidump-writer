@@ -12,21 +12,21 @@ goblin = "0.5"
 libc = "0.2.74"
 memmap2 = "0.5"
 memoffset = "0.6"
-minidump-common = "0.9"
+minidump-common = "0.10"
 nix = "0.23"
 scroll = "0.11"
 tempfile = "3.1.0"
 thiserror = "1.0.21"
 
 [dependencies.crash-context]
-git = "https://github.com/EmbarkStudios/crash-handling"
-branch = "impl"
-#path = "../crash-handling/crash-context"
+#git = "https://github.com/EmbarkStudios/crash-handling"
+#branch = "impl"
+path = "../crash-handling/crash-context"
 features = ["fill-minidump"]
 
 [dev-dependencies]
 debugid = "0.7.3"
-minidump = "0.9"
+minidump = "0.10"
 
 [patch.crates-io]
 minidump = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }

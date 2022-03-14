@@ -10,11 +10,8 @@ cfg_if::cfg_if! {
         pub use arm as imp;
         pub type RawContextCPU = arm::MDRawContextARM;
     } else if #[cfg(target_arch = "aarch64")] {
-        pub mod aarch64;
-        pub use aarch64 as imp;
-
-        compile_error!("flesh me out");
-        //pub type RawContextCPU = aarch64::MDRawContextX86;
+        pub type RawContextCPU = minidump_common::format::CONTEXT_ARM64_OLD;
+        pub type FloatStateCPU = minidump_common::format::FLOATING_SAVE_AREA_ARM64_OLD;
     } else if #[cfg(target_arch = "mips")] {
         compile_error!("flesh me out");
     } else {

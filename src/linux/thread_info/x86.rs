@@ -42,7 +42,7 @@ impl ThreadInfoX86 {
     fn getfpregset(pid: Pid) -> Result<libc::user_fpregs_struct> {
         Self::ptrace_get_data_via_io::<libc::user_fpregs_struct>(
             ptrace::Request::PTRACE_GETREGSET,
-            Some(NT_Elf::NT_PRFPREG),
+            Some(NT_Elf::NT_PRFPREGSET),
             nix::unistd::Pid::from_raw(pid),
         )
     }
@@ -75,8 +75,7 @@ impl ThreadInfoX86 {
         )
     }
 
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create_impl(tid: Pid, ppid: Pid, tgid: Pid) -> Result<Self> {
         let regs = Self::getregset(tid).or_else(|_| ptrace::getregs(unistd::Pid::from_raw(tid)))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
         #[cfg(target_arch = "x86")]
@@ -117,7 +116,7 @@ impl ThreadInfoX86 {
         #[cfg(target_arch = "x86")]
         let stack_pointer = regs.esp as usize;
 
-        Ok(ThreadInfoX86 {
+        Ok(Self {
             stack_pointer,
             tgid,
             ppid,
