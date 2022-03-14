@@ -162,7 +162,7 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
     assert_eq!(module.code_file(), "a fake mapping");
     assert_eq!(
         module.debug_identifier(),
-        Some("33221100554477668899AABBCCDDEEFF0".into())
+        Some("33221100554477668899AABBCCDDEEFF0".parse().unwrap())
     );
 
     let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
@@ -493,10 +493,7 @@ fn test_with_deleted_binary() {
         .main_module()
         .expect("Could not get main module");
     assert_eq!(main_module.code_file(), binary_copy.to_string_lossy());
-    assert_eq!(
-        main_module.debug_identifier(),
-        Some(std::borrow::Cow::from(filtered.as_str()))
-    );
+    assert_eq!(main_module.debug_identifier(), filtered.parse().ok());
 }
 
 fn test_skip_if_requested_helper(context: Context) {

@@ -271,7 +271,7 @@ pub fn write_dso_debug_stream(
         dyn_addr as *mut libc::c_void,
         dynamic_length,
     )?;
-    MemoryArrayWriter::<u8>::alloc_from_array(buffer, &dso_debug_data)?;
+    MemoryArrayWriter::write_bytes(buffer, &dso_debug_data);
 
     Ok(dirent)
 }

@@ -9,6 +9,8 @@ license = "MIT"
 byteorder = "1.3.2"
 cfg-if = "1.0"
 memoffset = "0.5.1"
+minidump-common = "0.10"
+scroll = "0.11"
 tempfile = "3.1.0"
 thiserror = "1.0.21"
 
@@ -21,5 +23,8 @@ memmap2 = "0.2.2"
 nix = "0.23"
 
 [dev-dependencies]
-minidump = { git = "https://github.com/luser/rust-minidump", rev = "9652b3b" }
-minidump-common = { git = "https://github.com/luser/rust-minidump", rev = "9652b3b" }
+minidump = "0.10"
+
+[patch.crates-io]
+minidump = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }
+minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }

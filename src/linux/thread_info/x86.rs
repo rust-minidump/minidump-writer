@@ -1,15 +1,8 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
-use crate::errors::ThreadInfoError;
-use crate::minidump_cpu::imp::*;
-use crate::minidump_cpu::RawContextCPU;
-#[cfg(target_arch = "x86_64")]
-use crate::thread_info::to_u128;
+use crate::{errors::ThreadInfoError, minidump_cpu::RawContextCPU};
 use core::mem::size_of_val;
 use libc::user;
-use nix::sys::ptrace;
-use nix::unistd;
-#[cfg(target_arch = "x86")]
-use std::convert::TryInto;
+use nix::{sys::ptrace, unistd};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -120,7 +113,7 @@ impl ThreadInfoX86 {
         #[cfg(target_arch = "x86")]
         let stack_pointer = regs.esp as usize;
 
-        Ok(ThreadInfoX86 {
+        Ok(Self {
             stack_pointer,
             tgid,
             ppid,
@@ -144,7 +137,9 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86_64")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_AMD64_FULL | MD_CONTEXT_AMD64_SEGMENTS;
+        out.context_flags = crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_FULL
+            .bits()
+            | crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_SEGMENTS.bits();
 
         out.cs = self.regs.cs as u16; // TODO: This is u64, do we loose information by doing this?
 
@@ -186,28 +181,30 @@ impl ThreadInfoX86 {
 
         out.rip = self.regs.rip;
 
-        out.flt_save.control_word = self.fpregs.cwd;
-        out.flt_save.status_word = self.fpregs.swd;
-        out.flt_save.tag_word = self.fpregs.ftw as u8; // TODO: This is u16, do we loose information by doing this?
-        out.flt_save.error_opcode = self.fpregs.fop;
-        out.flt_save.error_offset = self.fpregs.rip as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.error_selector = 0; // We don't have this.
-        out.flt_save.data_offset = self.fpregs.rdp as u32; // TODO: This is u64, do we loose information by doing this?
-        out.flt_save.data_selector = 0; // We don't have this.
-        out.flt_save.mx_csr = self.fpregs.mxcsr;
-        out.flt_save.mx_csr_mask = self.fpregs.mxcr_mask;
+        {
+            let fs = self.fpregs;
+            let mut float_save = crate::minidump_cpu::FloatStateCPU {
+                control_word: fs.cwd,
+                status_word: fs.swd,
+                tag_word: fs.ftw as u8,
+                error_opcode: fs.fop,
+                error_offset: fs.rip as u32,
+                data_offset: fs.rdp as u32,
+                error_selector: 0, // We don't have this.
+                data_selector: 0,  // We don't have this.
+                mx_csr: fs.mxcsr,
+                mx_csr_mask: fs.mxcr_mask,
+                ..Default::default()
+            };
 
-        let data = to_u128(&self.fpregs.st_space);
-        for idx in 0..data.len() {
-            out.flt_save.float_registers[idx] = data[idx];
-        }
+            super::copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
+            super::copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
 
-        let data = to_u128(&self.fpregs.xmm_space);
-        for idx in 0..data.len() {
-            out.flt_save.xmm_registers[idx] = data[idx];
+            use scroll::Pwrite;
+            out.float_save
+                .pwrite_with(float_save, 0, scroll::Endian::Little)
+                .expect("this is impossible");
         }
-        // my_memcpy(&out.flt_save.float_registers, &self.fpregs.st_space, 8 * 16);
-        // my_memcpy(&out.flt_save.xmm_registers, &self.fpregs.xmm_space, 16 * 16);
     }
 
     #[cfg(target_arch = "x86")]
@@ -250,74 +247,54 @@ impl ThreadInfoX86 {
         out.float_save.data_offset = self.fpregs.foo as u32;
         out.float_save.data_selector = self.fpregs.fos as u32;
 
-        // 8 registers * 10 bytes per register.
-        // my_memcpy(out->float_save.register_area, fpregs.st_space, 10 * 8);
-        out.float_save.register_area = self
-            .fpregs
-            .st_space
-            .iter()
-            .map(|x| x.to_ne_bytes().to_vec())
-            .flatten()
-            .take(MD_FLOATINGSAVEAREA_X86_REGISTERAREA_SIZE)
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into() // Make slice into fixed size array
-            .unwrap(); // Which has to work as we know the numbers work out
+        use scroll::Pwrite;
+        {
+            let ra = &mut out.float_save.register_area;
+            // 8 registers * 10 bytes per register.
+            for (idx, block) in self.fpregs.st_space.iter().enumerate() {
+                let offset = idx * std::mem::size_of::<u32>();
+                if offset >= ra.len() {
+                    break;
+                }
 
-        // This matches the Intel fpsave format.
-        let mut idx = 0;
-        for val in &(self.fpregs.cwd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.swd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.twd as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fop as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fip as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.fcs as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.foo as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpregs.fos as u16).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-        for val in &(self.fpxregs.mxcsr as u32).to_ne_bytes() {
-            out.extended_registers[idx] = *val;
-            idx += 1;
-        }
-
-        // my_memcpy(out->extended_registers + 32, &fpxregs.st_space, 128);
-        idx = 32;
-        for val in &self.fpxregs.st_space {
-            for byte in &val.to_ne_bytes() {
-                out.extended_registers[idx] = *byte;
-                idx += 1;
+                ra.pwrite_with(block, offset, scroll::Endian::Little)
+                    .expect("checked");
             }
         }
 
-        // my_memcpy(out->extended_registers + 160, &fpxregs.xmm_space, 128);
-        idx = 160;
-        for val in &self.fpxregs.xmm_space {
-            for byte in &val.to_ne_bytes() {
-                out.extended_registers[idx] = *byte;
-                idx += 1;
+        #[allow(unused_assignments)]
+        {
+            let mut offset = 0;
+            macro_rules! write_er {
+                ($reg:expr) => {
+                    offset += out
+                        .extended_registers
+                        .pwrite_with($reg, offset, scroll::Endian::Little)
+                        .unwrap()
+                };
+            }
+
+            // This matches the Intel fpsave format.
+            write_er!(self.fpregs.cwd as u16);
+            write_er!(self.fpregs.swd as u16);
+            write_er!(self.fpregs.twd as u16);
+            write_er!(self.fpxregs.fop);
+            write_er!(self.fpxregs.fip);
+            write_er!(self.fpxregs.fcs);
+            write_er!(self.fpregs.foo);
+            write_er!(self.fpregs.fos);
+            write_er!(self.fpxregs.mxcsr);
+
+            offset = 32;
+
+            for val in &self.fpxregs.st_space {
+                write_er!(val);
+            }
+
+            debug_assert_eq!(offset, 160);
+
+            for val in &self.fpxregs.xmm_space {
+                write_er!(val);
             }
         }
     }

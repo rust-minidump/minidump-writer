@@ -1,10 +1,9 @@
 use crate::errors::ThreadInfoError;
-use nix::errno::Errno;
-use nix::sys::ptrace;
-use nix::unistd;
-use std::convert::TryInto;
-use std::io::{self, BufRead};
-use std::path;
+use nix::{errno::Errno, sys::ptrace, unistd};
+use std::{
+    io::{self, BufRead},
+    path,
+};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -37,22 +36,20 @@ enum NT_Elf {
     //NT_AUXV = 6,
 }
 
-pub fn to_u128(slice: &[u32]) -> Vec<u128> {
-    let mut res = Vec::new();
-    for chunk in slice.chunks_exact(4) {
-        let value = u128::from_ne_bytes(
-            chunk
-                .iter()
-                .map(|x| x.to_ne_bytes().to_vec())
-                .flatten()
-                .collect::<Vec<_>>()
-                .as_slice()
-                .try_into() // Make slice into fixed size array
-                .unwrap(), // Which has to work as we know the numbers work out
-        );
-        res.push(value)
-    }
-    res
+#[inline]
+pub fn to_u128(slice: &[u32]) -> &[u128] {
+    unsafe { std::slice::from_raw_parts(slice.as_ptr().cast(), slice.len().saturating_div(4)) }
+}
+
+#[inline]
+pub fn copy_registers(dst: &mut [u128], src: &[u128]) {
+    let to_copy = std::cmp::min(dst.len(), src.len());
+    dst[..to_copy].copy_from_slice(&src[..to_copy]);
+}
+
+#[inline]
+pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
+    copy_registers(dst, to_u128(src));
 }
 
 trait CommonThreadInfo {
