@@ -18,7 +18,26 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_arch = "aarch64")] {
         pub(crate) mod aarch64;
 
-        pub type fpstate_t = libc::fpsimd_context; // Currently not part of libc! This will produce an error.
+        /// Magic value written by the kernel and our custom getcontext
+        pub const FPSIMD_MAGIC: u32 = 0x46508001;
+
+        #[repr(C)]
+        #[derive(Clone)]
+        pub struct _aarch64_ctx {
+            pub magic: u32,
+            pub size: u32,
+        }
+
+        #[repr(C)]
+        #[derive(Clone)]
+        pub struct fpsimd_context {
+            pub head: _aarch64_ctx,
+            pub fpsr: u32,
+            pub fpcr: u32,
+            pub vregs: [u128; 32],
+        }
+
+        pub type fpstate_t = fpsimd_context;
     }
 }
 

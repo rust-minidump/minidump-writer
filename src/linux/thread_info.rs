@@ -30,7 +30,7 @@ cfg_if::cfg_if! {
 enum NT_Elf {
     NT_NONE = 0,
     NT_PRSTATUS = 1,
-    NT_PRFPREG = 2,
+    NT_PRFPREGSET = 2,
     //NT_PRPSINFO = 3,
     //NT_TASKSTRUCT = 4,
     //NT_AUXV = 6,

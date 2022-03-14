@@ -1,10 +1,10 @@
-use crate::errors::CpuInfoError;
-use crate::minidump_format::*;
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::Read;
-use std::io::{BufRead, BufReader};
-use std::path;
+use crate::{errors::CpuInfoError, minidump_format::*};
+use std::{
+    collections::HashSet,
+    fs::File,
+    io::{BufRead, BufReader, Read},
+    path,
+};
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
 
@@ -86,47 +86,36 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
 
     // The ELF hwcaps are listed in the "Features" entry as textual tags.
     // This table is used to rebuild them.
-    let cpu_features_entries;
     #[cfg(target_arch = "arm")]
-    {
-        cpu_features_entries = [
-            CpuFeaturesEntry::new("swp", MDCPUInformationARMElfHwCaps::Swp as u32),
-            CpuFeaturesEntry::new("half", MDCPUInformationARMElfHwCaps::Half as u32),
-            CpuFeaturesEntry::new("thumb", MDCPUInformationARMElfHwCaps::Thumb as u32),
-            CpuFeaturesEntry::new("bit26", MDCPUInformationARMElfHwCaps::Bit26 as u32),
-            CpuFeaturesEntry::new("fastmult", MDCPUInformationARMElfHwCaps::FastMult as u32),
-            CpuFeaturesEntry::new("fpa", MDCPUInformationARMElfHwCaps::Fpa as u32),
-            CpuFeaturesEntry::new("vfp", MDCPUInformationARMElfHwCaps::Vfp as u32),
-            CpuFeaturesEntry::new("edsp", MDCPUInformationARMElfHwCaps::Edsp as u32),
-            CpuFeaturesEntry::new("java", MDCPUInformationARMElfHwCaps::Java as u32),
-            CpuFeaturesEntry::new("iwmmxt", MDCPUInformationARMElfHwCaps::Iwmmxt as u32),
-            CpuFeaturesEntry::new("crunch", MDCPUInformationARMElfHwCaps::Crunch as u32),
-            CpuFeaturesEntry::new("thumbee", MDCPUInformationARMElfHwCaps::Thumbee as u32),
-            CpuFeaturesEntry::new("neon", MDCPUInformationARMElfHwCaps::Neon as u32),
-            CpuFeaturesEntry::new("vfpv3", MDCPUInformationARMElfHwCaps::Vfpv3 as u32),
-            CpuFeaturesEntry::new("vfpv3d16", MDCPUInformationARMElfHwCaps::Vfpv3d16 as u32),
-            CpuFeaturesEntry::new("tls", MDCPUInformationARMElfHwCaps::Tls as u32),
-            CpuFeaturesEntry::new("vfpv4", MDCPUInformationARMElfHwCaps::Vfpv4 as u32),
-            CpuFeaturesEntry::new("idiva", MDCPUInformationARMElfHwCaps::Idiva as u32),
-            CpuFeaturesEntry::new("idivt", MDCPUInformationARMElfHwCaps::Idivt as u32),
-            CpuFeaturesEntry::new(
-                "idiv",
-                MDCPUInformationARMElfHwCaps::Idiva as u32
-                    | MDCPUInformationARMElfHwCaps::Idivt as u32,
-            ),
-        ];
-    }
-    #[cfg(target_arch = "aarch64")]
-    {
-        // No hwcaps on aarch64.
-        cpu_features_entries = [];
-    }
+    let cpu_features_entries = [
+        CpuFeaturesEntry::new("swp", MDCPUInformationARMElfHwCaps::HWCAP_SWP),
+        CpuFeaturesEntry::new("half", MDCPUInformationARMElfHwCaps::HWCAP_HALF),
+        CpuFeaturesEntry::new("thumb", MDCPUInformationARMElfHwCaps::HWCAP_THUMB),
+        CpuFeaturesEntry::new("bit26", MDCPUInformationARMElfHwCaps::HWCAP_26BIT),
+        CpuFeaturesEntry::new("fastmult", MDCPUInformationARMElfHwCaps::HWCAP_FAST_MULT),
+        CpuFeaturesEntry::new("fpa", MDCPUInformationARMElfHwCaps::HWCAP_FPA),
+        CpuFeaturesEntry::new("vfp", MDCPUInformationARMElfHwCaps::HWCAP_VFP),
+        CpuFeaturesEntry::new("edsp", MDCPUInformationARMElfHwCaps::HWCAP_EDSP),
+        CpuFeaturesEntry::new("java", MDCPUInformationARMElfHwCaps::HWCAP_JAVA),
+        CpuFeaturesEntry::new("iwmmxt", MDCPUInformationARMElfHwCaps::HWCAP_IWMMXT),
+        CpuFeaturesEntry::new("crunch", MDCPUInformationARMElfHwCaps::HWCAP_CRUNCH),
+        CpuFeaturesEntry::new("thumbee", MDCPUInformationARMElfHwCaps::HWCAP_THUMBEE),
+        CpuFeaturesEntry::new("neon", MDCPUInformationARMElfHwCaps::HWCAP_NEON),
+        CpuFeaturesEntry::new("vfpv3", MDCPUInformationARMElfHwCaps::HWCAP_VFPv3),
+        CpuFeaturesEntry::new("vfpv3d16", MDCPUInformationARMElfHwCaps::HWCAP_VFPv3D16),
+        CpuFeaturesEntry::new("tls", MDCPUInformationARMElfHwCaps::HWCAP_TLS),
+        CpuFeaturesEntry::new("vfpv4", MDCPUInformationARMElfHwCaps::HWCAP_VFPv4),
+        CpuFeaturesEntry::new("idiva", MDCPUInformationARMElfHwCaps::HWCAP_IDIVA),
+        CpuFeaturesEntry::new("idivt", MDCPUInformationARMElfHwCaps::HWCAP_IDIVT),
+        CpuFeaturesEntry::new("idiv", HWCAP_IDIV),
+    ];
 
     // processor_architecture should always be set, do this first
     if cfg!(target_arch = "aarch64") {
-        sys_info.processor_architecture = MDCPUArchitecture::Arm64Old as u16;
+        sys_info.processor_architecture =
+            MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM64_OLD as u16;
     } else {
-        sys_info.processor_architecture = MDCPUArchitecture::Arm as u16;
+        sys_info.processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM as u16;
     }
 
     // /proc/cpuinfo is not readable under various sandboxed environments
@@ -139,8 +128,6 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     sys_info.number_of_processors = 0;
     sys_info.processor_level = 1; // There is no ARMv1
     sys_info.processor_revision = 42;
-    sys_info.cpu.cpuid = 0;
-    sys_info.cpu.elf_hwcaps = 0;
 
     // Counting the number of CPUs involves parsing two sysfs files,
     // because the content of /proc/cpuinfo will only mirror the number
@@ -173,6 +160,8 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             return Ok(());
         }
     };
+
+    let mut cpuid = 0;
 
     for line in BufReader::new(cpuinfo_file).lines() {
         let line = line?;
@@ -211,7 +200,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             };
             result &= (1 << entry.bit_length) - 1;
             result <<= entry.bit_lshift;
-            sys_info.cpu.cpuid |= result as u32;
+            cpuid |= result as u32;
         }
 
         if cfg!(target_arch = "arm") {
@@ -246,20 +235,50 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             }
         }
 
-        // Rebuild the ELF hwcaps from the 'Features' field.
-        if field == "Features" {
-            if let Some(val) = value {
-                // Parse each space-separated tag.
-                for tag in val.split_whitespace() {
-                    for entry in &cpu_features_entries {
-                        if entry.tag == tag {
-                            sys_info.cpu.elf_hwcaps |= entry.hwcaps;
-                            break;
+        let elf_hwcaps = {
+            let mut elf_hwcaps = 0;
+            #[cfg(target_arch = "arm")]
+            {
+                // Rebuild the ELF hwcaps from the 'Features' field.
+                if field == "Features" {
+                    if let Some(val) = value {
+                        // Parse each space-separated tag.
+                        for tag in val.split_whitespace() {
+                            for entry in &cpu_features_entries {
+                                if entry.tag == tag {
+                                    elf_hwcaps |= entry.hwcaps;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
+
+            elf_hwcaps
+        };
+
+        // The sys_info.cpu field is just a byte array, but in arm's case it is
+        // actually
+        // minidump_common::format::ARMCpuInfo {
+        //  pub cpuid: u32,
+        //  pub elf_hwcaps: u32,
+        // }
+        use scroll::Pwrite;
+        sys_info
+            .cpu
+            .data
+            .pwrite_with(cpuid, 0, scroll::Endian::Little)
+            .expect("impossible");
+        sys_info
+            .cpu
+            .data
+            .pwrite_with(
+                elf_hwcaps,
+                std::mem::size_of::<u32>(),
+                scroll::Endian::Little,
+            )
+            .expect("impossible");
     }
     Ok(())
 }

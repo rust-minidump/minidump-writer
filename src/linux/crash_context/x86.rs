@@ -1,6 +1,5 @@
 use super::CrashContext;
-use crate::minidump_cpu::imp::*;
-use crate::minidump_cpu::RawContextCPU;
+use crate::{minidump_cpu::RawContextCPU, minidump_format::format};
 use libc::{
     REG_CS, REG_DS, REG_EAX, REG_EBP, REG_EBX, REG_ECX, REG_EDI, REG_EDX, REG_EFL, REG_EIP, REG_ES,
     REG_ESI, REG_ESP, REG_FS, REG_GS, REG_SS, REG_UESP,
@@ -15,36 +14,49 @@ impl CrashContext {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_X86_FULL | MD_CONTEXT_X86_FLOATING_POINT;
+        out.context_flags = format::ContextFlagsX86::CONTEXT_X86_FULL.bits()
+            | format::ContextFlagsX86::CONTEXT_X86_FLOATING_POINT.bits();
 
-        out.gs = self.context.uc_mcontext.gregs[REG_GS as usize] as u32;
-        out.fs = self.context.uc_mcontext.gregs[REG_FS as usize] as u32;
-        out.es = self.context.uc_mcontext.gregs[REG_ES as usize] as u32;
-        out.ds = self.context.uc_mcontext.gregs[REG_DS as usize] as u32;
+        {
+            let gregs = &self.context.uc_mcontext.gregs;
+            out.gs = gregs[REG_GS as usize] as u32;
+            out.fs = gregs[REG_FS as usize] as u32;
+            out.es = gregs[REG_ES as usize] as u32;
+            out.ds = gregs[REG_DS as usize] as u32;
 
-        out.edi = self.context.uc_mcontext.gregs[REG_EDI as usize] as u32;
-        out.esi = self.context.uc_mcontext.gregs[REG_ESI as usize] as u32;
-        out.ebx = self.context.uc_mcontext.gregs[REG_EBX as usize] as u32;
-        out.edx = self.context.uc_mcontext.gregs[REG_EDX as usize] as u32;
-        out.ecx = self.context.uc_mcontext.gregs[REG_ECX as usize] as u32;
-        out.eax = self.context.uc_mcontext.gregs[REG_EAX as usize] as u32;
+            out.edi = gregs[REG_EDI as usize] as u32;
+            out.esi = gregs[REG_ESI as usize] as u32;
+            out.ebx = gregs[REG_EBX as usize] as u32;
+            out.edx = gregs[REG_EDX as usize] as u32;
+            out.ecx = gregs[REG_ECX as usize] as u32;
+            out.eax = gregs[REG_EAX as usize] as u32;
 
-        out.ebp = self.context.uc_mcontext.gregs[REG_EBP as usize] as u32;
-        out.eip = self.context.uc_mcontext.gregs[REG_EIP as usize] as u32;
-        out.cs = self.context.uc_mcontext.gregs[REG_CS as usize] as u32;
-        out.eflags = self.context.uc_mcontext.gregs[REG_EFL as usize] as u32;
-        out.esp = self.context.uc_mcontext.gregs[REG_UESP as usize] as u32;
-        out.ss = self.context.uc_mcontext.gregs[REG_SS as usize] as u32;
+            out.ebp = gregs[REG_EBP as usize] as u32;
+            out.eip = gregs[REG_EIP as usize] as u32;
+            out.cs = gregs[REG_CS as usize] as u32;
+            out.eflags = gregs[REG_EFL as usize] as u32;
+            out.esp = gregs[REG_UESP as usize] as u32;
+            out.ss = gregs[REG_SS as usize] as u32;
+        }
 
-        out.float_save.control_word = self.float_state.cw;
-        out.float_save.status_word = self.float_state.sw;
-        out.float_save.tag_word = self.float_state.tag;
-        out.float_save.error_offset = self.float_state.ipoff;
-        out.float_save.error_selector = self.float_state.cssel;
-        out.float_save.data_offset = self.float_state.dataoff;
-        out.float_save.data_selector = self.float_state.datasel;
+        {
+            let fs = &self.float_state;
+            let mut out = &mut out.float_save;
+            out.control_word = fs.cw;
+            out.status_word = fs.sw;
+            out.tag_word = fs.tag;
+            out.error_offset = fs.ipoff;
+            out.error_selector = fs.cssel;
+            out.data_offset = fs.dataoff;
+            out.data_selector = fs.datasel;
 
-        // 8 registers * 10 bytes per register.
-        // my_memcpy(out->float_save.register_area, fp->_st, 10 * 8);
+            debug_assert_eq!(fs._st.len() * std::mem::size_of::<libc::_libc_fpreg>(), 80);
+            out.register_area.copy_from_slice(unsafe {
+                std::slice::from_raw_parts(
+                    fs._st.as_ptr().cast(),
+                    fs._st.len() * std::mem::size_of::<libc::_libc_fpreg>(),
+                )
+            });
+        }
     }
 }

@@ -38,7 +38,7 @@ impl ThreadInfoX86 {
     fn getfpregset(pid: Pid) -> Result<libc::user_fpregs_struct> {
         Self::ptrace_get_data_via_io::<libc::user_fpregs_struct>(
             ptrace::Request::PTRACE_GETREGSET,
-            Some(NT_Elf::NT_PRFPREG),
+            Some(NT_Elf::NT_PRFPREGSET),
             nix::unistd::Pid::from_raw(pid),
         )
     }
@@ -209,7 +209,7 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_X86_ALL;
+        out.context_flags = crate::minidump_format::format::ContextFlagsX86::CONTEXT_X86_ALL.bits();
 
         out.dr0 = self.dregs[0] as u32;
         out.dr3 = self.dregs[3] as u32;
