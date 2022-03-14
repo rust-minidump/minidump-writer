@@ -41,7 +41,7 @@ pub fn write(
     for user in &config.user_mapping_list {
         // GUID was provided by caller.
         let module = fill_raw_module(buffer, &user.mapping, &user.identifier)?;
-        modules.push(module)
+        modules.push(module);
     }
 
     let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, modules.len() as u32)?;
@@ -64,10 +64,9 @@ fn fill_raw_module(
     mapping: &MappingInfo,
     identifier: &[u8],
 ) -> Result<MDRawModule, errors::SectionMappingsError> {
-    let cv_record: MDLocationDescriptor;
-    if identifier.is_empty() {
+    let cv_record = if identifier.is_empty() {
         // Just zeroes
-        cv_record = Default::default();
+        Default::default()
     } else {
         let cv_signature = crate::minidump_format::format::CvSignature::Elf as u32;
         let array_size = std::mem::size_of_val(&cv_signature) + identifier.len();
@@ -81,8 +80,8 @@ fn fill_raw_module(
         {
             sig_section.set_value_at(buffer, *val, index)?;
         }
-        cv_record = sig_section.location();
-    }
+        sig_section.location()
+    };
 
     let (file_path, _) = mapping
         .get_mapping_effective_name_and_path()

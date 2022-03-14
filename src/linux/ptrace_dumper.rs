@@ -73,6 +73,7 @@ impl PtraceDumper {
         Ok(())
     }
 
+    #[cfg_attr(not(target_os = "android"), allow(clippy::unused_self))]
     pub fn late_init(&mut self) -> Result<(), InitError> {
         #[cfg(target_os = "android")]
         {
@@ -216,7 +217,7 @@ impl PtraceDumper {
                         .ok();
                     (tid, name)
                 })
-                .for_each(|(tid, name)| self.threads.push(Thread { tid, name }))
+                .for_each(|(tid, name)| self.threads.push(Thread { tid, name }));
         }
         Ok(())
     }
@@ -274,8 +275,7 @@ impl PtraceDumper {
             let line = line.map_err(errmap)?;
             match MappingInfo::parse_from_line(&line, linux_gate_loc, self.mappings.last_mut()) {
                 Ok(MappingInfoParsingResult::Success(map)) => self.mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => continue,
+                Ok(MappingInfoParsingResult::SkipLine) | Err(_) => continue,
             }
         }
 
@@ -354,11 +354,11 @@ impl PtraceDumper {
         let defaced;
         #[cfg(target_pointer_width = "64")]
         {
-            defaced = 0x0defaced0defacedusize.to_ne_bytes()
+            defaced = 0x0defaced0defacedusize.to_ne_bytes();
         }
         #[cfg(target_pointer_width = "32")]
         {
-            defaced = 0x0defacedusize.to_ne_bytes()
+            defaced = 0x0defacedusize.to_ne_bytes();
         };
         // the bitfield length is 2^test_bits long.
         let test_bits = 11;
@@ -448,26 +448,19 @@ impl PtraceDumper {
 
     // Find the mapping which the given memory address falls in.
     pub fn find_mapping(&self, address: usize) -> Option<&MappingInfo> {
-        for map in &self.mappings {
-            if address >= map.start_address && address - map.start_address < map.size {
-                return Some(&map);
-            }
-        }
-        None
+        self.mappings
+            .iter()
+            .find(|map| address >= map.start_address && address - map.start_address < map.size)
     }
 
     // Find the mapping which the given memory address falls in. Uses the
     // unadjusted mapping address range from the kernel, rather than the
     // biased range.
     pub fn find_mapping_no_bias(&self, address: usize) -> Option<&MappingInfo> {
-        for map in &self.mappings {
-            if address >= map.system_mapping_info.start_address
+        self.mappings.iter().find(|map| {
+            address >= map.system_mapping_info.start_address
                 && address < map.system_mapping_info.end_address
-            {
-                return Some(&map);
-            }
-        }
-        None
+        })
     }
 
     fn parse_build_id<'data>(
@@ -493,41 +486,42 @@ impl PtraceDumper {
 
     pub fn elf_file_identifier_from_mapped_file(mem_slice: &[u8]) -> Result<Vec<u8>, DumperError> {
         let elf_obj = elf::Elf::parse(mem_slice)?;
-        match Self::parse_build_id(&elf_obj, mem_slice) {
+
+        if let Some(build_id) = Self::parse_build_id(&elf_obj, mem_slice) {
             // Look for a build id note first.
-            Some(build_id) => Ok(build_id.to_vec()),
+            Ok(build_id.to_vec())
+        } else {
             // Fall back on hashing the first page of the text section.
-            None => {
-                // Attempt to locate the .text section of an ELF binary and generate
-                // a simple hash by XORing the first page worth of bytes into |result|.
-                for section in elf_obj.section_headers {
-                    if section.sh_type != elf::section_header::SHT_PROGBITS {
-                        continue;
-                    }
-                    if section.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0 {
-                        if section.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0 {
-                            let text_section = &mem_slice[section.sh_offset as usize..]
-                                [..section.sh_size as usize];
-                            // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
-                            // function backwards-compatible.
-                            let max_len = std::cmp::min(text_section.len(), 4096);
-                            let mut result = vec![0u8; std::mem::size_of::<GUID>()];
-                            let mut offset = 0;
-                            while offset < max_len {
-                                for idx in 0..std::mem::size_of::<GUID>() {
-                                    if offset + idx >= text_section.len() {
-                                        break;
-                                    }
-                                    result[idx] ^= text_section[offset + idx];
-                                }
-                                offset += std::mem::size_of::<GUID>();
-                            }
-                            return Ok(result);
-                        }
-                    }
+
+            // Attempt to locate the .text section of an ELF binary and generate
+            // a simple hash by XORing the first page worth of bytes into |result|.
+            for section in elf_obj.section_headers {
+                if section.sh_type != elf::section_header::SHT_PROGBITS {
+                    continue;
                 }
-                Err(DumperError::NoBuildIDFound)
+                if section.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0
+                    && section.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0
+                {
+                    let text_section =
+                        &mem_slice[section.sh_offset as usize..][..section.sh_size as usize];
+                    // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
+                    // function backwards-compatible.
+                    let max_len = std::cmp::min(text_section.len(), 4096);
+                    let mut result = vec![0u8; std::mem::size_of::<GUID>()];
+                    let mut offset = 0;
+                    while offset < max_len {
+                        for idx in 0..std::mem::size_of::<GUID>() {
+                            if offset + idx >= text_section.len() {
+                                break;
+                            }
+                            result[idx] ^= text_section[offset + idx];
+                        }
+                        offset += std::mem::size_of::<GUID>();
+                    }
+                    return Ok(result);
+                }
             }
+            Err(DumperError::NoBuildIDFound)
         }
     }
 
@@ -564,7 +558,7 @@ impl PtraceDumper {
             }
         }
         let new_name = MappingInfo::handle_deleted_file_in_mapping(
-            &mapping.name.as_ref().unwrap_or(&String::new()),
+            mapping.name.as_deref().unwrap_or_default(),
             pid,
         )?;
 

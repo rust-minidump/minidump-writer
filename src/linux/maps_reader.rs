@@ -182,7 +182,7 @@ impl MappingInfo {
     }
 
     pub fn get_mmap(name: &Option<String>, offset: usize) -> Result<Mmap> {
-        if !MappingInfo::is_mapped_file_safe_to_open(&name) {
+        if !MappingInfo::is_mapped_file_safe_to_open(name) {
             return Err(MapsReaderError::NotSafeToOpenMapping(
                 name.clone().unwrap_or_default(),
             ));
@@ -298,7 +298,6 @@ impl MappingInfo {
 
     pub fn get_mapping_effective_name_and_path(&self) -> Result<(String, String)> {
         let mut file_path = self.name.clone().unwrap_or_default();
-        let file_name;
 
         // Tools such as minidump_stackwalk use the name of the module to look up
         // symbols produced by dump_syms. dump_syms will prefer to use a module's
@@ -306,15 +305,14 @@ impl MappingInfo {
         // filesystem name of the module.
 
         // Just use the filesystem name if no SONAME is present.
-        let file_name = match self.elf_file_so_name() {
-            Ok(name) => name,
-            Err(_) => {
-                //   file_path := /path/to/libname.so
-                //   file_name := libname.so
-                let split: Vec<_> = file_path.rsplitn(2, '/').collect();
-                file_name = split.first().unwrap().to_string();
-                return Ok((file_path, file_name));
-            }
+        let file_name = if let Ok(name) = self.elf_file_so_name() {
+            name
+        } else {
+            //   file_path := /path/to/libname.so
+            //   file_name := libname.so
+            // SAFETY: The unwrap is safe as rsplit always returns at least one item
+            let file_name = file_path.rsplit('/').next().unwrap().to_owned();
+            return Ok((file_path, file_name));
         };
 
         if self.executable && self.offset != 0 {
@@ -421,10 +419,11 @@ mod tests {
         let (lines, linux_gate_loc) = get_lines_and_loc();
         // Only /usr/bin/cat and [heap]
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("failed to read mapping info")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 23);
@@ -437,10 +436,11 @@ mod tests {
         let (lines, linux_gate_loc) = get_lines_and_loc();
         // Only /usr/bin/cat and [heap]
         for line in lines[0..=6].iter() {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("failed to read mapping info")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
 
@@ -578,10 +578,11 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("failed to read mapping info")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 1);
@@ -603,10 +604,11 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(x) => panic!("{:?}", x),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("failed to read mapping info")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 1);
@@ -637,10 +639,11 @@ mod tests {
         let linux_gate_loc = 0x7ffe091bf000;
         let mut mappings: Vec<MappingInfo> = Vec::new();
         for line in lines {
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) => continue,
-                Err(_) => assert!(false),
+            match MappingInfo::parse_from_line(line, linux_gate_loc, mappings.last_mut())
+                .expect("failed to read mapping info")
+            {
+                MappingInfoParsingResult::Success(map) => mappings.push(map),
+                MappingInfoParsingResult::SkipLine => continue,
             }
         }
         assert_eq!(mappings.len(), 4);

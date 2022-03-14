@@ -58,9 +58,13 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             continue;
         }
 
-        let split: Vec<_> = line.split(':').map(|x| x.trim()).collect();
-        let field = split[0];
-        let value = split.get(1); // Option, might be missing
+        let mut liter = line.split(':').map(|x| x.trim());
+        let field = liter.next().unwrap(); // guaranteed to have at least one item
+        let value = if let Some(val) = liter.next() {
+            val
+        } else {
+            continue;
+        };
 
         let mut is_first_entry = true;
         for mut entry in cpu_info_table.iter_mut() {
@@ -70,21 +74,17 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             }
             is_first_entry = false;
             if field == entry.info_name {
-                if let Some(val) = value {
-                    if let Ok(v) = val.parse() {
-                        entry.value = v;
-                        entry.found = true;
-                    } else {
-                        continue;
-                    }
+                if let Ok(v) = value.parse() {
+                    entry.value = v;
+                    entry.found = true;
                 } else {
                     continue;
                 }
             }
 
             // special case for vendor_id
-            if field == vendor_id_name && value.is_some() && !value.unwrap().is_empty() {
-                vendor_id = value.unwrap().to_string();
+            if field == vendor_id_name && !value.is_empty() {
+                vendor_id = value.to_owned();
             }
         }
     }

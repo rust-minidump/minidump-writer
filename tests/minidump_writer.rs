@@ -594,10 +594,7 @@ fn test_sanitized_stacks_helper(context: Context) {
         let start = mem.rva as usize;
         let end = (mem.rva + mem.data_size) as usize;
         let slice = &dump_array.as_slice()[start..end];
-        assert!(slice
-            .windows(defaced.len())
-            .position(|window| window == defaced)
-            .is_some());
+        assert!(slice.windows(defaced.len()).any(|window| window == defaced));
     }
 }
 #[test]

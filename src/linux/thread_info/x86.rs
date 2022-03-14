@@ -94,18 +94,18 @@ impl ThreadInfoX86 {
 
         let debug_offset = memoffset::offset_of!(user, u_debugreg);
         let elem_offset = size_of_val(&dregs[0]);
-        for idx in 0..NUM_DEBUG_REGISTERS {
+        for (idx, dreg) in dregs.iter_mut().enumerate() {
             let chunk = Self::peek_user(
                 tid,
                 (debug_offset + idx * elem_offset) as ptrace::AddressType,
             )?;
             #[cfg(target_arch = "x86_64")]
             {
-                dregs[idx] = chunk as u64; // libc / ptrace is very messy wrt int types used...
+                *dreg = chunk as u64; // libc / ptrace is very messy wrt int types used...
             }
             #[cfg(target_arch = "x86")]
             {
-                dregs[idx] = chunk as i32; // libc / ptrace is very messy wrt int types used...
+                *dreg = chunk as i32; // libc / ptrace is very messy wrt int types used...
             }
         }
 
