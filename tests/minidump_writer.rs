@@ -1,18 +1,21 @@
+#![cfg(any(target_os = "linux", target_os = "android"))]
+
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
-use minidump_writer_linux::app_memory::AppMemory;
-#[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
-use minidump_writer_linux::crash_context::fpstate_t;
-use minidump_writer_linux::crash_context::CrashContext;
-use minidump_writer_linux::errors::*;
-use minidump_writer_linux::linux_ptrace_dumper::LinuxPtraceDumper;
-use minidump_writer_linux::maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo};
-use minidump_writer_linux::minidump_writer::MinidumpWriter;
-use minidump_writer_linux::thread_info::Pid;
-use nix::errno::Errno;
-use nix::sys::signal::Signal;
+#[cfg(not(target_arch = "arm"))]
+use minidump_writer::crash_context::fpstate_t;
+use minidump_writer::{
+    app_memory::AppMemory,
+    crash_context::CrashContext,
+    errors::*,
+    maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
+    minidump_writer::MinidumpWriter,
+    ptrace_dumper::PtraceDumper,
+    thread_info::Pid,
+};
+use nix::{errno::Errno, sys::signal::Signal};
 use std::collections::HashSet;
-use std::convert::TryInto;
+
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
@@ -429,7 +432,7 @@ fn test_with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let build_id = LinuxPtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
+    let build_id = PtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
         .expect("Failed to get build_id");
 
     let guid = GUID {

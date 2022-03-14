@@ -1,13 +1,16 @@
+#![cfg(any(target_os = "linux", target_os = "android"))]
+
 // This binary shouldn't be under /src, but under /tests, but that is
 // currently not possible (https://github.com/rust-lang/cargo/issues/4356)
-use minidump_writer_linux::linux_ptrace_dumper::{LinuxPtraceDumper, AT_SYSINFO_EHDR};
-use minidump_writer_linux::{linux_ptrace_dumper, LINUX_GATE_LIBRARY_NAME};
-use nix::sys::mman::{mmap, MapFlags, ProtFlags};
-use nix::unistd::getppid;
-use std::convert::TryInto;
-use std::env;
-use std::error;
-use std::result;
+use minidump_writer::{
+    ptrace_dumper::{PtraceDumper, AT_SYSINFO_EHDR},
+    LINUX_GATE_LIBRARY_NAME,
+};
+use nix::{
+    sys::mman::{mmap, MapFlags, ProtFlags},
+    unistd::getppid,
+};
+use std::{env, error, result};
 
 type Error = Box<dyn error::Error + std::marker::Send + std::marker::Sync>;
 pub type Result<T> = result::Result<T, Error>;
@@ -24,13 +27,13 @@ macro_rules! test {
 
 fn test_setup() -> Result<()> {
     let ppid = getppid();
-    linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
+    PtraceDumper::new(ppid.as_raw())?;
     Ok(())
 }
 
 fn test_thread_list() -> Result<()> {
     let ppid = getppid();
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
+    let dumper = PtraceDumper::new(ppid.as_raw())?;
     test!(!dumper.threads.is_empty(), "No threads")?;
     test!(
         dumper
@@ -46,9 +49,9 @@ fn test_thread_list() -> Result<()> {
 
 fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
     let ppid = getppid().as_raw();
-    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
+    let mut dumper = PtraceDumper::new(ppid)?;
     dumper.suspend_threads()?;
-    let stack_res = LinuxPtraceDumper::copy_from_process(ppid, stack_var as *mut libc::c_void, 1)?;
+    let stack_res = PtraceDumper::copy_from_process(ppid, stack_var as *mut libc::c_void, 1)?;
 
     let expected_stack: libc::c_long = 0x11223344;
     test!(
@@ -56,7 +59,7 @@ fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
         "stack var not correct"
     )?;
 
-    let heap_res = LinuxPtraceDumper::copy_from_process(ppid, heap_var as *mut libc::c_void, 1)?;
+    let heap_res = PtraceDumper::copy_from_process(ppid, heap_var as *mut libc::c_void, 1)?;
     let expected_heap: libc::c_long = 0x55667788;
     test!(
         heap_res == expected_heap.to_ne_bytes(),
@@ -68,7 +71,7 @@ fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
 
 fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
     let ppid = getppid();
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid.as_raw())?;
+    let dumper = PtraceDumper::new(ppid.as_raw())?;
     dumper
         .find_mapping(addr1)
         .ok_or("No mapping for addr1 found")?;
@@ -85,7 +88,7 @@ fn test_file_id() -> Result<()> {
     let ppid = getppid().as_raw();
     let exe_link = format!("/proc/{}/exe", ppid);
     let exe_name = std::fs::read_link(&exe_link)?.into_os_string();
-    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let mut dumper = PtraceDumper::new(getppid().as_raw())?;
     let mut found_exe = None;
     for (idx, mapping) in dumper.mappings.iter().enumerate() {
         if mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name) {
@@ -102,7 +105,7 @@ fn test_file_id() -> Result<()> {
 
 fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
     // Now check that LinuxPtraceDumper interpreted the mappings properly.
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(getppid().as_raw())?;
+    let dumper = PtraceDumper::new(getppid().as_raw())?;
     let mut mapping_count = 0;
     for map in &dumper.mappings {
         if map.name == Some(path.clone()) {
@@ -120,13 +123,13 @@ fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Res
 
 fn test_linux_gate_mapping_id() -> Result<()> {
     let ppid = getppid().as_raw();
-    let mut dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
+    let mut dumper = PtraceDumper::new(ppid)?;
     let mut found_linux_gate = false;
     for mut mapping in dumper.mappings.clone() {
         if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
             found_linux_gate = true;
             dumper.suspend_threads()?;
-            let id = LinuxPtraceDumper::elf_identifier_for_mapping(&mut mapping, ppid)?;
+            let id = PtraceDumper::elf_identifier_for_mapping(&mut mapping, ppid)?;
             test!(!id.is_empty(), "id-vec is empty")?;
             test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
             dumper.resume_threads()?;
@@ -139,7 +142,7 @@ fn test_linux_gate_mapping_id() -> Result<()> {
 
 fn test_mappings_include_linux_gate() -> Result<()> {
     let ppid = getppid().as_raw();
-    let dumper = linux_ptrace_dumper::LinuxPtraceDumper::new(ppid)?;
+    let dumper = PtraceDumper::new(ppid)?;
     let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
     test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
     let mut found_linux_gate = false;

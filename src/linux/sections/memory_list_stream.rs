@@ -1,11 +1,9 @@
-use crate::errors::SectionMemListError;
-use crate::minidump_format::*;
-use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::sections::{MemoryArrayWriter, MemoryWriter};
+use super::*;
 
-type Result<T> = std::result::Result<T, SectionMemListError>;
-
-pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
+pub fn write(
+    config: &mut MinidumpWriter,
+    buffer: &mut DumpBuf,
+) -> Result<MDRawDirectory, errors::SectionMemListError> {
     let list_header =
         MemoryWriter::<u32>::alloc_with_val(buffer, config.memory_blocks.len() as u32)?;
 

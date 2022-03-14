@@ -1,11 +1,5 @@
-use crate::errors::SectionMappingsError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::maps_reader::MappingInfo;
-use crate::minidump_format::*;
-use crate::minidump_writer::{DumpBuf, MinidumpWriter};
-use crate::sections::{write_string_to_location, MemoryArrayWriter, MemoryWriter};
-
-type Result<T> = std::result::Result<T, SectionMappingsError>;
+use super::*;
+use crate::linux::maps_reader::MappingInfo;
 
 /// Write information about the mappings in effect. Because we are using the
 /// minidump format, the information about the mappings is pretty limited.
@@ -14,8 +8,8 @@ type Result<T> = std::result::Result<T, SectionMappingsError>;
 pub fn write(
     config: &mut MinidumpWriter,
     buffer: &mut DumpBuf,
-    dumper: &mut LinuxPtraceDumper,
-) -> Result<MDRawDirectory> {
+    dumper: &mut PtraceDumper,
+) -> Result<MDRawDirectory, errors::SectionMappingsError> {
     let mut modules = Vec::new();
 
     // First write all the mappings from the dumper
@@ -69,7 +63,7 @@ fn fill_raw_module(
     buffer: &mut DumpBuf,
     mapping: &MappingInfo,
     identifier: &[u8],
-) -> Result<MDRawModule> {
+) -> Result<MDRawModule, errors::SectionMappingsError> {
     let cv_record: MDLocationDescriptor;
     if identifier.is_empty() {
         // Just zeroes
@@ -92,7 +86,7 @@ fn fill_raw_module(
 
     let (file_path, _) = mapping
         .get_mapping_effective_name_and_path()
-        .map_err(|e| SectionMappingsError::GetEffectivePathError(mapping.clone(), e))?;
+        .map_err(|e| errors::SectionMappingsError::GetEffectivePathError(mapping.clone(), e))?;
     let name_header = write_string_to_location(buffer, &file_path)?;
 
     Ok(MDRawModule {

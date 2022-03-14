@@ -6,12 +6,19 @@ pub mod systeminfo_stream;
 pub mod thread_list_stream;
 pub mod thread_names_stream;
 
-use crate::errors::MemoryWriterError;
-use crate::minidump_format::*;
+use crate::{
+    errors::{self, MemoryWriterError},
+    linux::{
+        minidump_writer::{self, DumpBuf, MinidumpWriter},
+        ptrace_dumper::PtraceDumper,
+    },
+    minidump_format::*,
+};
 use std::convert::TryInto;
-use std::io::{Cursor, Write};
+use std::io::Write;
 
-type Result<T> = std::result::Result<T, MemoryWriterError>;
+pub type Buffer = std::io::Cursor<Vec<u8>>;
+type WriteResult<T> = std::result::Result<T, MemoryWriterError>;
 
 #[derive(Debug, PartialEq)]
 pub struct MemoryWriter<T: Default + Sized> {
@@ -25,7 +32,7 @@ where
     T: Default + Sized,
 {
     /// Create a slot for a type T in the buffer, we can fill right now with real values.
-    pub fn alloc_with_val(buffer: &mut Cursor<Vec<u8>>, val: T) -> Result<Self> {
+    pub fn alloc_with_val(buffer: &mut Buffer, val: T) -> WriteResult<Self> {
         // Get position of this value (e.g. before we add ourselves there)
         let position = buffer.position();
         let size = std::mem::size_of::<T>();
@@ -42,14 +49,14 @@ where
     /// Create a slot for a type T in the buffer, we can fill later with real values.
     /// This function fills it with `Default::default()`, which is less performant than
     /// using uninitialized memory, but safe.
-    pub fn alloc(buffer: &mut Cursor<Vec<u8>>) -> Result<Self> {
+    pub fn alloc(buffer: &mut Buffer) -> WriteResult<Self> {
         // Filling out the buffer with default-values
         let val: T = Default::default();
         Self::alloc_with_val(buffer, val)
     }
 
     /// Write actual values in the buffer-slot we got during `alloc()`
-    pub fn set_value(&mut self, buffer: &mut Cursor<Vec<u8>>, val: T) -> Result<()> {
+    pub fn set_value(&mut self, buffer: &mut Buffer, val: T) -> WriteResult<()> {
         // Save whereever the current cursor stands in the buffer
         let curr_pos = buffer.position();
 
@@ -89,7 +96,7 @@ where
     T: Default + Sized,
 {
     /// Create a slot for a type T in the buffer, we can fill in the values in one go.
-    pub fn alloc_from_array(buffer: &mut Cursor<Vec<u8>>, array: &[T]) -> Result<Self> {
+    pub fn alloc_from_array(buffer: &mut Buffer, array: &[T]) -> WriteResult<Self> {
         // Get position of this value (e.g. before we add ourselves there)
         let position = buffer.position();
         for val in array {
@@ -109,7 +116,7 @@ where
     /// Create a slot for a type T in the buffer, we can fill later with real values.
     /// This function fills it with `Default::default()`, which is less performant than
     /// using uninitialized memory, but safe.
-    pub fn alloc_array(buffer: &mut Cursor<Vec<u8>>, array_size: usize) -> Result<Self> {
+    pub fn alloc_array(buffer: &mut Buffer, array_size: usize) -> WriteResult<Self> {
         // Get position of this value (e.g. before we add ourselves there)
         let position = buffer.position();
         for _ in 0..array_size {
@@ -129,12 +136,7 @@ where
     }
 
     /// Write actual values in the buffer-slot we got during `alloc()`
-    pub fn set_value_at(
-        &mut self,
-        buffer: &mut Cursor<Vec<u8>>,
-        val: T,
-        index: usize,
-    ) -> Result<()> {
+    pub fn set_value_at(&mut self, buffer: &mut Buffer, val: T, index: usize) -> WriteResult<()> {
         // Save whereever the current cursor stands in the buffer
         let curr_pos = buffer.position();
 
@@ -170,9 +172,9 @@ where
 }
 
 pub fn write_string_to_location(
-    buffer: &mut Cursor<Vec<u8>>,
+    buffer: &mut Buffer,
     text: &str,
-) -> Result<MDLocationDescriptor> {
+) -> WriteResult<MDLocationDescriptor> {
     let letters: Vec<u16> = text.encode_utf16().collect();
 
     // First write size of the string (x letters in u16, times the size of u16)
