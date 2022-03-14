@@ -232,7 +232,7 @@ fn fill_thread_stack(
         buffer.write_all(&stack_bytes);
         thread.stack.start_of_memory_range = stack as u64;
         thread.stack.memory = stack_location;
-        config.memory_blocks.push(thread.stack.clone());
+        config.memory_blocks.push(thread.stack);
     }
     Ok(())
 }

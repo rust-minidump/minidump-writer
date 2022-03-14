@@ -299,7 +299,7 @@ impl MinidumpWriter {
         // we should have a mostly-intact dump
         dir_section.write_to_file(buffer, None)?;
 
-        let dirent = thread_list_stream::write(self, buffer, &dumper)?;
+        let dirent = thread_list_stream::write(self, buffer, dumper)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
@@ -307,7 +307,7 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let _ = app_memory::write(self, buffer)?;
+        app_memory::write(self, buffer)?;
         // Write section to file
         dir_section.write_to_file(buffer, None)?;
 
@@ -413,6 +413,7 @@ impl MinidumpWriter {
         Ok(())
     }
 
+    #[allow(clippy::unused_self)]
     fn write_file(
         &self,
         buffer: &mut DumpBuf,

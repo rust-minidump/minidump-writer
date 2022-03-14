@@ -124,7 +124,7 @@ pub fn write_dso_debug_stream(
 
     // Assume the program base is at the beginning of the same page as the PHDR
     let mut base = phdr & !0xfff;
-    let mut dyn_addr = 0 as ElfAddr;
+    let mut dyn_addr = 0;
     // Search for the program PT_DYNAMIC segment
     for ph in program_headers {
         // Adjust base address with the virtual address of the PT_LOAD segment
@@ -217,7 +217,7 @@ pub fn write_dso_debug_stream(
     }
 
     let mut linkmap_rva = u32::MAX;
-    if dso_vec.len() > 0 {
+    if !dso_vec.is_empty() {
         // If we have at least one DSO, create an array of MDRawLinkMap
         // entries in the minidump file.
         let mut linkmap = MemoryArrayWriter::<MDRawLinkMap>::alloc_array(buffer, dso_vec.len())?;
