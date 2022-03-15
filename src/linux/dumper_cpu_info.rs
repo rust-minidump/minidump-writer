@@ -34,12 +34,11 @@ pub fn os_information() -> (PlatformId, String) {
         info.machine()
     );
 
-    (
-        if cfg!(target_os = "android") {
-            PlatformId::Android
-        } else {
-            PlatformId::Linux
-        },
-        vers,
-    )
+    let platform_id = if cfg!(target_os = "android") {
+        PlatformId::Android
+    } else {
+        PlatformId::Linux
+    };
+
+    (platform_id, vers)
 }

@@ -1,5 +1,5 @@
 use super::CrashContext;
-use crate::{minidump_cpu::RawContextCPU, minidump_format::format};
+use crate::{minidump_cpu::RawContextCPU, minidump_format::format::ContextFlagsX86};
 use libc::{
     REG_CS, REG_DS, REG_EAX, REG_EBP, REG_EBX, REG_ECX, REG_EDI, REG_EDX, REG_EFL, REG_EIP, REG_ES,
     REG_ESI, REG_ESP, REG_FS, REG_GS, REG_SS, REG_UESP,
@@ -14,8 +14,8 @@ impl CrashContext {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = format::ContextFlagsX86::CONTEXT_X86_FULL.bits()
-            | format::ContextFlagsX86::CONTEXT_X86_FLOATING_POINT.bits();
+        out.context_flags = ContextFlagsX86::CONTEXT_X86_FULL.bits()
+            | ContextFlagsX86::CONTEXT_X86_FLOATING_POINT.bits();
 
         {
             let gregs = &self.context.uc_mcontext.gregs;

@@ -26,5 +26,5 @@ nix = "0.23"
 minidump = "0.10"
 
 [patch.crates-io]
-minidump = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }
-minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }
+minidump = { git = "https://github.com/luser/rust-minidump", branch = "master" }
+minidump-common = { git = "https://github.com/luser/rust-minidump", branch = "master" }

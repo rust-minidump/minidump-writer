@@ -1,9 +1,12 @@
 use super::CrashContext;
-use crate::{minidump_cpu::RawContextCPU, minidump_format::format};
+use crate::{
+    minidump_cpu::RawContextCPU, minidump_format::format, thread_info::copy_u32_registers,
+};
 use libc::{
     REG_CSGSFS, REG_EFL, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15, REG_R8, REG_R9,
     REG_RAX, REG_RBP, REG_RBX, REG_RCX, REG_RDI, REG_RDX, REG_RIP, REG_RSI, REG_RSP,
 };
+use scroll::Pwrite;
 
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> usize {
@@ -64,28 +67,9 @@ impl CrashContext {
                 ..Default::default()
             };
 
-            #[inline]
-            pub fn to_u128(slice: &[u32]) -> &[u128] {
-                unsafe {
-                    std::slice::from_raw_parts(slice.as_ptr().cast(), slice.len().saturating_div(4))
-                }
-            }
-
-            #[inline]
-            pub fn copy_registers(dst: &mut [u128], src: &[u128]) {
-                let to_copy = std::cmp::min(dst.len(), src.len());
-                dst[..to_copy].copy_from_slice(&src[..to_copy]);
-            }
-
-            #[inline]
-            pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
-                copy_registers(dst, to_u128(src));
-            }
-
             copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
             copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
 
-            use scroll::Pwrite;
             out.float_save
                 .pwrite_with(float_save, 0, scroll::Endian::Little)
                 .expect("this is impossible");

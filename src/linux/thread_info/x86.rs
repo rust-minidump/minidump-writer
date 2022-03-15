@@ -1,8 +1,9 @@
 use super::{CommonThreadInfo, NT_Elf, Pid};
-use crate::{errors::ThreadInfoError, minidump_cpu::RawContextCPU};
+use crate::{errors::ThreadInfoError, minidump_cpu::RawContextCPU, minidump_format::format};
 use core::mem::size_of_val;
 use libc::user;
 use nix::{sys::ptrace, unistd};
+use scroll::Pwrite;
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -137,9 +138,10 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86_64")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_FULL
-            .bits()
-            | crate::minidump_format::format::ContextFlagsAmd64::CONTEXT_AMD64_SEGMENTS.bits();
+        use format::ContextFlagsAmd64;
+
+        out.context_flags = ContextFlagsAmd64::CONTEXT_AMD64_FULL.bits()
+            | ContextFlagsAmd64::CONTEXT_AMD64_SEGMENTS.bits();
 
         out.cs = self.regs.cs as u16; // TODO: This is u64, do we loose information by doing this?
 
@@ -182,7 +184,7 @@ impl ThreadInfoX86 {
         out.rip = self.regs.rip;
 
         {
-            let fs = self.fpregs;
+            let fs = &self.fpregs;
             let mut float_save = crate::minidump_cpu::FloatStateCPU {
                 control_word: fs.cwd,
                 status_word: fs.swd,
@@ -200,7 +202,6 @@ impl ThreadInfoX86 {
             super::copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
             super::copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
 
-            use scroll::Pwrite;
             out.float_save
                 .pwrite_with(float_save, 0, scroll::Endian::Little)
                 .expect("this is impossible");
@@ -209,7 +210,7 @@ impl ThreadInfoX86 {
 
     #[cfg(target_arch = "x86")]
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = crate::minidump_format::format::ContextFlagsX86::CONTEXT_X86_ALL.bits();
+        out.context_flags = format::ContextFlagsX86::CONTEXT_X86_ALL.bits();
 
         out.dr0 = self.dregs[0] as u32;
         out.dr3 = self.dregs[3] as u32;
@@ -258,7 +259,7 @@ impl ThreadInfoX86 {
                 }
 
                 ra.pwrite_with(block, offset, scroll::Endian::Little)
-                    .expect("checked");
+                    .expect("this is impossible");
             }
         }
 

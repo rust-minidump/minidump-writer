@@ -203,7 +203,7 @@ impl MinidumpWriter {
             }
         }
 
-        let mut buffer = Buffer::with_capacity(4 * 1024);
+        let mut buffer = Buffer::with_capacity(0);
         self.generate_dump(&mut buffer, &mut dumper, destination)?;
 
         // dumper would resume threads in drop() automatically,
