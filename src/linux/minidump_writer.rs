@@ -1,12 +1,16 @@
-use crate::app_memory::AppMemoryList;
-use crate::crash_context::CrashContext;
-use crate::dso_debug;
-use crate::errors::{FileWriterError, InitError, MemoryWriterError, WriterError};
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
-use crate::maps_reader::{MappingInfo, MappingList};
-use crate::minidump_format::*;
-use crate::sections::*;
-use crate::thread_info::Pid;
+use crate::{
+    linux::{
+        app_memory::AppMemoryList,
+        crash_context::CrashContext,
+        dso_debug,
+        errors::{FileWriterError, InitError, MemoryWriterError, WriterError},
+        maps_reader::{MappingInfo, MappingList},
+        ptrace_dumper::PtraceDumper,
+        sections::*,
+        thread_info::Pid,
+    },
+    minidump_format::*,
+};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 pub type DumpBuf = Cursor<Vec<u8>>;
@@ -185,7 +189,7 @@ impl MinidumpWriter {
     /// Generates a minidump and writes to the destination provided. Returns the in-memory
     /// version of the minidump as well.
     pub fn dump(&mut self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>> {
-        let mut dumper = LinuxPtraceDumper::new(self.process_id)?;
+        let mut dumper = PtraceDumper::new(self.process_id)?;
         dumper.suspend_threads()?;
         dumper.late_init()?;
 
@@ -209,7 +213,7 @@ impl MinidumpWriter {
         Ok(buffer.into_inner())
     }
 
-    fn crash_thread_references_principal_mapping(&self, dumper: &LinuxPtraceDumper) -> bool {
+    fn crash_thread_references_principal_mapping(&self, dumper: &PtraceDumper) -> bool {
         if self.crash_context.is_none() || self.principal_mapping.is_none() {
             return false;
         }
@@ -244,7 +248,7 @@ impl MinidumpWriter {
                 return false;
             }
         };
-        let stack_copy = match LinuxPtraceDumper::copy_from_process(
+        let stack_copy = match PtraceDumper::copy_from_process(
             self.blamed_thread,
             stack_ptr as *mut libc::c_void,
             stack_len,
@@ -265,7 +269,7 @@ impl MinidumpWriter {
     fn generate_dump(
         &mut self,
         buffer: &mut DumpBuf,
-        dumper: &mut LinuxPtraceDumper,
+        dumper: &mut PtraceDumper,
         destination: &mut (impl Write + Seek),
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number

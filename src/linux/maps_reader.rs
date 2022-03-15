@@ -4,10 +4,7 @@ use crate::thread_info::Pid;
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
 use memmap2::{Mmap, MmapOptions};
-use std::convert::TryInto;
-use std::fs::File;
-use std::mem::size_of;
-use std::path::PathBuf;
+use std::{fs::File, mem::size_of, path::PathBuf};
 
 pub const LINUX_GATE_LIBRARY_NAME: &str = "linux-gate.so";
 pub const DELETED_SUFFIX: &str = " (deleted)";

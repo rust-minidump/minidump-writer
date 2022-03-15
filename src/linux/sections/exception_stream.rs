@@ -1,9 +1,5 @@
-use crate::errors::SectionExceptionStreamError;
-use crate::minidump_format::*;
-use crate::minidump_writer::{CrashingThreadContext, DumpBuf, MinidumpWriter};
-use crate::sections::MemoryWriter;
-
-type Result<T> = std::result::Result<T, SectionExceptionStreamError>;
+use super::minidump_writer::CrashingThreadContext;
+use super::*;
 
 #[allow(non_camel_case_types, unused)]
 #[repr(u32)]
@@ -45,7 +41,10 @@ enum MDExceptionCodeLinux {
                                           dump requested. */
 }
 
-pub fn write(config: &mut MinidumpWriter, buffer: &mut DumpBuf) -> Result<MDRawDirectory> {
+pub fn write(
+    config: &mut MinidumpWriter,
+    buffer: &mut DumpBuf,
+) -> Result<MDRawDirectory, errors::SectionExceptionStreamError> {
     let exception = if let Some(context) = &config.crash_context {
         let sig_addr;
         #[cfg(target_arch = "arm")]
