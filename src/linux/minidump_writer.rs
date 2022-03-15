@@ -133,7 +133,7 @@ type Result<T> = std::result::Result<T, WriterError>;
 
 impl MinidumpWriter {
     pub fn new(process: Pid, blamed_thread: Pid) -> Self {
-        MinidumpWriter {
+        Self {
             process_id: process,
             blamed_thread,
             minidump_size_limit: None,
@@ -169,8 +169,6 @@ impl MinidumpWriter {
         self
     }
 
-    // Has to be deactivated for ARM for now, as libc doesn't include ucontext_t for ARM yet
-    #[cfg(not(target_arch = "arm"))]
     pub fn set_crash_context(&mut self, crash_context: CrashContext) -> &mut Self {
         self.crash_context = Some(crash_context);
         self
