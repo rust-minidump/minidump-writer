@@ -10,18 +10,18 @@ use scroll::Pwrite;
 
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> usize {
-        self.context.uc_mcontext.gregs[REG_RIP as usize] as usize
+        self.inner.context.uc_mcontext.gregs[REG_RIP as usize] as usize
     }
 
     pub fn get_stack_pointer(&self) -> usize {
-        self.context.uc_mcontext.gregs[REG_RSP as usize] as usize
+        self.inner.context.uc_mcontext.gregs[REG_RSP as usize] as usize
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
         out.context_flags = format::ContextFlagsAmd64::CONTEXT_AMD64_FULL.bits();
 
         {
-            let gregs = &self.context.uc_mcontext.gregs;
+            let gregs = &self.inner.context.uc_mcontext.gregs;
             out.cs = (gregs[REG_CSGSFS as usize] & 0xffff) as u16;
 
             out.fs = ((gregs[REG_CSGSFS as usize] >> 32) & 0xffff) as u16;
@@ -51,7 +51,7 @@ impl CrashContext {
         }
 
         {
-            let fs = &self.float_state;
+            let fs = &self.inner.float_state;
 
             let mut float_save = format::XMM_SAVE_AREA32 {
                 control_word: fs.cwd,

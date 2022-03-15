@@ -26,7 +26,7 @@ pub fn parse_cpus_from_sysfile(file: &mut File) -> Result<HashSet<u32>> {
             continue;
         }
         let cores: std::result::Result<Vec<_>, _> =
-            items.split("-").map(|x| x.parse::<u32>()).collect();
+            items.split('-').map(|x| x.parse::<u32>()).collect();
         let cores = cores?;
         match cores.as_slice() {
             [x] => {
@@ -63,30 +63,22 @@ impl CpuInfoEntry {
     }
 }
 
-struct CpuFeaturesEntry {
-    tag: &'static str,
-    hwcaps: u32,
-}
-
-impl CpuFeaturesEntry {
-    fn new(tag: &'static str, hwcaps: u32) -> Self {
-        CpuFeaturesEntry { tag, hwcaps }
+/// Retrieves the hardware capabilities from the 'Features' field.
+#[cfg(target_arch = "arm")]
+fn parse_features(val: &str) -> u32 {
+    struct CpuFeaturesEntry {
+        tag: &'static str,
+        hwcaps: u32,
     }
-}
 
-pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
-    // The CPUID value is broken up in several entries in /proc/cpuinfo.
-    // This table is used to rebuild it from the entries.
-    let cpu_id_entries = [
-        CpuInfoEntry::new("CPU implementer", 'x', 24, 8),
-        CpuInfoEntry::new("CPU variant", 'x', 20, 4),
-        CpuInfoEntry::new("CPU part", 'x', 4, 12),
-        CpuInfoEntry::new("CPU revision", 'd', 0, 4),
-    ];
+    impl CpuFeaturesEntry {
+        fn new(tag: &'static str, hwcaps: u32) -> Self {
+            CpuFeaturesEntry { tag, hwcaps }
+        }
+    }
 
     // The ELF hwcaps are listed in the "Features" entry as textual tags.
     // This table is used to rebuild them.
-    #[cfg(target_arch = "arm")]
     let cpu_features_entries = [
         CpuFeaturesEntry::new("swp", MDCPUInformationARMElfHwCaps::HWCAP_SWP),
         CpuFeaturesEntry::new("half", MDCPUInformationARMElfHwCaps::HWCAP_HALF),
@@ -108,6 +100,36 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         CpuFeaturesEntry::new("idiva", MDCPUInformationARMElfHwCaps::HWCAP_IDIVA),
         CpuFeaturesEntry::new("idivt", MDCPUInformationARMElfHwCaps::HWCAP_IDIVT),
         CpuFeaturesEntry::new("idiv", HWCAP_IDIV),
+    ];
+
+    let mut ehwc = 0;
+    // Parse each space-separated tag.
+    for tag in val.split_whitespace() {
+        for entry in &cpu_features_entries {
+            if entry.tag == tag {
+                ehwc |= entry.hwcaps;
+                break;
+            }
+        }
+    }
+
+    ehwc
+}
+
+/// Stub for aarch64, always 0
+#[cfg(target_arch = "aarch64")]
+fn parse_features(_val: &str) -> u32 {
+    0
+}
+
+pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
+    // The CPUID value is broken up in several entries in /proc/cpuinfo.
+    // This table is used to rebuild it from the entries.
+    let cpu_id_entries = [
+        CpuInfoEntry::new("CPU implementer", 'x', 24, 8),
+        CpuInfoEntry::new("CPU variant", 'x', 20, 4),
+        CpuInfoEntry::new("CPU part", 'x', 4, 12),
+        CpuInfoEntry::new("CPU revision", 'd', 0, 4),
     ];
 
     // processor_architecture should always be set, do this first
@@ -162,6 +184,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     };
 
     let mut cpuid = 0;
+    let mut elf_hwcaps = 0;
 
     for line in BufReader::new(cpuinfo_file).lines() {
         let line = line?;
@@ -174,33 +197,30 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             continue;
         }
 
-        let split: Vec<_> = line.split(":").map(|x| x.trim()).collect();
-        let field = split[0];
-        let value = split.get(1); // Option, might be missing
-        for entry in &cpu_id_entries {
-            if value.is_none() {
-                break;
-            }
-            if field != entry.field {
-                continue;
-            }
-            let mut result;
-            let val = value.unwrap();
+        let (field, value) = if let Some(ind) = line.find(':') {
+            (&line[..ind], Some(&line[ind + 1..]))
+        } else {
+            (line.as_str(), None)
+        };
 
-            let rr = if val.starts_with("0x") || entry.format == 'x' {
-                usize::from_str_radix(val.trim_start_matches("0x"), 16)
-            } else {
-                usize::from_str_radix(val, 10)
-            };
-            result = match rr {
-                Ok(x) => x,
-                Err(_) => {
+        if let Some(val) = value {
+            for entry in &cpu_id_entries {
+                if field != entry.field {
                     continue;
                 }
-            };
-            result &= (1 << entry.bit_length) - 1;
-            result <<= entry.bit_lshift;
-            cpuid |= result as u32;
+
+                let rr = if val.starts_with("0x") || entry.format == 'x' {
+                    usize::from_str_radix(val.trim_start_matches("0x"), 16)
+                } else {
+                    val.parse()
+                };
+
+                if let Ok(mut result) = rr {
+                    result &= (1 << entry.bit_length) - 1;
+                    result <<= entry.bit_lshift;
+                    cpuid |= result as u32;
+                }
+            }
         }
 
         if cfg!(target_arch = "arm") {
@@ -235,51 +255,36 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             }
         }
 
-        let elf_hwcaps = {
-            let mut elf_hwcaps = 0;
-            #[cfg(target_arch = "arm")]
-            {
-                // Rebuild the ELF hwcaps from the 'Features' field.
-                if field == "Features" {
-                    if let Some(val) = value {
-                        // Parse each space-separated tag.
-                        for tag in val.split_whitespace() {
-                            for entry in &cpu_features_entries {
-                                if entry.tag == tag {
-                                    elf_hwcaps |= entry.hwcaps;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
+        // Rebuild the ELF hwcaps from the 'Features' field.
+        if field == "Features" {
+            if let Some(val) = value {
+                elf_hwcaps = parse_features(val);
             }
-
-            elf_hwcaps
-        };
-
-        // The sys_info.cpu field is just a byte array, but in arm's case it is
-        // actually
-        // minidump_common::format::ARMCpuInfo {
-        //  pub cpuid: u32,
-        //  pub elf_hwcaps: u32,
-        // }
-        use scroll::Pwrite;
-        sys_info
-            .cpu
-            .data
-            .pwrite_with(cpuid, 0, scroll::Endian::Little)
-            .expect("impossible");
-        sys_info
-            .cpu
-            .data
-            .pwrite_with(
-                elf_hwcaps,
-                std::mem::size_of::<u32>(),
-                scroll::Endian::Little,
-            )
-            .expect("impossible");
+        }
     }
+
+    // The sys_info.cpu field is just a byte array, but in arm's case it is
+    // actually
+    // minidump_common::format::ARMCpuInfo {
+    //  pub cpuid: u32,
+    //  pub elf_hwcaps: u32,
+    // }
+    use scroll::Pwrite;
+    sys_info
+        .cpu
+        .data
+        .pwrite_with(cpuid, 0, scroll::Endian::Little)
+        .expect("impossible");
+    sys_info
+        .cpu
+        .data
+        .pwrite_with(
+            elf_hwcaps,
+            std::mem::size_of::<u32>(),
+            scroll::Endian::Little,
+        )
+        .expect("impossible");
+
     Ok(())
 }
 
@@ -310,28 +315,28 @@ mod tests {
     fn test_one_cpu() {
         let mut file = new_file("10");
         let set = parse_cpus_from_sysfile(&mut file).expect("Failed to file");
-        assert_eq!(set, [10,].iter().map(|x| *x).collect());
+        assert_eq!(set, [10,].iter().copied().collect());
     }
 
     #[test]
     fn test_one_cpu_newline() {
         let mut file = new_file("10\n");
         let set = parse_cpus_from_sysfile(&mut file).expect("Failed to file");
-        assert_eq!(set, [10,].iter().map(|x| *x).collect());
+        assert_eq!(set, [10,].iter().copied().collect());
     }
 
     #[test]
     fn test_two_cpus() {
         let mut file = new_file("1,10\n");
         let set = parse_cpus_from_sysfile(&mut file).expect("Failed to file");
-        assert_eq!(set, [1, 10].iter().map(|x| *x).collect());
+        assert_eq!(set, [1, 10].iter().copied().collect());
     }
 
     #[test]
     fn test_two_cpus_with_range() {
         let mut file = new_file("1-2\n");
         let set = parse_cpus_from_sysfile(&mut file).expect("Failed to file");
-        assert_eq!(set, [1, 2].iter().map(|x| *x).collect());
+        assert_eq!(set, [1, 2].iter().copied().collect());
     }
 
     #[test]
@@ -345,7 +350,7 @@ mod tests {
     fn test_multiple_items() {
         let mut file = new_file("0, 2-4, 128\n");
         let set = parse_cpus_from_sysfile(&mut file).expect("Failed to file");
-        assert_eq!(set, [0, 2, 3, 4, 128].iter().map(|x| *x).collect());
+        assert_eq!(set, [0, 2, 3, 4, 128].iter().copied().collect());
     }
 
     #[test]
@@ -358,7 +363,7 @@ mod tests {
         let set2 = parse_cpus_from_sysfile(&mut file2).expect("Failed to file");
         assert_eq!(set2, (16..=24).collect());
 
-        set1 = set1.intersection(&set2).map(|x| *x).collect();
+        set1 = set1.intersection(&set2).copied().collect();
         assert_eq!(set1, (16..=19).collect());
     }
 
@@ -366,14 +371,14 @@ mod tests {
     fn test_intersects_with_discontinuous() {
         let mut file1 = new_file("0, 2-4, 7, 10\n");
         let mut set1 = parse_cpus_from_sysfile(&mut file1).expect("Failed to file");
-        assert_eq!(set1, [0, 2, 3, 4, 7, 10].iter().map(|x| *x).collect());
+        assert_eq!(set1, [0, 2, 3, 4, 7, 10].iter().copied().collect());
 
         let mut file2 = new_file("0-2, 5, 8-10\n");
         let set2 = parse_cpus_from_sysfile(&mut file2).expect("Failed to file");
-        assert_eq!(set2, [0, 1, 2, 5, 8, 9, 10].iter().map(|x| *x).collect());
+        assert_eq!(set2, [0, 1, 2, 5, 8, 9, 10].iter().copied().collect());
 
-        set1 = set1.intersection(&set2).map(|x| *x).collect();
-        assert_eq!(set1, [0, 2, 10].iter().map(|x| *x).collect());
+        set1 = set1.intersection(&set2).copied().collect();
+        assert_eq!(set1, [0, 2, 10].iter().copied().collect());
     }
 
     #[test]
