@@ -46,28 +46,8 @@ pub fn write(
     buffer: &mut DumpBuf,
 ) -> Result<MDRawDirectory, errors::SectionExceptionStreamError> {
     let exception = if let Some(context) = &config.crash_context {
-        let sig_addr;
-        #[cfg(target_arch = "arm")]
-        {
-            // Not part of libc-crate, but thats how the Linux-variant does it
-            // and according to the systemheaders, android as well.
-            #[allow(non_camel_case_types)]
-            #[repr(C)]
-            struct siginfo_sigfault {
-                _si_signo: libc::c_int,
-                _si_errno: libc::c_int,
-                _si_code: libc::c_int,
-                si_addr: *mut libc::c_void,
-            }
+        let sig_addr = context.inner.siginfo.ssi_addr as u64;
 
-            sig_addr = unsafe {
-                (*(&context.siginfo as *const libc::siginfo_t as *const siginfo_sigfault)).si_addr
-            } as u64;
-        }
-        #[cfg(not(target_arch = "arm"))]
-        {
-            sig_addr = context.inner.siginfo.ssi_addr as u64;
-        }
         MDException {
             exception_code: context.inner.siginfo.ssi_signo as u32,
             exception_flags: context.inner.siginfo.ssi_code as u32,
