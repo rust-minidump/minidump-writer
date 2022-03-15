@@ -1,11 +1,5 @@
 use super::{CommonThreadInfo, Pid};
-use crate::errors::ThreadInfoError;
-use crate::minidump_cpu::imp::{
-    MD_CONTEXT_ARM_FULL, MD_CONTEXT_ARM_GPR_COUNT, MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT,
-    MD_FLOATINGSAVEAREA_ARM_FPR_COUNT,
-};
-use crate::minidump_cpu::RawContextCPU;
-use libc;
+use crate::{errors::ThreadInfoError, minidump_cpu::RawContextCPU};
 use nix::sys::ptrace;
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
@@ -44,7 +38,7 @@ pub struct user_fpregs {
 #[repr(C)]
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Default)]
 pub struct user_regs {
-    uregs: [libc::c_long; 18],
+    uregs: [u32; 18],
 }
 
 #[derive(Debug)]
@@ -82,18 +76,16 @@ impl ThreadInfoArm {
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
-        out.context_flags = MD_CONTEXT_ARM_FULL;
-        for idx in 0..MD_CONTEXT_ARM_GPR_COUNT {
-            out.iregs[idx] = self.regs.uregs[idx] as u32;
-        }
+        out.context_flags =
+            crate::minidump_format::format::ContextFlagsArm::CONTEXT_ARM_FULL.bits();
+
+        out.iregs.copy_from_slice(&self.regs.uregs[..16]);
         // No CPSR register in ThreadInfo(it's not accessible via ptrace)
         out.cpsr = 0;
 
         #[cfg(not(target_os = "android"))]
         {
             out.float_save.fpscr = self.fpregs.fpsr as u64 | ((self.fpregs.fpcr as u64) << 32);
-            out.float_save.regs = [0; MD_FLOATINGSAVEAREA_ARM_FPR_COUNT];
-            out.float_save.extra = [0; MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT];
         }
     }
 

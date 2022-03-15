@@ -6,9 +6,8 @@ cfg_if::cfg_if! {
         pub type RawContextCPU = minidump_common::format::CONTEXT_X86;
         pub type FloatStateCPU = minidump_common::format::FLOATING_SAVE_AREA_X86;
     } else if #[cfg(target_arch = "arm")] {
-        pub mod arm;
-        pub use arm as imp;
-        pub type RawContextCPU = arm::MDRawContextARM;
+        pub type RawContextCPU = minidump_common::format::CONTEXT_ARM;
+        pub type FloatStateCPU = minidump_common::format::FLOATING_SAVE_AREA_ARM;
     } else if #[cfg(target_arch = "aarch64")] {
         /// This is the number of general purpose registers _not_ counting
         /// the stack pointer
