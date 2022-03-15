@@ -1,10 +1,9 @@
 use super::{CommonThreadInfo, Pid};
-use crate::errors::ThreadInfoError;
-use crate::minidump_cpu::RawContextCPU;
+use crate::{
+    errors::ThreadInfoError,
+    minidump_cpu::{RawContextCPU, FP_REG_COUNT, GP_REG_COUNT},
+};
 use nix::sys::ptrace;
-
-pub const MD_FLOATINGSAVEAREA_ARM64_FPR_COUNT: usize = 32;
-pub const MD_CONTEXT_ARM64_GPR_COUNT: usize = 33;
 
 /* Indices into iregs for registers with a dedicated or conventional
  * purpose.
@@ -91,25 +90,19 @@ impl ThreadInfoAarch64 {
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
         out.context_flags =
-            minidump_common::format::ContextFlagsArm64Old::CONTEXT_ARM64_FULL_OLD.bits() as u64;
-
-        /// This is the number of general purpose registers _not_ counting
-        /// the stack pointer
-        const GP_REG_COUNT: usize = 31;
-        /// The number of floating point registers in the floating point save area
-        const FP_REG_COUNT: usize = 32;
+            minidump_common::format::ContextFlagsArm64Old::CONTEXT_ARM64_OLD_FULL.bits() as u64;
 
         out.cpsr = self.regs.pstate as u32;
         out.iregs[..GP_REG_COUNT].copy_from_slice(&self.regs.regs[..GP_REG_COUNT]);
-        out.iregs[MDARM64RegisterNumbers::Sp as usize] = self.regs.sp;
+        out.sp = self.regs.sp;
         // Note that in breakpad this was the last member of the iregs field
         // which was 33 in length, but in rust-minidump it is its own separate
         // field instead
         out.pc = self.regs.pc;
 
-        out.float_save.fpsr = self.fpregs.fpsr;
-        out.float_save.fpcr = self.fpregs.fpcr;
-        out.float_save.regs[..FP_REG_COUNT].copy_from_slice(&self.fpregs.vregs[..FP_REG_COUNT]);
+        out.fpsr = self.fpregs.fpsr;
+        out.fpcr = self.fpregs.fpcr;
+        out.float_regs[..FP_REG_COUNT].copy_from_slice(&self.fpregs.vregs[..FP_REG_COUNT]);
     }
 
     pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
