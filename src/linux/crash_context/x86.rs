@@ -6,11 +6,11 @@ use libc::{
 };
 impl CrashContext {
     pub fn get_instruction_pointer(&self) -> usize {
-        self.context.uc_mcontext.gregs[REG_EIP as usize] as usize
+        self.inner.context.uc_mcontext.gregs[REG_EIP as usize] as usize
     }
 
     pub fn get_stack_pointer(&self) -> usize {
-        self.context.uc_mcontext.gregs[REG_ESP as usize] as usize
+        self.inner.context.uc_mcontext.gregs[REG_ESP as usize] as usize
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
@@ -18,7 +18,7 @@ impl CrashContext {
             | ContextFlagsX86::CONTEXT_X86_FLOATING_POINT.bits();
 
         {
-            let gregs = &self.context.uc_mcontext.gregs;
+            let gregs = &self.inner.context.uc_mcontext.gregs;
             out.gs = gregs[REG_GS as usize] as u32;
             out.fs = gregs[REG_FS as usize] as u32;
             out.es = gregs[REG_ES as usize] as u32;
@@ -40,7 +40,7 @@ impl CrashContext {
         }
 
         {
-            let fs = &self.float_state;
+            let fs = &self.inner.float_state;
             let mut out = &mut out.float_save;
             out.control_word = fs.cw;
             out.status_word = fs.sw;

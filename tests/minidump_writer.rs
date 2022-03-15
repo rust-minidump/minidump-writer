@@ -2,8 +2,6 @@
 
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
-#[cfg(not(target_arch = "arm"))]
-use minidump_writer::crash_context::fpstate_t;
 use minidump_writer::{
     app_memory::AppMemory,
     crash_context::CrashContext,
@@ -16,10 +14,11 @@ use minidump_writer::{
 use nix::{errno::Errno, sys::signal::Signal};
 use std::collections::HashSet;
 
-use std::io::{BufRead, BufReader};
-use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, Stdio};
-use std::str::FromStr;
+use std::{
+    io::{BufRead, BufReader},
+    os::unix::process::ExitStatusExt,
+    process::{Command, Stdio},
+};
 
 mod common;
 use common::*;
@@ -31,23 +30,28 @@ enum Context {
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
-fn get_ucontext() -> Result<libc::ucontext_t> {
-    let mut context = std::mem::MaybeUninit::<libc::ucontext_t>::uninit();
-    let res = unsafe { libc::getcontext(context.as_mut_ptr()) };
-    Errno::result(res)?;
-    unsafe { Ok(context.assume_init()) }
+fn get_ucontext() -> Result<crash_context::ucontext_t> {
+    let mut context = std::mem::MaybeUninit::uninit();
+    unsafe {
+        let res = crash_context::crash_context_getcontext(context.as_mut_ptr());
+        Errno::result(res)?;
+
+        Ok(context.assume_init())
+    }
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 fn get_crash_context(tid: Pid) -> CrashContext {
-    let siginfo: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
-    let float_state: fpstate_t = unsafe { std::mem::zeroed() };
+    let float_state = unsafe { std::mem::zeroed() };
     CrashContext {
-        siginfo,
-        tid,
-        context,
-        float_state,
+        inner: crash_context::CrashContext {
+            siginfo,
+            tid,
+            context,
+            float_state,
+        },
     }
 }
 
@@ -108,8 +112,16 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
         .read_line(&mut buf)
         .expect("Couldn't read address provided by child");
     let mut output = buf.split_whitespace();
-    let mmap_addr = usize::from_str(output.next().unwrap()).expect("unable to parse mmap_addr");
-    let memory_size = usize::from_str(output.next().unwrap()).expect("unable to parse memory_size");
+    let mmap_addr = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse mmap_addr");
+    let memory_size = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse memory_size");
     // Add information about the mapped memory.
     let mapping = MappingInfo {
         start_address: mmap_addr,
@@ -219,7 +231,11 @@ fn test_write_with_additional_memory_helper(context: Context) {
     let mut output = buf.split_whitespace();
     let memory_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
-    let memory_size = usize::from_str(output.next().unwrap()).expect("unable to parse memory_size");
+    let memory_size = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse memory_size");
 
     let app_memory = AppMemory {
         ptr: memory_addr,
@@ -627,7 +643,11 @@ fn test_write_early_abort_helper(context: Context) {
     let _ = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
     let memory_addr = 0;
-    let memory_size = usize::from_str(output.next().unwrap()).expect("unable to parse memory_size");
+    let memory_size = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse memory_size");
 
     let app_memory = AppMemory {
         ptr: memory_addr,
