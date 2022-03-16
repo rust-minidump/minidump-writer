@@ -52,7 +52,7 @@ pub fn write(
     };
 
     if !modules.is_empty() {
-        let mapping_list = MemoryArrayWriter::<MDRawModule>::alloc_from_array(buffer, &modules)?;
+        let mapping_list = MemoryArrayWriter::<MDRawModule>::alloc_from_iter(buffer, modules)?;
         dirent.location.data_size += mapping_list.location().data_size;
     }
 
@@ -69,7 +69,7 @@ fn fill_raw_module(
         // Just zeroes
         cv_record = Default::default();
     } else {
-        let cv_signature = MD_CVINFOELF_SIGNATURE;
+        let cv_signature = crate::minidump_format::format::CvSignature::Elf as u32;
         let array_size = std::mem::size_of_val(&cv_signature) + identifier.len();
 
         let mut sig_section = MemoryArrayWriter::<u8>::alloc_array(buffer, array_size)?;

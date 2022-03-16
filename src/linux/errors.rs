@@ -126,6 +126,8 @@ pub enum MemoryWriterError {
     IOError(#[from] std::io::Error),
     #[error("Failed integer conversion")]
     TryFromIntError(#[from] std::num::TryFromIntError),
+    #[error("Failed to write to buffer")]
+    Scroll(#[from] scroll::Error),
 }
 
 #[derive(Debug, Error)]

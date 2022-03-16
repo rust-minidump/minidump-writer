@@ -7,9 +7,16 @@ pub fn write(buffer: &mut DumpBuf) -> Result<MDRawDirectory, errors::SectionSyst
         stream_type: MDStreamType::SystemInfoStream as u32,
         location: info_section.location(),
     };
-    let mut info: MDRawSystemInfo = Default::default();
+
+    let (platform_id, os_version) = dci::os_information();
+    let os_version_loc = write_string_to_location(buffer, &os_version)?;
+
+    // SAFETY: POD
+    let mut info = unsafe { std::mem::zeroed::<MDRawSystemInfo>() };
+    info.platform_id = platform_id as u32;
+    info.csd_version_rva = os_version_loc.rva;
+
     dci::write_cpu_information(&mut info)?;
-    dci::write_os_information(buffer, &mut info)?;
 
     info_section.set_value(buffer, info)?;
     Ok(dirent)

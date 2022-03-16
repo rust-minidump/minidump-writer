@@ -11,9 +11,9 @@ use crate::{
     },
     minidump_format::*,
 };
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 
-pub type DumpBuf = Cursor<Vec<u8>>;
+pub type DumpBuf = Buffer;
 
 #[derive(Debug)]
 pub struct DirSection<'a, W>
@@ -71,7 +71,7 @@ where
         ))?;
         let start = idx_pos.rva as usize;
         let end = (idx_pos.rva + idx_pos.data_size) as usize;
-        self.destination.write_all(&buffer.get_ref()[start..end])?;
+        self.destination.write_all(&buffer[start..end])?;
 
         // Reset file-position
         self.destination
@@ -93,7 +93,7 @@ where
         }
 
         let start_pos = self.last_position_written_to_file as usize;
-        self.destination.write_all(&buffer.get_ref()[start_pos..])?;
+        self.destination.write_all(&buffer[start_pos..])?;
         self.last_position_written_to_file = buffer.position();
         Ok(())
     }
@@ -203,14 +203,14 @@ impl MinidumpWriter {
             }
         }
 
-        let mut buffer = Cursor::new(Vec::new());
+        let mut buffer = Buffer::with_capacity(0);
         self.generate_dump(&mut buffer, &mut dumper, destination)?;
 
         // dumper would resume threads in drop() automatically,
         // but in case there is an error, we want to catch it
         dumper.resume_threads()?;
 
-        Ok(buffer.into_inner())
+        Ok(buffer.into())
     }
 
     fn crash_thread_references_principal_mapping(&self, dumper: &PtraceDumper) -> bool {
@@ -418,11 +418,9 @@ impl MinidumpWriter {
         buffer: &mut DumpBuf,
         filename: &str,
     ) -> std::result::Result<MDLocationDescriptor, MemoryWriterError> {
-        let mut file = std::fs::File::open(std::path::PathBuf::from(filename))?;
-        let mut content = Vec::new();
-        file.read_to_end(&mut content)?;
+        let content = std::fs::read(filename)?;
 
-        let section = MemoryArrayWriter::<u8>::alloc_from_array(buffer, &content)?;
+        let section = MemoryArrayWriter::write_bytes(buffer, &content);
         Ok(section.location())
     }
 }

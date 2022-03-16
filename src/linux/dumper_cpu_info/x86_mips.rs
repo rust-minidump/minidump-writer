@@ -1,6 +1,5 @@
 use crate::errors::CpuInfoError;
 use crate::minidump_format::*;
-use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::path;
 
@@ -35,15 +34,15 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     ];
 
     // processor_architecture should always be set, do this first
-    if cfg!(target_arch = "mips") {
-        sys_info.processor_architecture = MDCPUArchitecture::Mips as u16;
+    sys_info.processor_architecture = if cfg!(target_arch = "mips") {
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS
     } else if cfg!(target_arch = "mips64") {
-        sys_info.processor_architecture = MDCPUArchitecture::Mips64 as u16;
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS64
     } else if cfg!(target_arch = "x86") {
-        sys_info.processor_architecture = MDCPUArchitecture::X86 as u16;
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_INTEL
     } else {
-        sys_info.processor_architecture = MDCPUArchitecture::Amd64 as u16;
-    }
+        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64
+    } as u16;
 
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
 
@@ -106,17 +105,10 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
             (cpu_info_table[1].value << 8 | cpu_info_table[2].value) as u16;
     }
     if !vendor_id.is_empty() {
-        let mut slice = vendor_id.as_bytes();
-        for id_part in sys_info.cpu.vendor_id.iter_mut() {
-            let (int_bytes, rest) = slice.split_at(std::mem::size_of::<u32>());
-            slice = rest;
-            *id_part = match int_bytes.try_into() {
-                Ok(x) => u32::from_ne_bytes(x),
-                Err(_) => {
-                    continue;
-                }
-            };
-        }
+        let vendor_id = vendor_id.as_bytes();
+        // The vendor_id is the first 12 (3 * size_of::<u32>()) bytes
+        let vendor_len = std::cmp::min(3 * std::mem::size_of::<u32>(), vendor_id.len());
+        sys_info.cpu.data[..vendor_len].copy_from_slice(&vendor_id[..vendor_len]);
     }
 
     Ok(())

@@ -60,7 +60,12 @@ pub fn write(
     for (idx, item) in dumper.threads.clone().iter().enumerate() {
         let mut thread = MDRawThread {
             thread_id: item.tid.try_into()?,
-            ..Default::default()
+            suspend_count: 0,
+            priority_class: 0,
+            priority: 0,
+            teb: 0,
+            stack: MDMemoryDescriptor::default(),
+            thread_context: MDLocationDescriptor::default(),
         };
 
         // We have a different source of information for the crashing thread. If
@@ -224,7 +229,7 @@ fn fill_thread_stack(
             data_size: stack_bytes.len() as u32,
             rva: buffer.position() as u32,
         };
-        buffer.write_all(&stack_bytes)?;
+        buffer.write_all(&stack_bytes);
         thread.stack.start_of_memory_range = stack as u64;
         thread.stack.memory = stack_location;
         config.memory_blocks.push(thread.stack.clone());
