@@ -26,9 +26,9 @@ impl CrashContext {
 
         {
             let fs = &self.inner.float_state;
-            out.float_save.fpsr = fs.fpsr;
-            out.float_save.fpcr = fs.fpcr;
-            out.float_save.regs[..FP_REG_COUNT].copy_from_slice(&fs.vregs[..FP_REG_COUNT]);
+            out.fpsr = fs.fpsr;
+            out.fpcr = fs.fpcr;
+            out.float_regs[..FP_REG_COUNT].copy_from_slice(&fs.vregs[..FP_REG_COUNT]);
         }
     }
 }
