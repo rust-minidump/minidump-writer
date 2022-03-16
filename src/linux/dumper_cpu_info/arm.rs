@@ -1,4 +1,5 @@
 use crate::{errors::CpuInfoError, minidump_format::*};
+use scroll::Pwrite;
 use std::{
     collections::HashSet,
     fs::File,
@@ -269,7 +270,6 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     //  pub cpuid: u32,
     //  pub elf_hwcaps: u32,
     // }
-    use scroll::Pwrite;
     sys_info
         .cpu
         .data
