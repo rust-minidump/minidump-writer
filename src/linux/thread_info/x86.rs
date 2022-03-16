@@ -248,7 +248,6 @@ impl ThreadInfoX86 {
         out.float_save.data_offset = self.fpregs.foo as u32;
         out.float_save.data_selector = self.fpregs.fos as u32;
 
-        use scroll::Pwrite;
         {
             let ra = &mut out.float_save.register_area;
             // 8 registers * 10 bytes per register.
