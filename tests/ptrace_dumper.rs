@@ -57,7 +57,7 @@ fn test_thread_list_from_parent() {
         #[cfg(target_arch = "mips")]
         let process_tid_location = info.mcontext.gregs[1];
 
-        let thread_id_data = LinuxPtraceDumper::copy_from_process(
+        let thread_id_data = PtraceDumper::copy_from_process(
             *curr_thread,
             process_tid_location as *mut libc::c_void,
             4,

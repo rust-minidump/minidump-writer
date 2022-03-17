@@ -1,6 +1,6 @@
 use crate::errors::AndroidError;
-use crate::linux_ptrace_dumper::LinuxPtraceDumper;
 use crate::maps_reader::MappingInfo;
+use crate::ptrace_dumper::PtraceDumper;
 use crate::thread_info::Pid;
 use goblin::elf;
 #[cfg(target_pointer_width = "32")]
@@ -15,7 +15,6 @@ use goblin::elf::header::header64 as elf_header;
 use goblin::elf::program_header::program_header32::ProgramHeader;
 #[cfg(target_pointer_width = "64")]
 use goblin::elf::program_header::program_header64::ProgramHeader;
-use std::convert::TryInto;
 use std::ffi::c_void;
 
 type Result<T> = std::result::Result<T, AndroidError>;
@@ -44,7 +43,7 @@ fn has_android_packed_relocations(pid: Pid, load_bias: usize, vaddrs: DynVaddres
     let dyn_addr = load_bias + vaddrs.dyn_vaddr;
     for idx in 0..vaddrs.dyn_count {
         let addr = (dyn_addr + SIZEOF_DYN * idx) as *mut c_void;
-        let dyn_data = LinuxPtraceDumper::copy_from_process(pid, addr, SIZEOF_DYN)?;
+        let dyn_data = PtraceDumper::copy_from_process(pid, addr, SIZEOF_DYN)?;
         // TODO: Couldn't find a nice way to use goblin for that, to avoid the unsafe-block
         let dyn_obj: Dyn;
         unsafe {
@@ -84,7 +83,7 @@ fn parse_loaded_elf_program_headers(
     let mut dyn_vaddr = 0;
     let mut dyn_count = 0;
 
-    let phdr_opt = LinuxPtraceDumper::copy_from_process(
+    let phdr_opt = PtraceDumper::copy_from_process(
         pid,
         phdr_addr as *mut c_void,
         elf_header::SIZEOF_EHDR * ehdr.e_phnum as usize,
@@ -121,7 +120,7 @@ pub fn late_process_mappings(pid: Pid, mappings: &mut [MappingInfo]) -> Result<(
         .iter_mut()
         .filter(|m| m.executable && m.name.as_ref().map_or(false, |n| n.starts_with("/")))
     {
-        let ehdr_opt = LinuxPtraceDumper::copy_from_process(
+        let ehdr_opt = PtraceDumper::copy_from_process(
             pid,
             map.start_address as *mut c_void,
             elf_header::SIZEOF_EHDR,

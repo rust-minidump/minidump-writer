@@ -104,7 +104,7 @@ fn test_file_id() -> Result<()> {
 }
 
 fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
-    // Now check that LinuxPtraceDumper interpreted the mappings properly.
+    // Now check that PtraceDumper interpreted the mappings properly.
     let dumper = PtraceDumper::new(getppid().as_raw())?;
     let mut mapping_count = 0;
     for map in &dumper.mappings {
