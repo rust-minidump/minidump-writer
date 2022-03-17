@@ -45,47 +45,53 @@ impl ThreadInfoAarch64 {
 
     // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
     fn getfpregs(pid: Pid) -> Result<user_fpsimd_struct> {
-        Self::ptrace_get_data_via_io::<user_fpsimd_struct>(
-            ptrace::Request::PTRACE_GETREGSET,
-            Some(super::NT_Elf::NT_PRFPREGSET),
-            nix::unistd::Pid::from_raw(pid),
-        )
-        .or_else(|_err| {
-            // TODO: nix restricts PTRACE_GETFPREGS to arm android for some reason
-            let mut data = std::mem::MaybeUninit::<user_fpsimd_struct>::uninit();
-            let res = unsafe {
-                libc::ptrace(
-                    14,
-                    libc::pid_t::from(pid),
-                    super::NT_Elf::NT_NONE,
-                    data.as_mut_ptr(),
+        cfg_if::cfg_if! {
+            if #[cfg(target_os = "android")] {
+                // TODO: nix restricts PTRACE_GETFPREGS to arm android for some reason
+                let mut data = std::mem::MaybeUninit::<user_fpsimd_struct>::uninit();
+                let res = unsafe {
+                    libc::ptrace(
+                        14,
+                        libc::pid_t::from(pid),
+                        super::NT_Elf::NT_NONE,
+                        data.as_mut_ptr(),
+                    )
+                };
+                nix::errno::Errno::result(res)?;
+                Ok(unsafe { data.assume_init() })
+            } else {
+                Self::ptrace_get_data_via_io::<user_fpsimd_struct>(
+                    ptrace::Request::PTRACE_GETREGSET,
+                    Some(super::NT_Elf::NT_PRFPREGSET),
+                    nix::unistd::Pid::from_raw(pid),
                 )
-            };
-            nix::errno::Errno::result(res)?;
-            Ok(unsafe { data.assume_init() })
-        })
+            }
+        }
     }
 
     fn getregs(pid: Pid) -> Result<libc::user_regs_struct> {
-        Self::ptrace_get_data_via_io::<libc::user_regs_struct>(
-            ptrace::Request::PTRACE_GETREGSET,
-            Some(super::NT_Elf::NT_PRSTATUS),
-            nix::unistd::Pid::from_raw(pid),
-        )
-        .or_else(|_err| {
-            // TODO: nix restricts PTRACE_GETREGS to arm android for some reason
-            let mut data = std::mem::MaybeUninit::<libc::user_regs_struct>::uninit();
-            let res = unsafe {
-                libc::ptrace(
-                    12,
-                    libc::pid_t::from(pid),
-                    super::NT_Elf::NT_NONE,
-                    data.as_mut_ptr(),
+        cfg_if::cfg_if! {
+            if #[cfg(target_os = "android")] {
+                // TODO: nix restricts PTRACE_GETREGS to arm android for some reason
+                let mut data = std::mem::MaybeUninit::<libc::user_regs_struct>::uninit();
+                let res = unsafe {
+                    libc::ptrace(
+                        12,
+                        libc::pid_t::from(pid),
+                        super::NT_Elf::NT_NONE,
+                        data.as_mut_ptr(),
+                    )
+                };
+                nix::errno::Errno::result(res)?;
+                Ok(unsafe { data.assume_init() })
+            } else {
+                Self::ptrace_get_data_via_io::<libc::user_regs_struct>(
+                    ptrace::Request::PTRACE_GETREGSET,
+                    Some(super::NT_Elf::NT_PRSTATUS),
+                    nix::unistd::Pid::from_raw(pid),
                 )
-            };
-            nix::errno::Errno::result(res)?;
-            Ok(unsafe { data.assume_init() })
-        })
+            }
+        }
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {

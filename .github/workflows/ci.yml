@@ -20,10 +20,10 @@ jobs:
           #- { os: ubuntu-latest,  target: i686-unknown-linux-musl,     use-cross: true }
           - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu,   use-cross: true }
           - { os: ubuntu-latest,  target: aarch64-unknown-linux-musl,  use-cross: true }
-          #- { os: ubuntu-latest,  target: aarch64-linux-android,       use-cross: true }
+          - { os: ubuntu-latest,  target: aarch64-linux-android,       use-cross: true }
           - { os: ubuntu-latest,  target: arm-unknown-linux-gnueabi,   use-cross: true }
           - { os: ubuntu-latest,  target: arm-unknown-linux-musleabi,   use-cross: true }
-          #- { os: ubuntu-latest,  target: arm-linux-androideabi,       use-cross: true }
+          - { os: ubuntu-latest,  target: arm-linux-androideabi,       use-cross: true }
           - { os: ubuntu-latest,  target: arm-unknown-linux-gnueabihf, use-cross: true }
           #- { os: macos-latest,   target: x86_64-apple-darwin,         use-cross: false }
           #- { os: windows-latest, target: x86_64-pc-windows-msvc,      use-cross: false }
