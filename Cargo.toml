@@ -23,9 +23,24 @@ memmap2 = "0.5"
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 nix = "0.23"
 
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+version = "0.34"
+features = [
+    # MiniDumpWriteDump requires...a lot of features
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    # VerifierEnumerateResource and friends
+    "Win32_System_ApplicationVerifier",
+]
+
 [dev-dependencies]
 minidump = "0.10"
 
 [patch.crates-io]
 minidump = { git = "https://github.com/rust-minidump/rust-minidump" }
 minidump-common = { git = "https://github.com/rust-minidump/rust-minidump" }
+#crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "main" }
+crash-context = { path = "../crash-handling/crash-context" }
