@@ -90,7 +90,7 @@ impl MinidumpWriter {
 
         // This is a bit dangerous if doing in-process dumping, but that's not
         // (currently) a real target of this crate, so this allocation is fine
-        let mut user_streams = Vec::with_capacity(3);
+        let mut user_streams = Vec::with_capacity(2);
 
         // Add an MDRawBreakpadInfo stream to the minidump, to provide additional
         // information about the exception handler to the Breakpad processor.
@@ -122,71 +122,6 @@ impl MinidumpWriter {
                 // Again with the mut pointer
                 Buffer: breakpad_info.as_mut_ptr().cast(),
             });
-        }
-
-        // When dumping an external process we want to retrieve the actual contents
-        // of the assertion info and add it as a user stream, but we need to
-        // keep the memory alive for the duration of the write
-        // SAFETY: POD
-        let mut assertion_info: crash_context::RawAssertionInfo = unsafe { std::mem::zeroed() };
-
-        if let Some(ai) = self.crash_context.assertion_info {
-            let ai_ptr = if self.is_external_process {
-                // Even though this information is useful for non-exceptional dumps
-                // (purecall, invalid parameter), we don't treat it is a critical
-                // failure if we can't read it (unlike Breakpad) since we will still
-                // have the synthetic exception context that was generated which
-                // indicates the kind (again, purecall or invalid parameter), and
-                // realistically, the assertion information is going to fairly pointless
-                // anyways (at least for invalid parameters) since the information
-                // supplied to the handler is only going to be filled in if using
-                // the debug MSVCRT, which you can only realistically do in dev
-                // environments since the debug MSVCRT is not redistributable.
-                let mut assert_info =
-                    std::mem::MaybeUninit::<crash_context::RawAssertionInfo>::uninit();
-                let mut bytes_read = 0;
-
-                // SAFETY: syscall
-                if unsafe {
-                    md::ReadProcessMemory(
-                        self.crashing_process, // client process handle to read the memory from
-                        ai.cast(),             // the pointer to read from the client process
-                        assert_info.as_mut_ptr().cast(), // The buffer we're filling with the memory
-                        std::mem::size_of::<crash_context::RawAssertionInfo>(),
-                        &mut bytes_read,
-                    )
-                } == 0
-                {
-                    // log::error!(
-                    //     "failed to read assertion information from client: {}",
-                    //     last_os_error()
-                    // );
-                    std::ptr::null()
-                } else if bytes_read != std::mem::size_of::<crash_context::RawAssertionInfo>() {
-                    // log::error!(
-                    //     "read invalid number of bytes: expected {} != received {}",
-                    //     std::mem::size_of::<crash_context::RawAssertionInfo>(),
-                    //     bytes_read
-                    // );
-                    std::ptr::null()
-                } else {
-                    // SAFETY: this is fine as lone as Windows didn't lie to us
-                    assertion_info = unsafe { assert_info.assume_init() };
-
-                    &assertion_info
-                }
-            } else {
-                ai
-            };
-
-            if !ai.is_null() {
-                user_streams.push(md::MINIDUMP_USER_STREAM {
-                    Type: MINIDUMP_STREAM_TYPE::AssertionInfoStream as u32,
-                    BufferSize: std::mem::size_of::<crash_context::RawAssertionInfo>() as u32,
-                    // Again with the mut pointer
-                    Buffer: (ai_ptr as *mut crash_context::RawAssertionInfo).cast(),
-                });
-            }
         }
 
         let handle_stream = self.fill_handle_stream();
