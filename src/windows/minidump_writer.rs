@@ -12,6 +12,9 @@ use windows_sys::Win32::{
     },
 };
 
+// For some reason this is defined in SystemServices which is massive and not worth bringing in for ONE constant
+const GENERIC_ALL: u32 = 268435456;
+
 pub struct MinidumpWriter {
     /// The crash context as captured by an exception handler
     crash_context: crash_context::CrashContext,
@@ -34,13 +37,24 @@ impl MinidumpWriter {
     pub fn external_process(
         crash_context: crash_context::CrashContext,
         pid: u32,
-        proc_handle: HANDLE,
-    ) -> Self {
-        Self {
-            crash_context,
-            crashing_process: proc_handle,
-            crashing_pid: pid,
-            is_external_process: true,
+    ) -> Result<Self, Error> {
+        let crashing_process = unsafe {
+            OpenProcess(
+                GENERIC_ALL, // desired access
+                0,           // inherit handles
+                pid,         // pid
+            )
+        };
+
+        if crashing_process == 0 {
+            Err(std::io::Error::last_os_error().into())
+        } else {
+            Ok(Self {
+                crash_context,
+                crashing_process,
+                crashing_pid: pid,
+                is_external_process: true,
+            })
         }
     }
 
@@ -55,8 +69,8 @@ impl MinidumpWriter {
         // SAFETY: syscall
         let crashing_process = unsafe {
             OpenProcess(
-                268435456, // desired access - GENERIC_ALL - for some reason this is defined in SystemServices which is massive and not worth bringing in for ONE constant
-                0,         // inherit handles
+                GENERIC_ALL, // desired access
+                0,           // inherit handles
                 crashing_pid,
             )
         };
@@ -258,10 +272,7 @@ impl MinidumpWriter {
 
 impl Drop for MinidumpWriter {
     fn drop(&mut self) {
-        // If we're the current process we created the handle ourselves, so we need to close it
-        if !self.is_external_process {
-            // SAFETY: syscall
-            unsafe { CloseHandle(self.crashing_process) };
-        }
+        // SAFETY: syscall
+        unsafe { CloseHandle(self.crashing_process) };
     }
 }
