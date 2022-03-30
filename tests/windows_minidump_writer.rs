@@ -92,6 +92,7 @@ fn dump_external_process() {
         let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
         let mut buf = String::new();
         f.read_line(&mut buf).expect("failed to read stdout");
+        assert!(!buf.is_empty());
 
         let mut biter = buf.split(' ');
 
