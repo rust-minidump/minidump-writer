@@ -328,10 +328,10 @@ mod windows {
             println!("{exc_ptr_addr} {tid} {exception_code:x}");
 
             // Wait until we're killed
-            loop {
-                std::thread::park();
-            }
+            std::thread::sleep(std::time::Duration::from_secs_f32(60.0));
         }
+
+        panic!("we should be killed");
     }
 }
 
@@ -341,8 +341,10 @@ fn main() -> Result<()> {
     cfg_if::cfg_if! {
         if #[cfg(any(target_os = "linux", target_os = "android"))] {
             linux::real_main(args)
-        } else {
+        } else if #[cfg(target_os = "windows")] {
             windows::real_main(args)
+        } else {
+            unimplemented!();
         }
     }
 }

@@ -88,15 +88,19 @@ fn dump_external_process() {
 
     let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ACCESS_VIOLATION));
 
-    let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
-    let mut buf = String::new();
-    f.read_line(&mut buf).expect("failed to read stdout");
+    let (exception_pointers, thread_id, exception_code) = {
+        let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+        let mut buf = String::new();
+        f.read_line(&mut buf).expect("failed to read stdout");
 
-    let mut biter = buf.split(' ');
+        let mut biter = buf.split(' ');
 
-    let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
-    let thread_id: u32 = biter.next().unwrap().parse().unwrap();
-    let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap() as i32;
+        let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
+        let thread_id: u32 = biter.next().unwrap().parse().unwrap();
+        let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap() as i32;
+
+        (exception_pointers, thread_id, exception_code)
+    };
 
     assert_eq!(exception_code, EXCEPTION_ACCESS_VIOLATION);
 
