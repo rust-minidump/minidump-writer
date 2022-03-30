@@ -302,6 +302,7 @@ mod windows {
         Threading::GetCurrentThreadId,
     };
 
+    #[inline(never)]
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
         let exception_code = u32::from_str_radix(&args[0], 16).unwrap() as i32;
 
@@ -309,14 +310,10 @@ mod windows {
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
+            let mut exception_context = mem::MaybeUninit::uninit();
 
-            let mut exception_context = std::thread::spawn(move || {
-                let mut exception_context = mem::MaybeUninit::uninit();
-                RtlCaptureContext(exception_context.as_mut_ptr());
-                exception_context.assume_init()
-            })
-            .join()
-            .unwrap();
+            RtlCaptureContext(exception_context.as_mut_ptr());
+            let mut exception_context = exception_context.assume_init();
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
