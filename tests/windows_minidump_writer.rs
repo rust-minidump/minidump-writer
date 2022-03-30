@@ -96,7 +96,7 @@ fn dump_external_process() {
 
     let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
     let thread_id: u32 = biter.next().unwrap().parse().unwrap();
-    let exception_code = i32::from_str_radix(biter.next().unwrap(), 16).unwrap();
+    let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap() as i32;
 
     assert_eq!(exception_code, EXCEPTION_ACCESS_VIOLATION);
 

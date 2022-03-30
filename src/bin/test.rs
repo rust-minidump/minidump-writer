@@ -303,7 +303,7 @@ mod windows {
     };
 
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
-        let exception_code = i32::from_str_radix(&args[0], 16).unwrap();
+        let exception_code = u32::from_str_radix(&args[0], 16).unwrap() as i32;
 
         // Generate the exception and communicate back where the exception pointers
         // are
