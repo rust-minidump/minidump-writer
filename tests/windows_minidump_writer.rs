@@ -94,7 +94,7 @@ fn dump_external_process() {
         f.read_line(&mut buf).expect("failed to read stdout");
         assert!(!buf.is_empty());
 
-        let mut biter = buf.split(' ');
+        let mut biter = buf.trim().split(' ');
 
         let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
         let thread_id: u32 = biter.next().unwrap().parse().unwrap();
