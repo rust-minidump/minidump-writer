@@ -293,6 +293,48 @@ mod linux {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod windows {
+    use super::*;
+    use std::mem;
+    use windows_sys::Win32::System::{
+        Diagnostics::Debug::{RtlCaptureContext, EXCEPTION_POINTERS, EXCEPTION_RECORD},
+        Threading::GetCurrentThreadId,
+    };
+
+    pub(super) fn real_main(args: Vec<String>) -> Result<()> {
+        let exception_code = i32::from_str_radix(&args[0], 16).unwrap();
+
+        // Generate the exception and communicate back where the exception pointers
+        // are
+        unsafe {
+            let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
+            let mut exception_context = mem::MaybeUninit::uninit();
+
+            RtlCaptureContext(exception_context.as_mut_ptr());
+
+            let mut exception_context = exception_context.assume_init();
+
+            let exception_ptrs = EXCEPTION_POINTERS {
+                ExceptionRecord: &mut exception_record,
+                ContextRecord: &mut exception_context,
+            };
+
+            exception_record.ExceptionCode = exception_code;
+
+            let exc_ptr_addr = &exception_ptrs as *const _ as usize;
+            let tid = GetCurrentThreadId();
+
+            println!("{exc_ptr_addr} {tid} {exception_code:x}");
+
+            // Wait until we're killed
+            loop {
+                std::thread::park();
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
 
@@ -300,7 +342,7 @@ fn main() -> Result<()> {
         if #[cfg(any(target_os = "linux", target_os = "android"))] {
             linux::real_main(args)
         } else {
-            panic!("not implemented");
+            windows::real_main(args)
         }
     }
 }
