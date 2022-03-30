@@ -183,25 +183,25 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
     let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
     let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
     let _ = dump
-        .get_raw_stream(LinuxCpuInfo)
+        .get_raw_stream(LinuxCpuInfo as u32)
         .expect("Couldn't find LinuxCpuInfo");
     let _ = dump
-        .get_raw_stream(LinuxProcStatus)
+        .get_raw_stream(LinuxProcStatus as u32)
         .expect("Couldn't find LinuxProcStatus");
     let _ = dump
-        .get_raw_stream(LinuxCmdLine)
+        .get_raw_stream(LinuxCmdLine as u32)
         .expect("Couldn't find LinuxCmdLine");
     let _ = dump
-        .get_raw_stream(LinuxEnviron)
+        .get_raw_stream(LinuxEnviron as u32)
         .expect("Couldn't find LinuxEnviron");
     let _ = dump
-        .get_raw_stream(LinuxAuxv)
+        .get_raw_stream(LinuxAuxv as u32)
         .expect("Couldn't find LinuxAuxv");
     let _ = dump
-        .get_raw_stream(LinuxMaps)
+        .get_raw_stream(LinuxMaps as u32)
         .expect("Couldn't find LinuxMaps");
     let _ = dump
-        .get_raw_stream(LinuxDsoDebug)
+        .get_raw_stream(LinuxDsoDebug as u32)
         .expect("Couldn't find LinuxDsoDebug");
 }
 #[test]
