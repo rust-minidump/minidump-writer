@@ -1,3 +1,6 @@
+//! All of these tests are specific to ptrace
+#![cfg(any(target_os = "linux", target_os = "android"))]
+
 use minidump_writer::ptrace_dumper::PtraceDumper;
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
