@@ -310,7 +310,7 @@ mod windows {
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
-            let mut exception_context = mem::MaybeUninit::uninit();
+            let mut exception_context = mem::MaybeUninit::zeroed();
 
             #[inline(never)]
             unsafe fn another_function(ctx: *mut CONTEXT) {
