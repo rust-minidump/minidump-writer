@@ -310,11 +310,10 @@ mod windows {
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
-            let mut exception_context: CONTEXT = mem::zeroed();
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
-                ContextRecord: &mut exception_context,
+                ContextRecord: std::ptr::null_mut(),
             };
 
             exception_record.ExceptionCode = exception_code;
