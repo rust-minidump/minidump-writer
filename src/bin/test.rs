@@ -298,7 +298,7 @@ mod windows {
     use super::*;
     use std::mem;
     use windows_sys::Win32::System::{
-        Diagnostics::Debug::{RtlCaptureContext, EXCEPTION_POINTERS, EXCEPTION_RECORD},
+        Diagnostics::Debug::{RtlCaptureContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
         Threading::GetCurrentThreadId,
     };
 
@@ -312,7 +312,12 @@ mod windows {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
             let mut exception_context = mem::MaybeUninit::uninit();
 
-            RtlCaptureContext(exception_context.as_mut_ptr());
+            #[inline(never)]
+            unsafe fn another_function(ctx: *mut CONTEXT) {
+                RtlCaptureContext(ctx);
+            }
+
+            another_function(exception_context.as_mut_ptr());
             let mut exception_context = exception_context.assume_init();
 
             let exception_ptrs = EXCEPTION_POINTERS {
