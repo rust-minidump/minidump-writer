@@ -38,7 +38,3 @@ features = [
 
 [dev-dependencies]
 minidump = "0.10"
-
-[patch.crates-io]
-minidump = { git = "https://github.com/rust-minidump/rust-minidump" }
-minidump-common = { git = "https://github.com/rust-minidump/rust-minidump" }
