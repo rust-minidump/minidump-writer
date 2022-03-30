@@ -297,9 +297,12 @@ mod linux {
 mod windows {
     use super::*;
     use std::mem;
-    use windows_sys::Win32::System::{
-        Diagnostics::Debug::{CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-        Threading::GetCurrentThreadId,
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{
+            Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
+            Threading::{GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS},
+        },
     };
 
     #[inline(never)]
@@ -310,16 +313,24 @@ mod windows {
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
+            let mut exception_context: CONTEXT = mem::zeroed();
+            exception_context.ContextFlags =
+                minidump_common::format::ContextFlagsAmd64::CONTEXT_AMD64_ALL.bits();
+
+            let tid = GetCurrentThreadId();
+
+            let thread_handle = OpenThread(THREAD_ALL_ACCESS, 0, tid);
+            GetThreadContext(thread_handle, &mut exception_context);
+            CloseHandle(thread_handle);
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
-                ContextRecord: std::ptr::null_mut(),
+                ContextRecord: &mut exception_context,
             };
 
             exception_record.ExceptionCode = exception_code;
 
             let exc_ptr_addr = &exception_ptrs as *const _ as usize;
-            let tid = GetCurrentThreadId();
 
             println!("{exc_ptr_addr} {tid} {exception_code:x}");
 
