@@ -309,11 +309,14 @@ mod windows {
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
-            let mut exception_context = mem::MaybeUninit::uninit();
 
-            RtlCaptureContext(exception_context.as_mut_ptr());
-
-            let mut exception_context = exception_context.assume_init();
+            let mut exception_context = std::thread::spawn(move || {
+                let mut exception_context = mem::MaybeUninit::uninit();
+                RtlCaptureContext(exception_context.as_mut_ptr());
+                exception_context.assume_init()
+            })
+            .join()
+            .unwrap();
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
