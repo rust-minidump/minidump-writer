@@ -298,7 +298,7 @@ mod windows {
     use super::*;
     use std::mem;
     use windows_sys::Win32::System::{
-        Diagnostics::Debug::{RtlCaptureContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
+        Diagnostics::Debug::{CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
         Threading::GetCurrentThreadId,
     };
 
@@ -325,10 +325,10 @@ mod windows {
             println!("{exc_ptr_addr} {tid} {exception_code:x}");
 
             // Wait until we're killed
-            std::thread::sleep(std::time::Duration::from_secs_f32(60.0));
+            loop {
+                std::thread::park();
+            }
         }
-
-        panic!("we should be killed");
     }
 }
 
