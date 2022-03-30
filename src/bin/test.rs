@@ -300,7 +300,7 @@ fn main() -> Result<()> {
         if #[cfg(any(target_os = "linux", target_os = "android"))] {
             linux::real_main(args)
         } else {
-            compile_error!("test binary is not implemented for this target");
+            panic!("not implemented");
         }
     }
 }
