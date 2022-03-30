@@ -4,7 +4,7 @@ use minidump::{CrashReason, Minidump, MinidumpMemoryList, MinidumpSystemInfo, Mi
 use minidump_writer::minidump_writer::MinidumpWriter;
 use std::mem;
 use windows_sys::Win32::{
-    Foundation::{EXCEPTION_ACCESS_VIOLATION, STATUS_INVALID_PARAMETER},
+    Foundation::{EXCEPTION_ILLEGAL_INSTRUCTION, STATUS_INVALID_PARAMETER},
     System::{
         Diagnostics::Debug::{RtlCaptureContext, EXCEPTION_POINTERS, EXCEPTION_RECORD},
         Threading::GetCurrentThreadId,
@@ -86,7 +86,7 @@ fn dump_current_process() {
 fn dump_external_process() {
     use std::io::BufRead;
 
-    let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ACCESS_VIOLATION));
+    let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION));
 
     let (exception_pointers, thread_id, exception_code) = {
         let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
@@ -103,7 +103,7 @@ fn dump_external_process() {
         (exception_pointers, thread_id, exception_code)
     };
 
-    assert_eq!(exception_code, EXCEPTION_ACCESS_VIOLATION);
+    assert_eq!(exception_code, EXCEPTION_ILLEGAL_INSTRUCTION);
 
     let crash_context = crash_context::CrashContext {
         exception_pointers: exception_pointers as _,
@@ -135,6 +135,6 @@ fn dump_external_process() {
 
     assert_eq!(
         crash_reason,
-        CrashReason::from_windows_error(EXCEPTION_ACCESS_VIOLATION as u32)
+        CrashReason::from_windows_error(EXCEPTION_ILLEGAL_INSTRUCTION as u32)
     );
 }
