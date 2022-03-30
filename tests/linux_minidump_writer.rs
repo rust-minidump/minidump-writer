@@ -180,7 +180,6 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
     let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
     let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
     let _: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
-    let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
     let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
     let _ = dump
         .get_raw_stream(LinuxCpuInfo as u32)
