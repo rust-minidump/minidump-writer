@@ -3,12 +3,13 @@ use crate::{
         app_memory::AppMemoryList,
         crash_context::CrashContext,
         dso_debug,
-        errors::{FileWriterError, InitError, MemoryWriterError, WriterError},
+        errors::{FileWriterError, InitError, WriterError},
         maps_reader::{MappingInfo, MappingList},
         ptrace_dumper::PtraceDumper,
         sections::*,
         thread_info::Pid,
     },
+    mem_writer::{Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError},
     minidump_format::*,
 };
 use std::io::{Seek, SeekFrom, Write};

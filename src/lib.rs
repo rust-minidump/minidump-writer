@@ -12,3 +12,8 @@ cfg_if::cfg_if! {
 
 pub mod minidump_cpu;
 pub mod minidump_format;
+
+/// Non-windows platforms need additional code since they are essentially
+/// replicating functionality we get for free on Windows
+#[cfg(not(target_os = "windows"))]
+pub(crate) mod mem_writer;
