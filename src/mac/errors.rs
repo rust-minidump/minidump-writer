@@ -6,6 +6,8 @@ use mach2::kern_return::kern_return_t;
 pub enum WriterError {
     #[error("kernel error ({})", _0)]
     Kernel(kern_return_t),
+    #[error("detected an invalid mach image header")]
+    InvalidMachHeader,
 }
 
 #[inline]
