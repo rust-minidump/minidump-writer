@@ -41,5 +41,9 @@ features = [
     "Win32_System_Threading",
 ]
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Binds some additional mac specifics not in libc
+mach2 = "0.4"
+
 [dev-dependencies]
 minidump = "0.10"
