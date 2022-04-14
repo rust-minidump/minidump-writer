@@ -3,11 +3,13 @@
 
 // Just exports all of the mach functions we use into a flat list
 pub use mach2::{
-    kern_return::KERN_SUCCESS,
-    task, task_info,
+    kern_return::{kern_return_t, KERN_SUCCESS},
+    port::mach_port_name_t,
+    task::{self, task_threads},
+    task_info,
     thread_act::thread_get_state,
     traps::mach_task_self,
-    vm::{mach_vm_deallocate, mach_vm_read},
+    vm::{mach_vm_deallocate, mach_vm_read, mach_vm_region_recurse},
     vm_region::vm_region_submap_info_64,
 };
 
@@ -141,7 +143,7 @@ impl From<mach2::kern_return::kern_return_t> for KernelError {
 
         match kr {
             KERN_INVALID_ADDRESS => Self::InvalidAddress,
-            KERN_PROTECTED_FAILURE => Self::ProtectionFailure,
+            KERN_PROTECTION_FAILURE => Self::ProtectionFailure,
             KERN_NO_SPACE => Self::NoSpace,
             KERN_INVALID_ARGUMENT => Self::InvalidArgument,
             KERN_FAILURE => Self::Failure,
@@ -187,8 +189,8 @@ impl From<mach2::kern_return::kern_return_t> for KernelError {
             KERN_OPERATION_TIMED_OUT => Self::OperationTimedOut,
             KERN_CODESIGN_ERROR => Self::CodesignError,
             KERN_POLICY_STATIC => Self::PoicyStatic,
-            KERN_INSUFFICIENT_BUFFER_SIZE => Self::InsufficientBufferSize,
-            KERN_DENIED => Self::Denied,
+            52 => Self::InsufficientBufferSize,
+            53 => Self::Denied,
             54 => Self::MissingKC,
             55 => Self::InvalidKC,
             56 => Self::NotFound,
@@ -208,7 +210,7 @@ cfg_if::cfg_if! {
         /// x86_THREAD_STATE64 in /usr/include/mach/i386/thread_status.h
         pub const THREAD_STATE_FLAVOR: u32 = 4;
 
-        type ArchTreadState = mach2::structs::x86_thread_state64_t;
+        pub type ArchThreadState = mach2::structs::x86_thread_state64_t;
     } else if #[cfg(target_arch = "aarch64")] {
         /// ARM_THREAD_STATE64 in /usr/include/mach/arm/thread_status.h
         pub const THREAD_STATE_FLAVOR: u32 = 6;
@@ -216,17 +218,17 @@ cfg_if::cfg_if! {
         // Missing from mach2 atm
         // _STRUCT_ARM_THREAD_STATE64 from /usr/include/mach/arm/_structs.h
         #[repr(C)]
-        struct Arm64ThreadState {
-            x: [u64; 29],
-            fp: u64,
-            lr: u64,
-            sp: u64,
-            pc: u64,
-            cpsr: u32,
+        pub struct Arm64ThreadState {
+            pub x: [u64; 29],
+            pub fp: u64,
+            pub lr: u64,
+            pub sp: u64,
+            pub pc: u64,
+            pub cpsr: u32,
             __pad: u32,
         }
 
-        type ArchTreadState = Arm64ThreadState;
+        pub type ArchThreadState = Arm64ThreadState;
     } else {
         compile_error!("unsupported target arch");
     }
@@ -241,42 +243,41 @@ impl Default for ThreadState {
     fn default() -> Self {
         Self {
             state: [0u32; THREAD_STATE_MAX],
-            state_size: THREAD_STATE_MAX * std::mem::size_of::<u32>() as u32,
+            state_size: (THREAD_STATE_MAX * std::mem::size_of::<u32>()) as u32,
         }
     }
 }
 
 impl ThreadState {
     /// Gets the program counter
+    #[inline]
     pub fn pc(&self) -> u64 {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                let inner = self.as_ref();
-                inner.__pc
+                self.arch_state().__pc
             } else if #[cfg(target_arch = "aarch64")] {
-                let inner = self.as_ref();
-                inner.pc
+                self.arch_state().pc
             }
         }
     }
 
     /// Gets the stack pointer
+    #[inline]
     pub fn sp(&self) -> u64 {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                let inner = self.as_ref();
-                inner.__sp
+                self.arch_state().__sp
             } else if #[cfg(target_arch = "aarch64")] {
-                let inner = self.as_ref();
-                inner.sp
+                self.arch_state().sp
             }
         }
     }
-}
 
-impl AsRef<ArchThreadState> for ThreadState {
-    fn as_ref(&self) -> &ArchThreadState {
-        &*(self.state.as_ptr().cast())
+    /// Converts the raw binary blob into the architecture specific state
+    #[inline]
+    pub fn arch_state(&self) -> &ArchThreadState {
+        // SAFETY: hoping the kernel isn't lying
+        unsafe { &*(self.state.as_ptr().cast()) }
     }
 }
 
@@ -292,16 +293,17 @@ pub trait TaskInfo {
 // usr/include/mach-o/loader.h, the file type for the main executable image
 const MH_EXECUTE: u32 = 0x2;
 // usr/include/mach-o/loader.h, magic number for MachHeader
-const MH_MAGIC_64: u32 = 0xfeedfacf;
+pub const MH_MAGIC_64: u32 = 0xfeedfacf;
 // usr/include/mach-o/loader.h, command to map a segment
-const LC_SEGMENT_64: u32 = 0x19;
+pub const LC_SEGMENT_64: u32 = 0x19;
 // usr/include/mach-o/loader.h, dynamically linked shared lib ident
-const LC_ID_DYLIB: u32 = 0xd;
+pub const LC_ID_DYLIB: u32 = 0xd;
 // usr/include/mach-o/loader.h, the uuid
-const LC_UUID: u32 = 0x1b;
+pub const LC_UUID: u32 = 0x1b;
 
 // usr/include/mach-o/loader.h
 #[repr(C)]
+#[derive(Clone)]
 pub struct MachHeader {
     pub magic: u32,         // mach magic number identifier
     pub cpu_type: i32,      // cpu_type_t cpu specifier
@@ -384,15 +386,16 @@ pub struct UuidCommand {
 /// A block of load commands for a particular image
 pub struct LoadCommands {
     /// The block of memory containing all of the load commands
-    pub buf: Vec<u8>,
+    pub buffer: Vec<u8>,
     /// The number of actual load commmands that _should_ be in the buffer
     pub count: u32,
 }
 
 impl LoadCommands {
-    fn iter(&self) -> LoadCommandsIter<'_> {
+    #[inline]
+    pub fn iter(&self) -> LoadCommandsIter<'_> {
         LoadCommandsIter {
-            buf: &self.buf,
+            buffer: &self.buffer,
             count: self.count,
         }
     }
@@ -430,9 +433,15 @@ impl<'buf> Iterator for LoadCommandsIter<'buf> {
                 }
 
                 let cmd = match header.cmd {
-                    LC_SEGMENT_64 => Some(&*(self.buffer.as_ptr().cast::<SegmentCommand64>())),
-                    LC_ID_DYLIB => Some(&*(self.buffer.as_ptr().cast::<DylibCommand>())),
-                    LC_UUID => Some(&*(self.buffer.as_ptr().cast::<UuidCommand>())),
+                    LC_SEGMENT_64 => Some(LoadCommand::Segment(
+                        &*(self.buffer.as_ptr().cast::<SegmentCommand64>()),
+                    )),
+                    LC_ID_DYLIB => Some(LoadCommand::Dylib(
+                        &*(self.buffer.as_ptr().cast::<DylibCommand>()),
+                    )),
+                    LC_UUID => Some(LoadCommand::Uuid(
+                        &*(self.buffer.as_ptr().cast::<UuidCommand>()),
+                    )),
                     // Just ignore any other load commands
                     _ => None,
                 };
@@ -451,4 +460,77 @@ impl<'buf> Iterator for LoadCommandsIter<'buf> {
         let sz = self.count as usize;
         (sz, Some(sz))
     }
+}
+
+/// Retrieves an integer sysctl by name. Returns the default value if retrieval
+/// fails.
+pub fn sysctl_by_name<T: Sized + Default>(name: &[u8]) -> T {
+    let mut out = T::default();
+    let mut len = std::mem::size_of_val(&out);
+
+    // SAFETY: syscall
+    unsafe {
+        if libc::sysctlbyname(
+            name.as_ptr().cast(),
+            (&mut out as *mut T).cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            // log?
+            T::default()
+        } else {
+            out
+        }
+    }
+}
+
+/// Retrieves an `i32` sysctl by name and casts it to the specified integer type.
+/// Returns the default value if retrieval fails or the value is out of bounds of
+/// the specified integer type.
+pub fn int_sysctl_by_name<T: TryFrom<i32> + Default>(name: &[u8]) -> T {
+    let val = sysctl_by_name::<i32>(name);
+    T::try_from(val).unwrap_or_default()
+}
+
+/// Retrieves a string sysctl by name. Returns an empty string if the retrieval
+/// fails or the string can't be converted to utf-8.
+pub fn sysctl_string(name: &[u8]) -> String {
+    let mut buf_len = 0;
+
+    // SAFETY: syscalls
+    let string_buf = unsafe {
+        // Retrieve the size of the string (including null terminator)
+        if libc::sysctlbyname(
+            name.as_ptr().cast(),
+            std::ptr::null_mut(),
+            &mut buf_len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+            || buf_len <= 1
+        {
+            return String::new();
+        }
+
+        let mut buff = Vec::new();
+        buff.resize(buf_len, 0);
+
+        if libc::sysctlbyname(
+            name.as_ptr().cast(),
+            buff.as_mut_ptr().cast(),
+            &mut buf_len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return String::new();
+        }
+
+        buff.pop(); // remove null terminator
+        buff
+    };
+
+    String::from_utf8(string_buf).unwrap_or_default()
 }

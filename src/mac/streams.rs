@@ -1,4 +1,5 @@
 mod breakpad_info;
+mod exception;
 mod memory_list;
 mod misc_info;
 mod module_list;
@@ -6,7 +7,9 @@ mod system_info;
 mod thread_list;
 
 use super::{
-    minidump_writer::{DumpBuf, MinidumpWriter},
-    task_dumper::TaskDumper,
+    errors::WriterError,
+    mach,
+    minidump_writer::MinidumpWriter,
+    task_dumper::{ImageInfo, TaskDumpError, TaskDumper},
 };
-use crate::mac::errors::ker_ret;
+use crate::{dir_section::DumpBuf, mem_writer::*, minidump_format::*};

@@ -1,24 +1,20 @@
 use super::*;
+use crate::minidump_cpu::RawContextCPU;
 
 impl MinidumpWriter {
-    fn write_thread_list(
+    pub(crate) fn write_thread_list(
         &mut self,
         buffer: &mut DumpBuf,
         dumper: &TaskDumper,
     ) -> Result<MDRawDirectory, WriterError> {
-        // Retrieve the list of threads from the task that crashed.
-        // SAFETY: syscall
-        let mut threads = std::ptr::null_mut();
-        let mut thread_count = 0;
-
-        kern_ret(|| unsafe {
-            mach2::task::task_threads(self.crash_context.task, &mut threads, &mut thread_count)
-        })?;
+        let threads = dumper.read_threads()?;
 
         // Ignore the thread that handled the exception
-        if self.crash_context.handler_thread != mach2::port::MACH_PORT_NULL {
-            thread_count -= 1;
-        }
+        let thread_count = if self.crash_context.handler_thread != mach2::port::MACH_PORT_NULL {
+            threads.len() - 1
+        } else {
+            threads.len()
+        };
 
         let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, thread_count as u32)?;
 
@@ -27,20 +23,28 @@ impl MinidumpWriter {
             location: list_header.location(),
         };
 
-        let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, num_threads)?;
+        let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, thread_count)?;
         dirent.location.data_size += thread_list.location().data_size;
 
-        let threads = unsafe { std::slice::from_raw_parts(threads, thread_count as usize) };
-
-        for (i, tid) in threads.iter().enumerate() {
-            let thread = self.write_thread(buffer, tid)?;
+        let handler_thread = self.crash_context.handler_thread;
+        for (i, tid) in threads
+            .iter()
+            .filter(|tid| **tid != handler_thread)
+            .enumerate()
+        {
+            let thread = self.write_thread(*tid, buffer, dumper)?;
             thread_list.set_value_at(buffer, thread, i)?;
         }
 
         Ok(dirent)
     }
 
-    fn write_thread(&mut self, buffer: &mut DumpBuf, tid: u32) -> Result<MDRawThread, WriterError> {
+    fn write_thread(
+        &mut self,
+        tid: u32,
+        buffer: &mut DumpBuf,
+        dumper: &TaskDumper,
+    ) -> Result<MDRawThread, WriterError> {
         let mut thread = MDRawThread {
             thread_id: tid,
             suspend_count: 0,
@@ -51,12 +55,12 @@ impl MinidumpWriter {
             thread_context: MDLocationDescriptor::default(),
         };
 
-        let thread_state = Self::get_thread_state(tid)?;
+        let thread_state = dumper.read_thread_state(tid)?;
 
-        self.write_stack_from_start_address(thread_state.sp(), buffer, &mut thread)?;
+        self.write_stack_from_start_address(thread_state.sp(), &mut thread, buffer, dumper)?;
 
         let mut cpu: RawContextCPU = Default::default();
-        Self::fill_cpu_context(thread_state, &mut cpu);
+        Self::fill_cpu_context(&thread_state, &mut cpu);
         let cpu_section = MemoryWriter::alloc_with_val(buffer, cpu)?;
         thread.thread_context = cpu_section.location();
         Ok(thread)
@@ -65,14 +69,15 @@ impl MinidumpWriter {
     fn write_stack_from_start_address(
         &mut self,
         start: u64,
-        buffer: &mut DumpBuf,
         thread: &mut MDRawThread,
+        buffer: &mut DumpBuf,
+        dumper: &TaskDumper,
     ) -> Result<(), WriterError> {
-        thread.stack.start_of_memory_range = start.try_into()?;
+        thread.stack.start_of_memory_range = start;
         thread.stack.memory.data_size = 0;
         thread.stack.memory.rva = buffer.position() as u32;
 
-        let stack_size = self.calculate_stack_size(start);
+        let stack_size = self.calculate_stack_size(start, dumper);
 
         let stack_location = if stack_size == 0 {
             // In some situations the stack address for the thread can come back 0.
@@ -84,16 +89,16 @@ impl MinidumpWriter {
                 data_size: 16,
                 rva: buffer.position() as u32,
             };
-            buffer.write_all(0xdeadbeefu64.as_ne_bytes())?;
-            buffer.write_all(0xdeadbeefu64.as_ne_bytes())?;
+            buffer.write_all(&0xdeadbeefu64.to_ne_bytes());
+            buffer.write_all(&0xdeadbeefu64.to_ne_bytes());
             stack_location
         } else {
-            let stack_buffer = self.read_task_memory(start, stack_size)?;
+            let stack_buffer = dumper.read_task_memory(start, stack_size)?;
             let stack_location = MDLocationDescriptor {
                 data_size: stack_buffer.len() as u32,
                 rva: buffer.position() as u32,
             };
-            buffer.write_all(&stack_buffer)?;
+            buffer.write_all(&stack_buffer);
             stack_location
         };
 
@@ -102,12 +107,12 @@ impl MinidumpWriter {
         Ok(())
     }
 
-    fn calculate_stack_size(&self, start_address: u64) -> usize {
+    fn calculate_stack_size(&self, start_address: u64, dumper: &TaskDumper) -> usize {
         if start_address == 0 {
             return 0;
         }
 
-        let mut region = if let Ok(region) = self.get_vm_region(start_address) {
+        let mut region = if let Ok(region) = dumper.get_vm_region(start_address) {
             region
         } else {
             return 0;
@@ -119,6 +124,9 @@ impl MinidumpWriter {
             return 0;
         }
 
+        let root_range_start = region.range.start;
+        let mut stack_size = region.range.end - region.range.start;
+
         // If the user tag is VM_MEMORY_STACK, look for more readable regions with
         // the same tag placed immediately above the computed stack region. Under
         // some circumstances, the stack for thread 0 winds up broken up into
@@ -129,7 +137,7 @@ impl MinidumpWriter {
             loop {
                 let proposed_next_region_base = region.range.end;
 
-                region = if let Ok(reg) = self.get_vm_region(region.range.end) {
+                region = if let Ok(reg) = dumper.get_vm_region(region.range.end) {
                     reg
                 } else {
                     break;
@@ -142,19 +150,22 @@ impl MinidumpWriter {
                     break;
                 }
 
-                stack_region_size += region.range.end - region.range.start;
+                stack_size += region.range.end - region.range.start;
             }
         }
 
-        stack_region_base + stack_region_size - start_addr
+        (root_range_start + stack_size - start_address) as usize
     }
 
-    fn fill_cpu_context(thread_state: &ThreadState, out: &mut RawContextCPU) {
+    pub(crate) fn fill_cpu_context(
+        thread_state: &crate::mac::mach::ThreadState,
+        out: &mut RawContextCPU,
+    ) {
+        let ts = thread_state.arch_state();
+
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
                 out.context_flags = format::ContextFlagsCpu::CONTEXT_AMD64.bits();
-
-                let ts = thread_state.as_ref();
 
                 out.rax = ts.__rax;
                 out.rbx = ts.__rbx;
@@ -184,8 +195,6 @@ impl MinidumpWriter {
             } else if #[cfg(target_arch = "aarch64")] {
                 // This is kind of a lie as we don't actually include the full float state..?
                 out.context_flags = format::ContextFlagsArm64Old::CONTEXT_ARM64_OLD_FULL.bits() as u64;
-
-                let ts = thread_state.as_ref();
 
                 out.cpsr = ts.cpsr;
                 out.iregs[..28].copy_from_slice(&ts.x[..28]);

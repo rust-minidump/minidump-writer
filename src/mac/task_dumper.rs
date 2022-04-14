@@ -1,4 +1,4 @@
-use crate::mac::mach_helpers as mach;
+use crate::mac::mach;
 use mach2::mach_types as mt;
 use thiserror::Error;
 
@@ -11,6 +11,12 @@ pub enum TaskDumpError {
     },
     #[error("detected an invalid mach image header")]
     InvalidMachHeader,
+    #[error(transparent)]
+    NonUtf8String(#[from] std::string::FromUtf8Error),
+    #[error("unable to find the main executable image for the process")]
+    NoExecutableImage,
+    #[error("expected load command {name}({id}) was not found for an image")]
+    MissingLoadCommand { name: &'static str, id: u32 },
 }
 
 /// Wraps a mach call in a Result
@@ -23,7 +29,7 @@ macro_rules! mach_call {
         } else {
             // This is ugly, improvements to the macro welcome!
             let mut syscall = stringify!($call);
-            if let Some(i) = sc.find('(') {
+            if let Some(i) = syscall.find('(') {
                 syscall = &syscall[..i];
             }
             Err(TaskDumpError::Kernel {
@@ -36,10 +42,11 @@ macro_rules! mach_call {
 
 // dyld_image_info
 #[repr(C)]
+#[derive(Clone)]
 pub struct ImageInfo {
-    load_address: u64,
-    file_path: u64,
-    file_mod_date: u64,
+    pub load_address: u64,
+    pub file_path: u64,
+    pub file_mod_date: u64,
 }
 
 impl PartialEq for ImageInfo {
@@ -72,7 +79,7 @@ pub struct VMRegionInfo {
 /// for a task (MacOS process)
 pub struct TaskDumper {
     task: mt::task_t,
-    page_size: usize,
+    page_size: i64,
 }
 
 impl TaskDumper {
@@ -81,24 +88,24 @@ impl TaskDumper {
         Self {
             task,
             // SAFETY: syscall
-            page_size: unsafe { libc::getpagesize() },
+            page_size: unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as i64,
         }
     }
 
     /// Reads a block of memory from the task
-    pub fn read_task_memory<T: Sized>(
-        &self,
-        address: u64,
-        count: usize,
-    ) -> Result<Vec<T>, TaskDumpError> {
-        let length = count * std::mem::size_of::<T>();
+    pub fn read_task_memory<T>(&self, address: u64, count: usize) -> Result<Vec<T>, TaskDumpError>
+    where
+        T: Sized + Clone,
+    {
+        let length = (count * std::mem::size_of::<T>()) as u64;
 
         // use the negative of the page size for the mask to find the page address
-        let page_address = address & -self.page_size;
-        let last_page_address = (address + length + self.page_size - 1) & -self.page_size;
+        let page_address = address & (-self.page_size as u64);
+        let last_page_address =
+            (address + length + (self.page_size - 1) as u64) & (-self.page_size as u64);
 
         let page_size = last_page_address - page_address;
-        let mut local_start = std::ptr::null_mut();
+        let mut local_start = 0;
         let mut local_length = 0;
 
         mach_call!(mach::mach_vm_read(
@@ -111,16 +118,23 @@ impl TaskDumper {
 
         let mut buffer = Vec::with_capacity(count);
 
-        let task_buffer =
-            std::slice::from_raw_parts(local_start.offset(address - page_address).cast(), count);
+        // SAFETY: this is safe as long as the kernel has not lied to us
+        let task_buffer = unsafe {
+            std::slice::from_raw_parts(
+                (local_start as *const u8)
+                    .offset((address - page_address) as isize)
+                    .cast(),
+                count,
+            )
+        };
         buffer.extend_from_slice(task_buffer);
 
         // Don't worry about the return here, if something goes wrong there's probably
         // not much we can do about it, and we have what we want anyways
         let _res = mach_call!(mach::mach_vm_deallocate(
             mach::mach_task_self(),
-            local_start,
-            local_length
+            local_start as u64, // vm_read returns a pointer, but vm_deallocate takes a integer address :-/
+            local_length as u64, // vm_read and vm_deallocate use different sizes :-/
         ));
 
         Ok(buffer)
@@ -138,12 +152,12 @@ impl TaskDumper {
     ///
     /// Fails if the address cannot be read for some reason, or the string is
     /// not utf-8.
-    fn read_string(&self, addr: u64) -> Result<Option<String>, TaskDumpError> {
+    pub fn read_string(&self, addr: u64) -> Result<Option<String>, TaskDumpError> {
         // The problem is we don't know how much to read until we know how long
         // the string is. And we don't know how long the string is, until we've read
         // the memory!  So, we'll try to read kMaxStringLength bytes
         // (or as many bytes as we can until we reach the end of the vm region).
-        let get_region_size = || {
+        let get_region_size = || -> Result<u64, TaskDumpError> {
             let region = self.get_vm_region(addr)?;
 
             let mut size_to_end = region.range.end - addr;
@@ -163,14 +177,14 @@ impl TaskDumper {
         };
 
         if let Ok(size_to_end) = get_region_size() {
-            let mut bytes = self.read_task_memory(addr, size_to_end)?;
+            let mut bytes = self.read_task_memory(addr, size_to_end as usize)?;
 
             // Find the null terminator and truncate our string
-            if let Some(null_pos) = bytes.iter().position(|c| c == 0) {
+            if let Some(null_pos) = bytes.iter().position(|c| *c == 0) {
                 bytes.resize(null_pos, 0);
             }
 
-            String::from_utf8(bytes).map(Some)?
+            Ok(String::from_utf8(bytes).map(Some)?)
         } else {
             Ok(None)
         }
@@ -182,7 +196,6 @@ impl TaskDumper {
         let mut region_base = addr;
         let mut region_size = 0;
         let mut nesting_level = 0;
-        let mut region_info = 0;
         let mut submap_info = std::mem::MaybeUninit::<mach::vm_region_submap_info_64>::uninit();
 
         // mach/vm_region.h
@@ -192,7 +205,7 @@ impl TaskDumper {
 
         let mut info_count = VM_REGION_SUBMAP_INFO_COUNT_64;
 
-        mach_call!(mach_vm_region_recurse(
+        mach_call!(mach::mach_vm_region_recurse(
             self.task,
             &mut region_base,
             &mut region_size,
@@ -215,7 +228,7 @@ impl TaskDumper {
 
         mach_call!(mach::thread_get_state(
             tid,
-            THREAD_STATE_FLAVOR,
+            mach::THREAD_STATE_FLAVOR as i32,
             thread_state.state.as_mut_ptr(),
             &mut thread_state.state_size,
         ))?;
@@ -243,7 +256,7 @@ impl TaskDumper {
     /// multiple images with the same load address.
     pub fn read_images(&self) -> Result<Vec<ImageInfo>, TaskDumpError> {
         impl mach::TaskInfo for mach::task_info::task_dyld_info {
-            const FLAVOR: mach::task_info::TASK_DYLD_INFO;
+            const FLAVOR: u32 = mach::task_info::TASK_DYLD_INFO;
         }
 
         // Retrieve the address at which the list of loaded images is located
@@ -277,11 +290,10 @@ impl TaskDumper {
     }
 
     /// Retrieves the load commands for the specified image
-    pub fn read_load_commands(&self, img: &ImageInfo) -> Result<mach::LoadComands, TaskDumpError> {
-        let mach_header_buf =
-            self.read_task_memory::<u8>(img.load_address, std::mem::size_of::<mach::MachHeader>())?;
+    pub fn read_load_commands(&self, img: &ImageInfo) -> Result<mach::LoadCommands, TaskDumpError> {
+        let mach_header = self.read_task_memory::<mach::MachHeader>(img.load_address, 1)?;
 
-        let header: &mach::MachHeader = &*(mach_header_buf.as_ptr().cast());
+        let header = &mach_header[0];
 
         if header.magic != mach::MH_MAGIC_64 {
             return Err(TaskDumpError::InvalidMachHeader);
@@ -292,13 +304,45 @@ impl TaskDumper {
         // retrieve the memory as a raw byte buffer that we can then iterate
         // through and step according to the size of each load command
         let load_commands_buf = self.read_task_memory::<u8>(
-            image.load_address + std::mem::size_of::<MachHeader>() as u64,
+            img.load_address + std::mem::size_of::<mach::MachHeader>() as u64,
             header.size_commands as usize,
         )?;
 
-        Ok(mach::LoadComands {
+        Ok(mach::LoadCommands {
             buffer: load_commands_buf,
             count: header.num_commands,
         })
+    }
+
+    /// Gets a list of all of the thread ids in the task
+    pub fn read_threads(&self) -> Result<&'static [u32], TaskDumpError> {
+        let mut threads = std::ptr::null_mut();
+        let mut thread_count = 0;
+
+        mach_call!(mach::task_threads(
+            self.task,
+            &mut threads,
+            &mut thread_count
+        ))?;
+
+        Ok(
+            // SAFETY: This should be valid if the call succeeded
+            unsafe { std::slice::from_raw_parts(threads, thread_count as usize) },
+        )
+    }
+
+    /// Retrieves the PID for the task
+    pub fn pid_for_task(&self) -> Result<i32, TaskDumpError> {
+        extern "C" {
+            /// /usr/include/mach/mach_traps.h
+            ///
+            /// This seems to be marked as "obsolete" so might disappear at some point?
+            fn pid_for_task(task: mach::mach_port_name_t, pid: *mut i32) -> mach::kern_return_t;
+        }
+
+        let mut pid = 0;
+        mach_call!(pid_for_task(self.task, &mut pid))?;
+
+        Ok(pid)
     }
 }

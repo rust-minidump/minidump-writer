@@ -2,7 +2,7 @@
 compile_error!("Various MacOS FFI bindings assume we are on a 64-bit architechture");
 
 pub mod errors;
-mod mach_helpers;
+mod mach;
 pub mod minidump_writer;
 mod streams;
 mod task_dumper;

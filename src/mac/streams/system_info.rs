@@ -1,72 +1,6 @@
 use super::*;
 use crate::minidump_format::*;
 
-fn sysctl_by_name<T: Sized + Default>(name: &[u8]) -> T {
-    let mut out = T::default();
-    let mut len = std::mem::size_of_val(&out);
-
-    // SAFETY: syscall
-    unsafe {
-        if libc::sysctlbyname(
-            name.as_ptr().cast(),
-            (&mut out).cast(),
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            // log?
-            T::default()
-        } else {
-            out
-        }
-    }
-}
-
-fn int_sysctl_by_name<T: TryFrom<i32> + Default>(name: &[u8]) -> T {
-    let val = sysctl_by_name::<i32>(name);
-    T::try_from(val).unwrap_or_default()
-}
-
-fn sysctl_string(name: &[u8]) -> String {
-    let mut buf_len = 0;
-
-    // SAFETY: syscalls
-    let string_buf = unsafe {
-        // Retrieve the size of the string (including null terminator)
-        if libc::sysctlbyname(
-            name.as_ptr().cast(),
-            std::ptr::null_mut(),
-            &mut buf_len,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-            || buf_len <= 1
-        {
-            return String::new();
-        }
-
-        let mut buff = Vec::new();
-        buff.resize(buf_len, 0);
-
-        if libc::sysctlbyname(
-            name.as_ptr().cast(),
-            buff.as_mut_ptr().cast(),
-            &mut buf_len,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            return String::new();
-        }
-
-        buff.pop(); // remove null terminator
-        buff
-    };
-
-    String::from_utf8(string_buf).unwrap_or_default()
-}
-
 /// Retrieve the OS version information.
 ///
 /// Note that this only works on 10.13.4+, but that release is over 4 years old
@@ -75,7 +9,7 @@ fn sysctl_string(name: &[u8]) -> String {
 /// Note that Breakpad/Crashpad use a private API in CoreFoundation to do this
 /// via _CFCopySystemVersionDictionary->_kCFSystemVersionProductVersionKey
 fn os_version() -> (u32, u32, u32) {
-    let vers = sysctl_string(b"kern.osproductversion\0");
+    let vers = mach::sysctl_string(b"kern.osproductversion\0");
 
     let inner = || {
         let mut it = vers.split('.');
@@ -99,7 +33,7 @@ fn os_version() -> (u32, u32, u32) {
 /// its value versus the output of the `sw_vers -buildVersion` command
 #[inline]
 fn build_version() -> String {
-    sysctl_string(b"kern.osversion\0")
+    mach::sysctl_string(b"kern.osversion\0")
 }
 
 /// Retrieves more detailed information on the cpu.
@@ -111,8 +45,8 @@ fn read_cpu_info(cpu: &mut format::CPU_INFORMATION) {
         return;
     }
 
-    let mut md_feats = 1 << 2 /*PF_COMPARE_EXCHANGE_DOUBLE*/;
-    let features: u64 = sysctl_by_name(b"machdep.cpu.feature_bits\0");
+    let mut md_feats: u64 = 1 << 2 /*PF_COMPARE_EXCHANGE_DOUBLE*/;
+    let features: u64 = mach::sysctl_by_name(b"machdep.cpu.feature_bits\0");
 
     // Map the cpuid feature to its equivalent minidump cpu feature.
     // See https://en.wikipedia.org/wiki/CPUID for where the values for the
@@ -158,7 +92,7 @@ fn read_cpu_info(cpu: &mut format::CPU_INFORMATION) {
         28  /* PF_RDRAND_INSTRUCTION_AVAILABLE */
     );
 
-    let ext_features: u64 = sysctl_by_name(b"machdep.cpu.extfeature_bits\0");
+    let ext_features: u64 = mach::sysctl_by_name(b"machdep.cpu.extfeature_bits\0");
 
     map_feature!(
         ext_features,
@@ -171,7 +105,7 @@ fn read_cpu_info(cpu: &mut format::CPU_INFORMATION) {
         7   /* PF_3DNOW_INSTRUCTIONS_AVAILABLE */
     );
 
-    let leaf_features: u32 = sysctl_by_name(b"machdep.cpu.leaf7_feature_bits\0");
+    let leaf_features: u32 = mach::sysctl_by_name(b"machdep.cpu.leaf7_feature_bits\0");
     map_feature!(
         leaf_features,
         0,  /* F7_FSGSBASE */
@@ -187,18 +121,22 @@ fn read_cpu_info(cpu: &mut format::CPU_INFORMATION) {
 
     // minidump_common::format::OtherCpuInfo is just 2 adjacent u64's, we only
     // set the first, so just do a direct write to the bytes
-    cpu[..std::mem::size_of::<u64>()].copy_from_slice(md_feats.to_ne_bytes());
+    cpu.data[..std::mem::size_of::<u64>()].copy_from_slice(&md_feats.to_ne_bytes());
 }
 
-impl MiniDumpWriter {
-    fn write_system_info(&mut self, buffer: &mut DumpBuf) -> Result<MDRawDirectory, WriterError> {
+impl MinidumpWriter {
+    pub(crate) fn write_system_info(
+        &mut self,
+        buffer: &mut DumpBuf,
+        _dumper: &TaskDumper,
+    ) -> Result<MDRawDirectory, WriterError> {
         let mut info_section = MemoryWriter::<MDRawSystemInfo>::alloc(buffer)?;
         let dirent = MDRawDirectory {
             stream_type: MDStreamType::SystemInfoStream as u32,
             location: info_section.location(),
         };
 
-        let number_of_processors: u8 = int_sysctl_by_name(b"hw.ncpu\0");
+        let number_of_processors: u8 = mach::int_sysctl_by_name(b"hw.ncpu\0");
         // SAFETY: POD buffer
         let mut cpu: format::CPU_INFORMATION = unsafe { std::mem::zeroed() };
         read_cpu_info(&mut cpu);
@@ -210,15 +148,15 @@ impl MiniDumpWriter {
                 // machdep.cpu.family and machdep.cpu.model already take the extended family
                 // and model IDs into account. See 10.9.2 xnu-2422.90.20/osfmk/i386/cpuid.c
                 // cpuid_set_generic_info().
-                let processor_level: u16 = int_sysctl_by_name(b"machdep.cpu.family\0");
-                let model: u8 = int_sysctl_by_name(b"machdep.cpu.model\0");
-                let stepping: u8 = int_sysctl_by_name(b"machdep.cpu.stepping\0");
+                let processor_level: u16 = mach::int_sysctl_by_name(b"machdep.cpu.family\0");
+                let model: u8 = mach::int_sysctl_by_name(b"machdep.cpu.model\0");
+                let stepping: u8 = mach::int_sysctl_by_name(b"machdep.cpu.stepping\0");
 
                 let processor_revision: u16 = (model << 8) | stepping;
             } else if #[cfg(target_arch = "aarch64")] {
                 let processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM64;
 
-                let family: u32 = sysctl_by_name(b"hw.cpufamily\0");
+                let family: u32 = mach::sysctl_by_name(b"hw.cpufamily\0");
 
                 let processor_level = (family & 0xffff0000 >> 16) as u16;
                 let processor_revision = (family & 0x0000ffff)  as u16;
@@ -236,11 +174,10 @@ impl MiniDumpWriter {
             processor_level,
             processor_revision,
             number_of_processors,
-            product_type,
             cpu,
 
             // OS
-            platform_id: PlatformId::MacOs,
+            platform_id: PlatformId::MacOs as u32,
             product_type: 1, // VER_NT_WORKSTATION, could also be VER_NT_SERVER but...seriously?
             major_version,
             minor_version,

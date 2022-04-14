@@ -1,14 +1,15 @@
 use super::*;
 use format::{MiscInfoFlags, MINIDUMP_MISC_INFO_2 as MDRawMiscInfo};
-use std::ffi::c_void;
+use std::{ffi::c_void, time::Duration};
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct TimeValue {
     seconds: i32,
     microseconds: i32,
 }
 
-impl From<TimeValue> for std::time::Duration {
+impl From<TimeValue> for Duration {
     fn from(tv: TimeValue) -> Self {
         let mut seconds = tv.seconds as u64;
         let mut microseconds = tv.microseconds as u32;
@@ -19,7 +20,7 @@ impl From<TimeValue> for std::time::Duration {
             microseconds -= 1000000;
         }
 
-        std::time::Duration::new(seconds, microseconds * 1000)
+        Duration::new(seconds, microseconds * 1000)
     }
 }
 
@@ -34,20 +35,18 @@ struct MachTaskBasicInfo {
     suspend_count: i32,       // suspend count for task
 }
 
+impl mach::TaskInfo for MachTaskBasicInfo {
+    const FLAVOR: u32 = mach::task_info::MACH_TASK_BASIC_INFO;
+}
+
 #[repr(C)]
 struct TaskThreadsTimeInfo {
     user_time: TimeValue,   // total user run time for live threads
     system_time: TimeValue, // total system run time for live threads
 }
 
-extern "C" {
-    /// /usr/include/mach/mach_traps.h
-    ///
-    /// This seems to be marked as "obsolete" so might disappear at some point?
-    fn pid_for_task(
-        task: mach2::port::mach_port_name_t,
-        pid: *mut i32,
-    ) -> mach2::kern_return::kern_return_t;
+impl mach::TaskInfo for TaskThreadsTimeInfo {
+    const FLAVOR: u32 = mach::task_info::TASK_THREAD_TIMES_INFO;
 }
 
 #[repr(C)]
@@ -153,20 +152,34 @@ struct KInfoProc {
     kp_eproc: EProc,
 }
 
-impl MiniDumpWriter {
-    fn write_misc_info(&mut self, buffer: &mut DumpBuf) -> Result<MDRawDirectory, WriterError> {
+impl MinidumpWriter {
+    pub(crate) fn write_misc_info(
+        &mut self,
+        buffer: &mut DumpBuf,
+        dumper: &TaskDumper,
+    ) -> Result<MDRawDirectory, WriterError> {
         let mut info_section = MemoryWriter::<MDRawMiscInfo>::alloc(buffer)?;
         let dirent = MDRawDirectory {
             stream_type: MDStreamType::MiscInfoStream as u32,
             location: info_section.location(),
         };
 
+        let pid = dumper.pid_for_task()?;
+
         let mut misc_info = MDRawMiscInfo {
             size_of_info: std::mem::size_of::<MDRawMiscInfo>() as u32,
             flags1: MiscInfoFlags::MINIDUMP_MISC1_PROCESS_ID.bits()
                 | MiscInfoFlags::MINIDUMP_MISC1_PROCESS_TIMES.bits()
                 | MiscInfoFlags::MINIDUMP_MISC1_PROCESSOR_POWER_INFO.bits(),
-            ..Default::default()
+            process_id: pid as u32,
+            process_create_time: 0,
+            process_user_time: 0,
+            process_kernel_time: 0,
+            processor_max_mhz: 0,
+            processor_current_mhz: 0,
+            processor_mhz_limit: 0,
+            processor_max_idle_state: 0,
+            processor_current_idle_state: 0,
         };
 
         // Note that Breakpad is using `getrusage` to get process times, but that
@@ -176,83 +189,86 @@ impl MiniDumpWriter {
         // uses to get the information for the actual crashed process which is
         // far more interesting and relevant
         //
-        // SAFETY: syscalls
-        unsafe {
-            let mut pid = 0;
-            kern_ret(|| pid_for_task(self.crash_context.task, &mut pid))?;
+        // SAFETY: syscall
+        misc_info.process_create_time = unsafe {
+            let pid = dumper.pid_for_task()?;
 
-            let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
-            let mut kinfo_proc = std::mem::MaybeUninit::<KInfoProc>::zeroed();
-            let mut len = std::mem::size_of::<KInfoProc>();
-
-            if libc::sysctl(
-                mib.as_mut_ptr().cast(),
-                std::mem::size_of_val(&mib) as u32,
-                kinfo_proc.as_mut_ptr().cast(),
-                &mut len,
-            ) != 0
+            // Breakpad was using an old method to retrieve this, let's try the
+            // BSD method instead which is already implemented in libc
+            let mut proc_info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+            if libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                proc_info.as_mut_ptr().cast(),
+                size,
+            ) == size
             {
-                return Err(std::io::Error::last_os_error().into());
+                let proc_info = proc_info.assume_init();
+
+                proc_info.pbi_start_tvsec as u32
+            } else {
+                0
             }
 
-            let kinfo_proc = kinfo_proc.assume_init();
+            // let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+            // let mut kinfo_proc = std::mem::MaybeUninit::<KInfoProc>::zeroed();
+            // let mut len = std::mem::size_of::<KInfoProc>();
 
-            // This sysctl does not return an error if the pid was not found. 10.9.5
-            // xnu-2422.115.4/bsd/kern/kern_sysctl.c sysctl_prochandle() calls
-            // xnu-2422.115.4/bsd/kern/kern_proc.c proc_iterate(), which provides no
-            // indication of whether anything was done. To catch this, check that the PID
-            // has changed from the 0
-            if kinfo_proc.kp_proc.p_pid == 0 {
-                return Err();
-            }
+            // if libc::sysctl(
+            //     mib.as_mut_ptr().cast(),
+            //     std::mem::size_of_val(&mib) as u32,
+            //     kinfo_proc.as_mut_ptr().cast(),
+            //     &mut len,
+            // ) != 0
+            // {
+            //     return Err(std::io::Error::last_os_error().into());
+            // }
 
-            misc_info.process_create_time = kinfo_proc.kp_proc.starttime.tv_sec as u32;
+            // let kinfo_proc = kinfo_proc.assume_init();
 
-            // The basic task info keeps the timings for all of the terminated threads
-            let mut basic_info = std::mem::MaybeUninit::<MachTaskBasicInfo>::uninit();
-            let mut count = std::mem::size_of::<MachTaskBasicInfo>()
-                / std::mem::size_of::<mach2::vm_types::natural_t>();
+            // // This sysctl does not return an error if the pid was not found. 10.9.5
+            // // xnu-2422.115.4/bsd/kern/kern_sysctl.c sysctl_prochandle() calls
+            // // xnu-2422.115.4/bsd/kern/kern_proc.c proc_iterate(), which provides no
+            // // indication of whether anything was done. To catch this, check that the PID
+            // // actually matches the one that we requested
+            // if kinfo_proc.kp_proc.p_pid != pid {
+            //     0
+            // } else {
+            //     kinfo_proc.kp_proc.starttime.tv_sec as u32
+            // }
+        };
 
-            kern_ret(|| {
-                mach2::task::task_info(
-                    task,
-                    mach2::task_info::MACH_TASK_BASIC_INFO,
-                    basic_info.as_mut_ptr().cast(),
-                    &mut count,
-                )
-            })
-            .ok()?;
+        // The basic task info keeps the timings for all of the terminated threads
+        let basic_info = dumper.task_info::<MachTaskBasicInfo>().ok();
 
-            // THe thread times info keeps the timings for all of the living threads
-            let mut thread_times_info = std::mem::MaybeUninit::<TaskThreadsTimeInfo>::uninit();
-            let mut count = std::mem::size_of::<TaskThreadsTimeInfo>()
-                / std::mem::size_of::<mach2::vm_types::natural_t>();
+        // THe thread times info keeps the timings for all of the living threads
+        let thread_times_info = dumper.task_info::<TaskThreadsTimeInfo>().ok();
 
-            kern_ret(|| {
-                mach2::task::task_info(
-                    task,
-                    mach2::task_info::TASK_THREAD_TIMES_INFO,
-                    thread_times_info.as_mut_ptr().cast(),
-                    &mut count,
-                )
-            })
-            .ok()?;
+        let user_time = basic_info
+            .as_ref()
+            .map(|bi| Duration::from(bi.user_time))
+            .unwrap_or_default()
+            + thread_times_info
+                .as_ref()
+                .map(|tt| Duration::from(tt.user_time))
+                .unwrap_or_default();
+        let system_time = basic_info
+            .as_ref()
+            .map(|bi| Duration::from(bi.system_time))
+            .unwrap_or_default()
+            + thread_times_info
+                .as_ref()
+                .map(|tt| Duration::from(tt.system_time))
+                .unwrap_or_default();
 
-            let basic_info = basic_info.assume_init();
-            let thread_times_info = thread_times_info.assume_init();
-
-            let user_time: std::time::Duration =
-                basic_info.user_time.into() + thread_times_info.user_time.into();
-            let system_time: std::time::Duration =
-                basic_info.system_time.into() + thread_times_info.system_time.into();
-
-            misc_info.process_user_time = user_time.as_secs() as u32;
-            misc_info.process_kernel_time = system_time.as_secs() as u32;
-        }
+        misc_info.process_user_time = user_time.as_secs() as u32;
+        misc_info.process_kernel_time = system_time.as_secs() as u32;
 
         // Note that neither of these two keys are present on aarch64, at least atm
-        let max: u64 = sysctl_by_name(b"hw.cpufrequency_max\0");
-        let freq: u64 = sysctl_by_name(b"hw.cpufrequency\0");
+        let max: u64 = mach::sysctl_by_name(b"hw.cpufrequency_max\0");
+        let freq: u64 = mach::sysctl_by_name(b"hw.cpufrequency\0");
 
         let max = (max / 1000 * 1000) as u32;
         let current = (freq / 1000 * 1000) as u32;
@@ -261,7 +277,7 @@ impl MiniDumpWriter {
         misc_info.processor_mhz_limit = max;
         misc_info.processor_current_mhz = current;
 
-        info_section.set_value(misc_info);
+        info_section.set_value(buffer, misc_info)?;
 
         Ok(dirent)
     }

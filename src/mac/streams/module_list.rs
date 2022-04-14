@@ -1,7 +1,7 @@
 use super::*;
 
-impl MiniDumpWriter {
-    fn write_module_list(
+impl MinidumpWriter {
+    pub(crate) fn write_module_list(
         &mut self,
         buffer: &mut DumpBuf,
         dumper: &TaskDumper,
@@ -9,7 +9,7 @@ impl MiniDumpWriter {
         // The list of modules is pretty critical information, but there could
         // still be useful information in the minidump without them if we can't
         // retrieve them for some reason
-        let modules = self.read_loaded_modules(dumper).unwrap_or_default();
+        let modules = self.read_loaded_modules(buffer, dumper).unwrap_or_default();
 
         let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, modules.len() as u32)?;
 
@@ -43,7 +43,7 @@ impl MiniDumpWriter {
         let mut has_main_executable = false;
 
         for image in images {
-            if let Ok((module, is_main_executable)) = self.read_module(image) {
+            if let Ok((module, is_main_executable)) = self.read_module(image, buf, dumper) {
                 // We want to keep the modules sorted by their load address except
                 // in the case of the main executable image which we want to put
                 // first as it is most likely the culprit, or at least generally
@@ -58,9 +58,9 @@ impl MiniDumpWriter {
         }
 
         if !has_main_executable {
-            Err(WriterError::NoExecutableImage)
+            Err(TaskDumpError::NoExecutableImage.into())
         } else {
-            Ok(images)
+            Ok(modules)
         }
     }
 
@@ -81,14 +81,14 @@ impl MiniDumpWriter {
         let mut uuid = None;
 
         {
-            let load_commands = dumper.get_load_commands(&image)?;
+            let load_commands = dumper.read_load_commands(&image)?;
 
             for lc in load_commands.iter() {
                 match lc {
                     mach::LoadCommand::Segment(seg) if sizes.is_none() => {
-                        if seg.segment_name[..7] == b"__TEXT\0" {
+                        if &seg.segment_name[..7] == b"__TEXT\0" {
                             let slide = if seg.file_off == 0 && seg.file_size != 0 {
-                                image.load_address - seg.vm_addr
+                                (image.load_address - seg.vm_addr) as isize
                             } else {
                                 0
                             };
@@ -101,21 +101,28 @@ impl MiniDumpWriter {
                         }
                     }
                     mach::LoadCommand::Dylib(dylib) if version.is_none() => {
-                        version = Some(dylib.current_version);
+                        version = Some(dylib.dylib.current_version);
                     }
                     mach::LoadCommand::Uuid(img_id) if uuid.is_none() => {
                         uuid = Some(img_id.uuid);
                     }
+                    _ => {}
                 }
 
-                if image_sizes.is_some() && image_version.is_some() && image_uuid.is_some() {
+                if sizes.is_some() && version.is_some() && uuid.is_some() {
                     break;
                 }
             }
         }
 
-        let image_sizes = image_sizes.ok_or_else(|| WriterError::InvalidMachHeader)?;
-        let uuid = image_uuid.ok_or_else(|| WriterError::UnknownUuid)?;
+        let sizes = sizes.ok_or(TaskDumpError::MissingLoadCommand {
+            name: "LC_SEGMENT_64",
+            id: mach::LC_SEGMENT_64,
+        })?;
+        let uuid = uuid.ok_or(TaskDumpError::MissingLoadCommand {
+            name: "LC_UUID",
+            id: mach::LC_UUID,
+        })?;
 
         let file_path = if image.file_path != 0 {
             dumper.read_string(image.file_path)?.unwrap_or_default()
@@ -126,15 +133,15 @@ impl MiniDumpWriter {
         let module_name = write_string_to_location(buf, &file_path)?;
 
         let mut raw_module = MDRawModule {
-            base_of_image: image_sizes.vm_addr + image_sizes.slide,
-            size_of_image: image_sizes.vm_size as u32,
+            base_of_image: (sizes.vm_addr as isize + sizes.slide) as u64,
+            size_of_image: sizes.vm_size as u32,
             module_name_rva: module_name.rva,
             ..Default::default()
         };
 
         // Version info is not available for the main executable image since
         // it doesn't issue a LC_ID_DYLIB load command
-        if let Some(version) = &image_version {
+        if let Some(version) = &version {
             raw_module.version_info.signature = format::VS_FFI_SIGNATURE;
             raw_module.version_info.struct_version = format::VS_FFI_STRUCVERSION;
 
@@ -167,7 +174,7 @@ impl MiniDumpWriter {
         let cv = MemoryWriter::alloc_with_val(
             buf,
             CvInfoPdb {
-                cv_signature: format::CvSignature::Pdb70,
+                cv_signature: format::CvSignature::Pdb70 as u32,
                 age: 0,
                 signature: uuid.into(),
             },
@@ -176,13 +183,13 @@ impl MiniDumpWriter {
         // Note that we don't use write_string_to_location here as the module
         // name is a simple 8-bit string, not 16-bit like most other strings
         // in the minidump, and is directly part of the record itself, not an rva
-        buf.write_all(module_name.as_bytes())?;
-        buf.write_all(&[0])?; // null terminator
+        buf.write_all(module_name.as_bytes());
+        buf.write_all(&[0]); // null terminator
 
         let mut cv_location = cv.location();
-        cv_location.size += module_name.len() as u32 + 1;
+        cv_location.data_size += module_name.len() as u32 + 1;
         raw_module.cv_record = cv_location;
 
-        Ok((raw_module, image_version.is_none()))
+        Ok((raw_module, version.is_none()))
     }
 }
