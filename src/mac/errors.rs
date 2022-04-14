@@ -1,22 +1,11 @@
 use thiserror::Error;
 
-use mach2::kern_return::kern_return_t;
-
 #[derive(Debug, Error)]
 pub enum WriterError {
-    #[error("kernel error ({})", _0)]
-    Kernel(kern_return_t),
-    #[error("detected an invalid mach image header")]
-    InvalidMachHeader,
-}
-
-#[inline]
-pub(crate) fn kern_ret(func: impl FnOnce() -> kern_return_t) -> Result<(), WriterError> {
-    let res = func();
-
-    if res == KERN_SUCCESS {
-        Ok(())
-    } else {
-        Err(WriterError::Kerne(res))
-    }
+    #[error("unable to find a UUID for a module")]
+    UnknownUuid,
+    #[error("unable to find the main executable image for the process")]
+    NoExecutableImage,
+    #[error(transparent)]
+    TaskDumpError(#[from] crate::mac::task_dumper::TaskDumpError),
 }

@@ -1,66 +1,11 @@
 use super::*;
 
-// From /usr/include/mach/machine/thread_state.h
-const THREAD_STATE_MAX: usize = 1296;
-
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86_64")] {
-        /// x86_THREAD_STATE64 in /usr/include/mach/i386/thread_status.h
-        const THREAD_STATE_FLAVOR: u32 = 4;
-    } else if #[cfg(target_arch = "aarch64")] {
-        /// ARM_THREAD_STATE64 in /usr/include/mach/arm/thread_status.h
-        const THREAD_STATE_FLAVOR: u32 = 6;
-
-        // Missing from mach2 atm
-        // _STRUCT_ARM_THREAD_STATE64 from /usr/include/mach/arm/_structs.h
-        #[repr(C)]
-        struct Arm64ThreadState {
-            x: [u64; 29],
-            fp: u64,
-            lr: u64,
-            sp: u64,
-            pc: u64,
-            cpsr: u32,
-            __pad: u32,
-        }
-    }
-}
-
-struct ThreadState {
-    state: [u32; THREAD_STATE_MAX],
-    state_size: u32,
-}
-
-impl Default for ThreadState {
-    fn default() -> Self {
-        Self {
-            state: [0u32; THREAD_STATE_MAX],
-            state_size: THREAD_STATE_MAX * std::mem::size_of::<u32>() as u32,
-        }
-    }
-}
-
-impl ThreadState {
-    pub fn pc(&self) -> u64 {
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "x86_64")] {
-                let x86_64_state: &mach2::structs::x86_thread_state64_t = &*(thread_state.state.as_ptr().cast());
-                x86_64_state.__pc
-            } else if #[cfg(target_arch = "aarch64")] {
-                let aarch64_state: &Arm64ThreadState = &*(thread_state.state.as_ptr().cast());
-                aarch64_state.pc
-            }
-        }
-    }
-}
-
-pub(crate) struct VMRegionInfo {
-    pub(crate) info: mach2::vm_region::vm_region_submap_info_64,
-    pub(crate) range: std::ops::Range<u64>,
-}
-
 impl MinidumpWriter {
-    fn write_thread_list(&mut self, buffer: &mut DumpBuf) -> Result<MDRawDirectory, WriterError> {
+    fn write_thread_list(
+        &mut self,
+        buffer: &mut DumpBuf,
+        dumper: &TaskDumper,
+    ) -> Result<MDRawDirectory, WriterError> {
         // Retrieve the list of threads from the task that crashed.
         // SAFETY: syscall
         let mut threads = std::ptr::null_mut();
@@ -108,40 +53,13 @@ impl MinidumpWriter {
 
         let thread_state = Self::get_thread_state(tid)?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "x86_64")] {
-                let x86_64_state: &mach2::structs::x86_thread_state64_t = &*(thread_state.state.as_ptr().cast());
-
-                self.write_stack_from_start_address(x86_64_state.__rsp, buffer, &mut thread)?;
-            } else if #[cfg(target_arch = "aarch64")] {
-                let aarch64_state: &Arm64ThreadState = &*(thread_state.state.as_ptr().cast());
-                self.write_stack_from_start_address(aarch64_state.sp, buffer, &mut thread)?;
-            } else {
-                compile_error!("unsupported target arch");
-            }
-        }
+        self.write_stack_from_start_address(thread_state.sp(), buffer, &mut thread)?;
 
         let mut cpu: RawContextCPU = Default::default();
         Self::fill_cpu_context(thread_state, &mut cpu);
         let cpu_section = MemoryWriter::alloc_with_val(buffer, cpu)?;
         thread.thread_context = cpu_section.location();
         Ok(thread)
-    }
-
-    fn get_thread_state(tid: u32) -> Result<ThreadState, WriterError> {
-        let mut thread_state = ThreadState::default();
-
-        // SAFETY: syscall
-        kern_ret(|| unsafe {
-            mach2::thread_act::thread_get_state(
-                tid,
-                THREAD_STATE_FLAVOR,
-                thread_state.state.as_mut_ptr(),
-                &mut thread_state.state_size,
-            )
-        })?;
-
-        Ok(thread_state)
     }
 
     fn write_stack_from_start_address(
@@ -231,46 +149,12 @@ impl MinidumpWriter {
         stack_region_base + stack_region_size - start_addr
     }
 
-    fn read_task_memory(&self, address: u64, length: usize) -> Result<Vec<u8>, WriterError> {
-        let sys_page_size = libc::getpagesize();
-
-        // use the negative of the page size for the mask to find the page address
-        let page_address = address & (-sys_page_size);
-        let last_page_address = (address + length + (sys_page_size - 1)) & (-sys_page_size);
-
-        let page_size = last_page_address - page_address;
-        let mut local_start = std::ptr::null_mut();
-        let mut local_length = 0;
-
-        kern_ret(|| unsafe {
-            mach2::vm::mach_vm_read(
-                self.crash_context.task,
-                page_address,
-                page_size,
-                &mut local_start,
-                &mut local_length,
-            )
-        })?;
-
-        let mut buffer = Vec::with_capacity(length);
-
-        let task_buffer =
-            std::slice::from_raw_parts(local_start.offset(address - page_address), length);
-        buffer.extend_from_slice(task_buffer);
-
-        // Don't worry about the return here, if something goes wrong there's probably
-        // not much we can do about, and we have what we want anyways
-        mach2::vm::mach_vm_deallocate(mach2::traps::mach_task_self(), local_start, local_length);
-
-        Ok(buffer)
-    }
-
     fn fill_cpu_context(thread_state: &ThreadState, out: &mut RawContextCPU) {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
                 out.context_flags = format::ContextFlagsCpu::CONTEXT_AMD64.bits();
 
-                let ts: &Arm64ThreadState = &*(thread_state.state.as_ptr().cast());
+                let ts = thread_state.as_ref();
 
                 out.rax = ts.__rax;
                 out.rbx = ts.__rbx;
@@ -301,7 +185,7 @@ impl MinidumpWriter {
                 // This is kind of a lie as we don't actually include the full float state..?
                 out.context_flags = format::ContextFlagsArm64Old::CONTEXT_ARM64_OLD_FULL.bits() as u64;
 
-                let ts: &Arm64ThreadState = &*(thread_state.state.as_ptr().cast());
+                let ts = thread_state.as_ref();
 
                 out.cpsr = ts.cpsr;
                 out.iregs[..28].copy_from_slice(&ts.x[..28]);
@@ -313,39 +197,5 @@ impl MinidumpWriter {
                 compile_error!("unsupported target arch");
             }
         }
-    }
-
-    fn get_vm_region(&self, addr: u64) -> Result<VMRegionInfo, WriterError> {
-        let mut region_base = addr;
-        let mut region_size = 0;
-        let mut nesting_level = 0;
-        let mut region_info = 0;
-        let mut submap_info = std::mem::MaybeUninit::<vm_region_submap_info_64>::uninit();
-
-        // mach/vm_region.h
-        const VM_REGION_SUBMAP_INFO_COUNT_64: u32 =
-            (std::mem::size_of::<vm_region_submap_info_data_64_t>()
-                / std::mem::size_of::<mach2::natural_t>()) as u32;
-
-        let mut info_count = VM_REGION_SUBMAP_INFO_COUNT_64;
-
-        kern_ret(||
-            // SAFETY: syscall
-            unsafe {
-                mach2::vm::mach_vm_region_recurse(
-                self.crash_context.task,
-                &mut region_base,
-                &mut region_size,
-                &mut nesting_level,
-                submap_info.as_mut_ptr().cast(),
-                &mut info_count,
-            )
-        })?;
-
-        Ok(VMRegionInfo {
-            // SAFETY: this will be valid if the syscall succeeded
-            info: unsafe { submap_info.assume_init() },
-            range: region_base..region_base + region_base,
-        })
     }
 }

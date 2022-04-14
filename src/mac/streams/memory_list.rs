@@ -1,29 +1,18 @@
 use super::*;
 
 impl MiniDumpWriter {
-    fn write_memory_list(&mut self, buffer: &mut DumpBuf) -> Result<MDRawDirectory, WriterError> {
+    fn write_memory_list(
+        &mut self,
+        buffer: &mut DumpBuf,
+        dumper: &TaskDumper,
+    ) -> Result<MDRawDirectory, WriterError> {
         // Include some memory around the instruction pointer if the crash was
         // due to an exception
         const IP_MEM_SIZE: usize = 256;
 
         if self.crash_context.exc_info.is_some() {
-            let mut thread_state = thread_list_stream::ThreadState::default();
-            // SAFETY: syscall
-            if unsafe {
-                mach2::thread_act::thread_get_state(
-                    tid,
-                    THREAD_STATE_FLAVOR,
-                    thread_state.state.as_mut_ptr(),
-                    &mut thread_state.state_size,
-                )
-            } == mach2::kern_return::KERN_SUCCESS
-            {
-            } else {
-                None
-            }
-
             let get_ip_block = |task, tid| -> Option<std::ops::Range> {
-                let thread_state = Self::get_thread_state(tid).ok()?;
+                let thread_state = dumper.get_thread_state(tid).ok()?;
 
                 let ip = thread_state.pc();
 
@@ -46,7 +35,7 @@ impl MiniDumpWriter {
 
             if let Some(ip_range) = get_ip_block() {
                 let size = ip_range.end - ip_range.start;
-                let stack_buffer = self.read_task_memory(ip_range.start as _, size)?;
+                let stack_buffer = dumper.read_task_memory(ip_range.start as _, size)?;
                 let ip_location = MDLocationDescriptor {
                     data_size: size as u32,
                     rva: buffer.position() as u32,

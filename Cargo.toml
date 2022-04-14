@@ -47,3 +47,7 @@ mach2 = "0.4"
 
 [dev-dependencies]
 minidump = "0.10"
+
+[patch.crates-io]
+minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "master" }
+crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "macos" }
