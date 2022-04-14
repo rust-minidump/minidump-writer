@@ -1,3 +1,4 @@
+use crate::dir_section::FileWriterError;
 use crate::maps_reader::MappingInfo;
 use crate::mem_writer::MemoryWriterError;
 use crate::thread_info::Pid;
@@ -191,14 +192,6 @@ pub enum SectionDsoDebugError {
     CopyFromProcessError(#[from] DumperError),
     #[error("Failed to copy memory from process")]
     FromUTF8Error(#[from] std::string::FromUtf8Error),
-}
-
-#[derive(Debug, Error)]
-pub enum FileWriterError {
-    #[error("IO error")]
-    IOError(#[from] std::io::Error),
-    #[error("Failed to write to memory")]
-    MemoryWriterError(#[from] MemoryWriterError),
 }
 
 #[derive(Debug, Error)]

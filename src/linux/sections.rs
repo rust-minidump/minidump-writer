@@ -7,9 +7,10 @@ pub mod thread_list_stream;
 pub mod thread_names_stream;
 
 use crate::{
+    dir_section::DumpBuf,
     errors::{self},
     linux::{
-        minidump_writer::{self, DumpBuf, MinidumpWriter},
+        minidump_writer::{self, MinidumpWriter},
         ptrace_dumper::PtraceDumper,
     },
     mem_writer::*,
