@@ -351,6 +351,12 @@ mod mac {
             let task = mach2::traps::mach_task_self();
             let thread = mach2::mach_init::mach_thread_self();
 
+            // Busy loop for 1 second just so we accrue user thread time
+            let start = std::time::Instant::now();
+            while (std::time::Instant::now() - start).as_secs() < 1 {
+                eprint!(".");
+            }
+
             println!("{task} {thread}");
 
             // Wait until we're killed
