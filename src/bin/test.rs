@@ -351,15 +351,24 @@ mod mac {
             let task = mach2::traps::mach_task_self();
             let thread = mach2::mach_init::mach_thread_self();
 
-            // Busy loop for 1 second just so we accrue user thread time
-            std::thread::spawn(move || {
+            fn count(seconds: u64) {
+                // Busy loop for 1 second just so we accrue user thread time
                 let start = std::time::Instant::now();
-                while (std::time::Instant::now() - start).as_secs() < 1 {
-                    eprint!(".");
+                let mut counter = 0;
+                while (std::time::Instant::now() - start).as_secs() < seconds {
+                    counter += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
-            })
-            .join()
-            .unwrap();
+
+                eprintln!("{:?} counted to {}", std::thread::current().id(), counter);
+            }
+
+            // Start some threads
+            let threads = (0..20).map(|_| std::thread::spawn(move || count(1)));
+
+            for thread in threads {
+                thread.join().unwrap();
+            }
 
             println!("{task} {thread}");
 
