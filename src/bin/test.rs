@@ -344,7 +344,6 @@ mod windows {
 #[cfg(target_os = "macos")]
 mod mac {
     use super::*;
-    use std::mem;
 
     #[inline(never)]
     pub(super) fn real_main(_args: Vec<String>) -> Result<()> {
