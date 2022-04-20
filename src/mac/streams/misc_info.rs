@@ -42,36 +42,6 @@ impl mach::TaskInfo for MachTaskBasicInfo {
 
 #[repr(C, packed(4))]
 #[derive(Debug)]
-struct TaskBasicInfo64 {
-    suspend_count: i32,     // suspend count for task
-    virtual_size: u64,      // virtual memory size in bytes
-    resident_size: u64,     // resident memory size in bytes
-    user_time: TimeValue,   // total user run time for terminated threads
-    system_time: TimeValue, // total system run time for terminated threads
-    policy: i32,            // default policy for new threads
-}
-
-impl mach::TaskInfo for TaskBasicInfo64 {
-    const FLAVOR: u32 = mach::task_info::TASK_BASIC_INFO_64;
-}
-
-#[repr(C, packed(4))]
-#[derive(Debug)]
-struct TaskBasicInfo {
-    suspend_count: i32,     // suspend count for task
-    virtual_size: u64,      // virtual memory size in bytes
-    resident_size: u64,     // resident memory size in bytes
-    user_time: TimeValue,   // total user run time for terminated threads
-    system_time: TimeValue, // total system run time for terminated threads
-    policy: i32,            // default policy for new threads
-}
-
-impl mach::TaskInfo for TaskBasicInfo {
-    const FLAVOR: u32 = 5; //mach::task_info::TASK_BASIC_INFO;
-}
-
-#[repr(C, packed(4))]
-#[derive(Debug)]
 struct TaskThreadsTimeInfo {
     user_time: TimeValue,   // total user run time for live threads
     system_time: TimeValue, // total system run time for live threads
@@ -111,16 +81,10 @@ impl MinidumpWriter {
             processor_current_idle_state: 0,
         };
 
-        // Note that Breakpad is using `getrusage` to get process times, but that
-        // can only get resource usage for the current process and/or children,
-        // but since we're (most likely) running in a different process than the
-        // one that has crashed, we instead use `proc_pidinfo` which allows us to
-        // to retrieve the process time of the actual crashed process. Note that
-        // this is _also_ different from how Crashpad retrieves the process times,
-        // it uses sysctl with `CTL_KERN, KERN_PROC, KERN_PROC_PID`, however
-        // the structs that are filled out by that for this info are not available
-        // in libc, and frankly `proc_pidinfo` was better documented (well, relatively,
-        // all Apple documentation is terrible)
+        // Note that both Breakpad and Crashpad use `sysctl CTL_KERN, KERN_PROC, KERN_PROC_PID`
+        // to retrieve the process start time, but none of the structures that
+        // are filled in by that call are in libc at the moment, and `proc_pidinfo`
+        // seems to work just fine, so using that instead.
         //
         // SAFETY: syscall
         misc_info.process_create_time = unsafe {
@@ -146,10 +110,15 @@ impl MinidumpWriter {
             }
         };
 
+        // Note that Breakpad is using `getrusage` to retrieve this information,
+        // however that is wrong, as it can only retrieve the process usage information
+        // for the current or children processes, not an external process, so
+        // we use the Crashpad method, which is itself based off of the XNU
+        // method of retrieving the process times
+        // https://github.com/apple/darwin-xnu/blob/2ff845c2e033bd0ff64b5b6aa6063a1f8f65aa32/bsd/kern/kern_resource.c#L1215
+
         // The basic task info keeps the timings for all of the terminated threads
         let basic_info = dbg!(dumper.task_info::<MachTaskBasicInfo>()).ok();
-        let _basic_info64 = dbg!(dumper.task_info::<TaskBasicInfo64>()).ok();
-        let _task_basic_info = dbg!(dumper.task_info::<TaskBasicInfo>()).ok();
 
         // THe thread times info keeps the timings for all of the living threads
         let thread_times_info = dbg!(dumper.task_info::<TaskThreadsTimeInfo>()).ok();
