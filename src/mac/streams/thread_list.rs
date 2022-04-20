@@ -189,9 +189,9 @@ impl MinidumpWriter {
                 // specifies 32 bits for the flags register, we can truncate safely
                 // with no loss.
                 out.eflags = ts.__rflags as _;
-                out.cs = ts.__cs;
-                out.fs = ts.__fs;
-                out.gs = ts.__gs;
+                out.cs = ts.__cs as u16;
+                out.fs = ts.__fs as u16;
+                out.gs = ts.__gs as u16;
             } else if #[cfg(target_arch = "aarch64")] {
                 // This is kind of a lie as we don't actually include the full float state..?
                 out.context_flags = format::ContextFlagsArm64Old::CONTEXT_ARM64_OLD_FULL.bits() as u64;

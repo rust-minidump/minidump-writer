@@ -152,7 +152,7 @@ impl MinidumpWriter {
                 let model: u8 = mach::int_sysctl_by_name(b"machdep.cpu.model\0");
                 let stepping: u8 = mach::int_sysctl_by_name(b"machdep.cpu.stepping\0");
 
-                let processor_revision: u16 = (model << 8) | stepping;
+                let processor_revision = ((model as u16) << 8) | stepping as u16;
             } else if #[cfg(target_arch = "aarch64")] {
                 let processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM64;
 

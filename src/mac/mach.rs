@@ -254,7 +254,7 @@ impl ThreadState {
     pub fn pc(&self) -> u64 {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                self.arch_state().__pc
+                self.arch_state().__rip
             } else if #[cfg(target_arch = "aarch64")] {
                 self.arch_state().pc
             }
@@ -266,7 +266,7 @@ impl ThreadState {
     pub fn sp(&self) -> u64 {
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "x86_64")] {
-                self.arch_state().__sp
+                self.arch_state().__rsp
             } else if #[cfg(target_arch = "aarch64")] {
                 self.arch_state().sp
             }
