@@ -341,6 +341,27 @@ mod windows {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::*;
+    use std::mem;
+
+    #[inline(never)]
+    pub(super) fn real_main(_args: Vec<String>) -> Result<()> {
+        unsafe {
+            let task = mach2::traps::mach_task_self();
+            let thread = mach2::mach_init::mach_thread_self();
+
+            println!("{task} {thread}");
+
+            // Wait until we're killed
+            loop {
+                std::thread::park();
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
 
@@ -349,6 +370,8 @@ fn main() -> Result<()> {
             linux::real_main(args)
         } else if #[cfg(target_os = "windows")] {
             windows::real_main(args)
+        } else if #[cfg(target_os = "macos")] {
+            mac::real_main(args)
         } else {
             unimplemented!();
         }
