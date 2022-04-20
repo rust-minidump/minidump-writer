@@ -3,7 +3,7 @@ use format::{MiscInfoFlags, MINIDUMP_MISC_INFO_2 as MDRawMiscInfo};
 use std::{ffi::c_void, time::Duration};
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct TimeValue {
     seconds: i32,
     microseconds: i32,
@@ -25,6 +25,7 @@ impl From<TimeValue> for Duration {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct MachTaskBasicInfo {
     virtual_size: usize,      // virtual memory size in bytes
     resident_size: usize,     // resident memory size in bytes
@@ -40,6 +41,7 @@ impl mach::TaskInfo for MachTaskBasicInfo {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct TaskThreadsTimeInfo {
     user_time: TimeValue,   // total user run time for live threads
     system_time: TimeValue, // total system run time for live threads
@@ -92,34 +94,33 @@ impl MinidumpWriter {
         //
         // SAFETY: syscall
         misc_info.process_create_time = unsafe {
-            let pid = dbg!(dumper.pid_for_task())?;
+            let pid = dumper.pid_for_task()?;
 
             // Breakpad was using an old method to retrieve this, let's try the
             // BSD method instead which is already implemented in libc
             let mut proc_info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
             let size = dbg!(std::mem::size_of::<libc::proc_bsdinfo>() as i32);
-            if dbg!(
-                libc::proc_pidinfo(
-                    pid,
-                    libc::PROC_PIDTBSDINFO,
-                    0,
-                    proc_info.as_mut_ptr().cast(),
-                    size,
-                ) == size
-            ) {
+            if libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                proc_info.as_mut_ptr().cast(),
+                size,
+            ) == size
+            {
                 let proc_info = proc_info.assume_init();
 
-                dbg!(proc_info.pbi_start_tvsec) as u32
+                proc_info.pbi_start_tvsec as u32
             } else {
                 0
             }
         };
 
         // The basic task info keeps the timings for all of the terminated threads
-        let basic_info = dumper.task_info::<MachTaskBasicInfo>().ok();
+        let basic_info = dbg!(dumper.task_info::<MachTaskBasicInfo>()).ok();
 
         // THe thread times info keeps the timings for all of the living threads
-        let thread_times_info = dumper.task_info::<TaskThreadsTimeInfo>().ok();
+        let thread_times_info = dbg!(dumper.task_info::<TaskThreadsTimeInfo>()).ok();
 
         let user_time = basic_info
             .as_ref()
