@@ -36,7 +36,7 @@ struct MachTaskBasicInfo {
     suspend_count: i32,     // suspend count for task
 }
 
-impl mach::TaskInfo for TaskBasicInfo64 {
+impl mach::TaskInfo for MachTaskBasicInfo {
     const FLAVOR: u32 = mach::task_info::MACH_TASK_BASIC_INFO;
 }
 
@@ -51,7 +51,7 @@ struct TaskBasicInfo64 {
     policy: i32,            // default policy for new threads
 }
 
-impl mach::TaskInfo for MachTaskBasicInfo {
+impl mach::TaskInfo for TaskBasicInfo64 {
     const FLAVOR: u32 = mach::task_info::TASK_BASIC_INFO_64;
 }
 
@@ -70,7 +70,7 @@ impl mach::TaskInfo for TaskBasicInfo {
     const FLAVOR: u32 = 5; //mach::task_info::TASK_BASIC_INFO;
 }
 
-#[repr(C)]
+#[repr(C, packed(4))]
 #[derive(Debug)]
 struct TaskThreadsTimeInfo {
     user_time: TimeValue,   // total user run time for live threads
