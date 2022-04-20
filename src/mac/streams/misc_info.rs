@@ -92,23 +92,24 @@ impl MinidumpWriter {
         //
         // SAFETY: syscall
         misc_info.process_create_time = unsafe {
-            let pid = dumper.pid_for_task()?;
+            let pid = dbg!(dumper.pid_for_task())?;
 
             // Breakpad was using an old method to retrieve this, let's try the
             // BSD method instead which is already implemented in libc
             let mut proc_info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
-            let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
-            if libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                proc_info.as_mut_ptr().cast(),
-                size,
-            ) == size
-            {
+            let size = dbg!(std::mem::size_of::<libc::proc_bsdinfo>() as i32);
+            if dbg!(
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    proc_info.as_mut_ptr().cast(),
+                    size,
+                ) == size
+            ) {
                 let proc_info = proc_info.assume_init();
 
-                proc_info.pbi_start_tvsec as u32
+                dbg!(proc_info.pbi_start_tvsec) as u32
             } else {
                 0
             }
