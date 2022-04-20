@@ -49,109 +49,6 @@ impl mach::TaskInfo for TaskThreadsTimeInfo {
     const FLAVOR: u32 = mach::task_info::TASK_THREAD_TIMES_INFO;
 }
 
-#[repr(C)]
-struct VmSpace {
-    dummy: i32,
-    dummy2: *const u8,
-    dummy3: [i32; 5],
-    dummy4: [*const u8; 3],
-}
-
-#[repr(C)]
-struct ExternProc {
-    starttime: libc::timeval, // process start time, actually a union, but that's an implementation detail
-    vmspace: *const VmSpace,  // Address space
-    sigacts: *const u8,       // Signal actions, state (PROC ONLY)
-    flag: i32,                // P_* flags
-    stat: i8,                 // S* process status
-    pid: libc::pid_t,         // pid
-    oppid: libc::pid_t,       // save parent pid during ptrace
-    dupfd: i32,               // sideways return value from fdopen
-    /* Mach related  */
-    user_stack: *const u8,      // where user stack was allocated,
-    exit_thread: *const c_void, // Which thread is exiting?
-    debugger: i32,              // allow to debug
-    sigwait: i32,               // indication to suspend
-    /* scheduling */
-    estcpu: u32,                // time averaged value of cpticks
-    cpticks: i32,               // tick of cpu time
-    pctcpu: u32,                // %cpu for this process during swtime
-    wchan: *const c_void,       // sleep address
-    wmesg: *const i8,           // reason for sleep
-    swtime: u32,                // time swapped in or out
-    slptime: u32,               // time since last blocked
-    realtimer: libc::itimerval, // alarm timer
-    rtime: libc::timeval,       // real time
-    uticks: u64,                // statclock hits in user mode
-    sticks: u64,                // statclock hits in system mode
-    iticks: u64,                // statclock hits processing intr
-    traceflag: i32,             // kernel trace points
-    tracep: *const c_void,      // trace to vnode
-    siglist: i32,               // DEPRECATED
-    textvp: *const c_void,      // vnode of executable
-    holdcnt: i32,               // if non-zero, don't swap
-    sigmask: libc::sigset_t,    // DEPRECATED
-    sigignore: libc::sigset_t,  // signals being ignored
-    sigcatch: libc::sigset_t,   // signals being caught by user
-    priority: u8,               // process priority
-    usrpri: u8,                 // user-priority based on cpu and nice
-    nice: i8,                   // process "nice" value
-    comm: [i8; 16 /*MAXCOMLEN*/ + 1],
-    pgrp: *const c_void, // pointer to process group
-    addr: *const c_void, // kernel virtual addr of u-area (PROC ONLY)
-    xstat: u16,          // exit status for wait; also stop signal
-    acflag: u16,         // accounting flags
-    ru: *const c_void,   // exit information
-}
-
-#[repr(C)]
-struct Pcred {
-    pc_lock: [i8; 72],       // opaque content
-    pc_ucred: *const c_void, // current credentials
-    ruid: libc::uid_t,       // real user id
-    svuid: libc::uid_t,      // saved effective user id
-    rgid: libc::gid_t,       // real group id
-    svgid: libc::gid_t,      // saved effective group id
-    refcnt: i32,             // number of references
-}
-
-#[repr(C)]
-struct Ucred {
-    refcnt: i32,      // reference count
-    uid: libc::uid_t, // effective user id
-    ngroups: i16,     // number of groups
-    groups: [libc::gid_t; 16],
-}
-
-#[repr(C)]
-struct EProc {
-    paddr: *const c_void, // address of proc
-    sess: *const c_void,  // session pointer
-    pcred: Pcred,         // process credentials
-    ucred: Ucred,         // current credentials
-    vm: VmSpace,          // address space
-    ppid: libc::pid_t,    // parent process id
-    pgid: libc::gid_t,    // process group id
-    jobc: i16,            // job control counter
-    tdev: i32,            // controlling tty dev
-    tpgid: libc::gid_t,   // tty process group id
-    tsess: *const c_void, // tty session pointer
-    wmesg: [i8; 8],       // wchan message
-    xsize: i32,           // text size
-    xrssize: i16,         // text rss
-    xccount: i16,         // text references
-    xswrss: i16,
-    flag: i32,
-    login: [i8; 12], // short setlogin() name
-    spare: [i32; 4],
-}
-
-#[repr(C)]
-struct KInfoProc {
-    kp_proc: ExternProc,
-    kp_eproc: EProc,
-}
-
 impl MinidumpWriter {
     pub(crate) fn write_misc_info(
         &mut self,
@@ -185,9 +82,13 @@ impl MinidumpWriter {
         // Note that Breakpad is using `getrusage` to get process times, but that
         // can only get resource usage for the current process and/or children,
         // but since we're (most likely) running in a different process than the
-        // one that has crashed, we instead use the same method that Crashpad
-        // uses to get the information for the actual crashed process which is
-        // far more interesting and relevant
+        // one that has crashed, we instead use `proc_pidinfo` which allows us to
+        // to retrieve the process time of the actual crashed process. Note that
+        // this is _also_ different from how Crashpad retrieves the process times,
+        // it uses sysctl with `CTL_KERN, KERN_PROC, KERN_PROC_PID`, however
+        // the structs that are filled out by that for this info are not available
+        // in libc, and frankly `proc_pidinfo` was better documented (well, relatively,
+        // all Apple documentation is terrible)
         //
         // SAFETY: syscall
         misc_info.process_create_time = unsafe {
@@ -211,33 +112,6 @@ impl MinidumpWriter {
             } else {
                 0
             }
-
-            // let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
-            // let mut kinfo_proc = std::mem::MaybeUninit::<KInfoProc>::zeroed();
-            // let mut len = std::mem::size_of::<KInfoProc>();
-
-            // if libc::sysctl(
-            //     mib.as_mut_ptr().cast(),
-            //     std::mem::size_of_val(&mib) as u32,
-            //     kinfo_proc.as_mut_ptr().cast(),
-            //     &mut len,
-            // ) != 0
-            // {
-            //     return Err(std::io::Error::last_os_error().into());
-            // }
-
-            // let kinfo_proc = kinfo_proc.assume_init();
-
-            // // This sysctl does not return an error if the pid was not found. 10.9.5
-            // // xnu-2422.115.4/bsd/kern/kern_sysctl.c sysctl_prochandle() calls
-            // // xnu-2422.115.4/bsd/kern/kern_proc.c proc_iterate(), which provides no
-            // // indication of whether anything was done. To catch this, check that the PID
-            // // actually matches the one that we requested
-            // if kinfo_proc.kp_proc.p_pid != pid {
-            //     0
-            // } else {
-            //     kinfo_proc.kp_proc.starttime.tv_sec as u32
-            // }
         };
 
         // The basic task info keeps the timings for all of the terminated threads

@@ -31,6 +31,10 @@ fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
 fn dump_external_process() {
     use std::io::BufRead;
 
+    let approximate_proc_start_time = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let mut child = start_child_and_return("");
 
     let (task, thread) = {
@@ -73,13 +77,6 @@ fn dump_external_process() {
 
     let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
 
-    let _: MinidumpModuleList = md.get_stream().expect("Couldn't find MinidumpModuleList");
-    let _: MinidumpThreadList = md.get_stream().expect("Couldn't find MinidumpThreadList");
-    let _: MinidumpMemoryList = md.get_stream().expect("Couldn't find MinidumpMemoryList");
-    let _: MinidumpSystemInfo = md.get_stream().expect("Couldn't find MinidumpSystemInfo");
-    let _: MinidumpBreakpadInfo = md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");
-    let _: MinidumpMiscInfo = md.get_stream().expect("Couldn't find MinidumpMiscInfo");
-
     let crash_reason = get_crash_reason(&md);
 
     assert!(matches!(
@@ -89,4 +86,36 @@ fn dump_external_process() {
             100
         )
     ));
+
+    let _: MinidumpModuleList = md.get_stream().expect("Couldn't find MinidumpModuleList");
+    let _: MinidumpThreadList = md.get_stream().expect("Couldn't find MinidumpThreadList");
+    let _: MinidumpMemoryList = md.get_stream().expect("Couldn't find MinidumpMemoryList");
+    let _: MinidumpSystemInfo = md.get_stream().expect("Couldn't find MinidumpSystemInfo");
+    let _: MinidumpBreakpadInfo = md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");
+
+    let misc_info: MinidumpMiscInfo = md.get_stream().expect("Couldn't find MinidumpMiscInfo");
+
+    if let minidump::RawMiscInfo::MiscInfo2(mi) = &misc_info.raw {
+        // Unfortunately the minidump format only has 32-bit precision for the
+        // process start time
+        let process_create_time = mi.process_create_time as u64;
+
+        assert!(
+            process_create_time >= approximate_proc_start_time
+                && process_create_time <= approximate_proc_start_time + 2
+        );
+
+        assert!(mi.process_user_time > 0);
+        assert!(mi.process_kernel_time > 0);
+
+        // These aren't currently available on aarch64, or if they are, they
+        // are not via the same sysctlbyname mechanism. Would be nice if Apple
+        // documented...anything
+        if cfg!(target_arch = "x86_64") {
+            assert!(mi.processor_max_mhz > 0);
+            assert!(mi.processor_current_mhz > 0);
+        }
+    } else {
+        panic!("unexpected misc info type {:?}", misc_info);
+    }
 }
