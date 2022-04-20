@@ -118,10 +118,10 @@ impl MinidumpWriter {
         // https://github.com/apple/darwin-xnu/blob/2ff845c2e033bd0ff64b5b6aa6063a1f8f65aa32/bsd/kern/kern_resource.c#L1215
 
         // The basic task info keeps the timings for all of the terminated threads
-        let basic_info = dbg!(dumper.task_info::<MachTaskBasicInfo>()).ok();
+        let basic_info = dumper.task_info::<MachTaskBasicInfo>().ok();
 
         // THe thread times info keeps the timings for all of the living threads
-        let thread_times_info = dbg!(dumper.task_info::<TaskThreadsTimeInfo>()).ok();
+        let thread_times_info = dumper.task_info::<TaskThreadsTimeInfo>().ok();
 
         let user_time = basic_info
             .as_ref()

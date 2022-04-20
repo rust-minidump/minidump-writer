@@ -105,8 +105,16 @@ fn dump_external_process() {
                 && process_create_time <= approximate_proc_start_time + 2
         );
 
-        assert!(mi.process_user_time > 0);
-        assert!(mi.process_kernel_time > 0);
+        // I've tried busy looping to spend CPU time to get this up, but
+        // MACH_TASK_BASIC_INFO which should give terminated thread times only ever
+        // reports 0, and TASK_THREAD_TIMES_INFO which should show active thread
+        // times I've only been able to get upt to a few thousand microseconds
+        // even when busy looping for well over a second, and those get truncated
+        // to whole seconds. And it seems that crashpad doesn't have tests around
+        // this, though that's hard to say given how tedious it is finding stuff
+        // in that bloated codebase
+        // assert!(mi.process_user_time > 0);
+        // assert!(mi.process_kernel_time > 0);
 
         // These aren't currently available on aarch64, or if they are, they
         // are not via the same sysctlbyname mechanism. Would be nice if Apple
