@@ -26,18 +26,17 @@ impl From<TimeValue> for Duration {
 
 #[repr(C)]
 #[derive(Debug)]
-struct MachTaskBasicInfo {
-    virtual_size: usize,      // virtual memory size in bytes
-    resident_size: usize,     // resident memory size in bytes
-    resident_size_max: usize, // maximum resident memory size in bytes
-    user_time: TimeValue,     // total user run time for terminated threads
-    system_time: TimeValue,   // total system run time for terminated threads
-    policy: i32,              // default policy for new threads
-    suspend_count: i32,       // suspend count for task
+struct MachTaskBasicInfo64 {
+    suspend_count: i32,     // suspend count for task
+    virtual_size: usize,    // virtual memory size in bytes
+    resident_size: usize,   // resident memory size in bytes
+    user_time: TimeValue,   // total user run time for terminated threads
+    system_time: TimeValue, // total system run time for terminated threads
+    policy: i32,            // default policy for new threads
 }
 
-impl mach::TaskInfo for MachTaskBasicInfo {
-    const FLAVOR: u32 = mach::task_info::MACH_TASK_BASIC_INFO;
+impl mach::TaskInfo for MachTaskBasicInfo64 {
+    const FLAVOR: u32 = mach::task_info::TASK_BASIC_INFO_64;
 }
 
 #[repr(C)]
@@ -117,7 +116,7 @@ impl MinidumpWriter {
         };
 
         // The basic task info keeps the timings for all of the terminated threads
-        let basic_info = dbg!(dumper.task_info::<MachTaskBasicInfo>()).ok();
+        let basic_info = dbg!(dumper.task_info::<MachTaskBasicInfo64>()).ok();
 
         // THe thread times info keeps the timings for all of the living threads
         let thread_times_info = dbg!(dumper.task_info::<TaskThreadsTimeInfo>()).ok();
