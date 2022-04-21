@@ -321,6 +321,35 @@ impl TaskDumper {
         )
     }
 
+    /// Retrieves the main executable image for the task.
+    ///
+    /// Note that this method is currently only used for tests due to deficiencies
+    /// in `otool`
+    ///
+    /// # Errors
+    ///
+    /// Any of the errors that apply to [`Self::read_images`] apply here, in
+    /// addition to not being able to find the main executable image
+    pub fn read_executable_image(&self) -> Result<ImageInfo, TaskDumpError> {
+        let images = self.read_images()?;
+
+        for img in images {
+            let mach_header = self.read_task_memory::<mach::MachHeader>(img.load_address, 1)?;
+
+            let header = &mach_header[0];
+
+            if header.magic != mach::MH_MAGIC_64 {
+                return Err(TaskDumpError::InvalidMachHeader);
+            }
+
+            if header.file_type == mach::MH_EXECUTE {
+                return Ok(img);
+            }
+        }
+
+        Err(TaskDumpError::NoExecutableImage)
+    }
+
     /// Retrieves the load commands for the specified image
     ///
     /// # Errors

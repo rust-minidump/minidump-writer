@@ -290,8 +290,8 @@ pub trait TaskInfo {
     const FLAVOR: u32;
 }
 
-// usr/include/mach-o/loader.h, the file type for the main executable image
-//const MH_EXECUTE: u32 = 0x2;
+/// <usr/include/mach-o/loader.h>, the file type for the main executable image
+pub const MH_EXECUTE: u32 = 0x2;
 // usr/include/mach-o/loader.h, magic number for MachHeader
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
 // usr/include/mach-o/loader.h, command to map a segment
@@ -370,6 +370,7 @@ pub struct SegmentCommand64 {
 /// built and copied into user so it can be use to determined if the library used
 /// at runtime is exactly the same as used to built the program.
 #[repr(C)]
+#[derive(Debug)]
 pub struct Dylib {
     /// Offset from the load command start to the pathname
     pub name: u32,

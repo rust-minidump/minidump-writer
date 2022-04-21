@@ -26,6 +26,8 @@ fn iterates_load_commands() {
     let mut expected = String::new();
     let mut lc_index = 0;
 
+    expected.push('\n');
+
     while let Some(nlc) = lc_str[lc_index..].find("Load command ") {
         lc_index += nlc;
 
@@ -34,17 +36,31 @@ fn iterates_load_commands() {
             None => &lc_str[lc_index..],
         };
 
+        // otool prints the load command index for each command, but we only
+        // handle the small subset of the available load commands we care about
+        // so just ignore that
+        let block = &block[block.find('\n').unwrap() + 1..];
+
+        // otool also prints all the sections for LC_SEGMENT_* commands, but
+        // we don't care about those, so ignore them
+        let block = match block.find("Section") {
+            Some(ind) => &block[..ind],
+            None => block,
+        };
+
+        lc_index += 13;
+
         let cmd = block
             .find("cmd ")
             .expect("load commnd didn't specify cmd kind");
-        let cmd_end = block[cmd + 4..]
+        let cmd_end = block[cmd..]
             .find('\n')
             .expect("load cmd didn't end with newline");
         if matches!(
-            &block[cmd + 4..cmd_end],
+            dbg!(&block[cmd + 4..cmd + cmd_end]),
             "LC_SEGMENT_64" | "LC_UUID" | "LC_ID_DYLIB"
         ) {
-            expected.push_str(block);
+            expected.push_str(dbg!(block));
         }
     }
 
@@ -54,33 +70,45 @@ fn iterates_load_commands() {
     );
 
     let mut actual = String::new();
-    let images = task_dumper.read_images().expect("failed to read images");
 
-    for img in images {
+    // Unfortunately, Apple decided to move dynamic libs into a shared cache,
+    // removing them from the file system completely, and unless I'm missing it
+    // there is no way to get the load commands for the dylibs since otool
+    // only understands file paths? So we just get the load commands for the main
+    // executable instead, this means that we miss the `LC_ID_DYLIB` commands
+    // since they only apply to dylibs, but this test is more that we can
+    // correctly iterate through the load commands themselves, so this _should_
+    // be fine...
+    let exe_img = task_dumper
+        .read_executable_image()
+        .expect("failed to read executable image");
+
+    {
         let lcmds = task_dumper
-            .read_load_commands(&img)
+            .read_load_commands(&exe_img)
             .expect("failed to read load commands");
 
         for lc in lcmds.iter() {
             match lc {
                 LoadCommand::Segment(seg) => {
+                    let segname = std::str::from_utf8(&seg.segment_name).unwrap();
+                    let segname = &segname[..segname.find('\0').unwrap()];
                     write!(
                         &mut actual,
                         "
       cmd LC_SEGMENT_64
   cmdsize {}
   segname {}
-   vmaddr 0x{:x}
-   vmsize 0x{:x}
+   vmaddr 0x{:016x}
+   vmsize 0x{:016x}
   fileoff {}
  filesize {}
-  maxprot 0x{:x}
- initprot 0x{:x}
+  maxprot 0x{:08x}
+ initprot 0x{:08x}
    nsects {}
-    flags 0x{:x}
-",
+    flags 0x{:x}",
                         seg.cmd_size,
-                        std::str::from_utf8(&seg.segment_name).unwrap(),
+                        segname,
                         seg.vm_addr,
                         seg.vm_size,
                         seg.file_off,
@@ -93,7 +121,7 @@ fn iterates_load_commands() {
                     .unwrap();
                 }
                 LoadCommand::Dylib(_dylib) => {
-                    unreachable!()
+                    unreachable!();
                 }
                 LoadCommand::Uuid(uuid) => {
                     let id = uuid::Uuid::from_bytes(uuid.uuid);
