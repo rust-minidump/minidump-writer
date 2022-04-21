@@ -111,7 +111,7 @@ impl MinidumpWriter {
             // Breakpad was using an old method to retrieve this, let's try the
             // BSD method instead which is already implemented in libc
             let mut proc_info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
-            let size = dbg!(std::mem::size_of::<libc::proc_bsdinfo>() as i32);
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
             if libc::proc_pidinfo(
                 pid,
                 libc::PROC_PIDTBSDINFO,

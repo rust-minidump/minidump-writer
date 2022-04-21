@@ -57,10 +57,10 @@ fn iterates_load_commands() {
             .find('\n')
             .expect("load cmd didn't end with newline");
         if matches!(
-            dbg!(&block[cmd + 4..cmd + cmd_end]),
+            &block[cmd + 4..cmd + cmd_end],
             "LC_SEGMENT_64" | "LC_UUID" | "LC_ID_DYLIB"
         ) {
-            expected.push_str(dbg!(block));
+            expected.push_str(block);
         }
     }
 
