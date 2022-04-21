@@ -50,7 +50,7 @@ fn dump_current_process() {
         exception_record.ExceptionCode = STATUS_INVALID_PARAMETER;
 
         let crash_context = crash_context::CrashContext {
-            exception_pointers: &exception_ptrs,
+            exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
             thread_id: GetCurrentThreadId(),
             exception_code: STATUS_INVALID_PARAMETER,
         };
