@@ -54,4 +54,3 @@ uuid = "1.0"
 
 [patch.crates-io]
 minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "main" }
-crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "macos" }
