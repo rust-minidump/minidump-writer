@@ -2,6 +2,8 @@ use super::*;
 use crate::minidump_cpu::RawContextCPU;
 
 impl MinidumpWriter {
+    /// Writes the [`MDStreamType::ThreadListStream`] which is an array of
+    /// [`miniduimp_common::format::MINIDUMP_THREAD`]
     pub(crate) fn write_thread_list(
         &mut self,
         buffer: &mut DumpBuf,
@@ -103,6 +105,9 @@ impl MinidumpWriter {
         };
 
         thread.stack.memory = stack_location;
+
+        // Add the stack memory as a raw block of memory, this is written to
+        // the minidump as part of the memory list stream
         self.memory_blocks.push(thread.stack);
         Ok(())
     }

@@ -125,6 +125,11 @@ fn read_cpu_info(cpu: &mut format::CPU_INFORMATION) {
 }
 
 impl MinidumpWriter {
+    /// Writes the [`MDStreamType::SystemInfoStream`] stream.
+    ///
+    /// On MacOS we includes basic CPU information, though some of it is not
+    /// available on `aarch64` at the time of this writing, as well as kernel
+    /// version information.
     pub(crate) fn write_system_info(
         &mut self,
         buffer: &mut DumpBuf,

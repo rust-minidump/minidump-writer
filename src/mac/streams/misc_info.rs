@@ -1,9 +1,10 @@
 use super::*;
 use format::{MiscInfoFlags, MINIDUMP_MISC_INFO_2 as MDRawMiscInfo};
-use std::{ffi::c_void, time::Duration};
+use std::time::Duration;
 
+/// From <usr/include/mach/time_value.h>
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 struct TimeValue {
     seconds: i32,
     microseconds: i32,
@@ -24,27 +25,38 @@ impl From<TimeValue> for Duration {
     }
 }
 
+/// From <usr/include/mach/task_info.h>, this includes basic information about
+/// a task.
 #[repr(C, packed(4))]
-#[derive(Debug)]
 struct MachTaskBasicInfo {
-    virtual_size: u64,      // virtual memory size in bytes
-    resident_size: u64,     // resident memory size in bytes
-    resident_size_max: u64, // maximum resident memory size in bytes
-    user_time: TimeValue,   // total user run time for terminated threads
-    system_time: TimeValue, // total system run time for terminated threads
-    policy: i32,            // default policy for new threads
-    suspend_count: i32,     // suspend count for task
+    /// Virtual memory size in bytes
+    virtual_size: u64,
+    /// Resident memory size in bytes
+    resident_size: u64,
+    /// Maximum resident memory size in bytes
+    resident_size_max: u64,
+    /// Total user run time for terminated threads
+    user_time: TimeValue,
+    /// Total system run time for terminated threads
+    system_time: TimeValue,
+    /// Default policy for new threads
+    policy: i32,
+    /// Suspend count for task
+    suspend_count: i32,
 }
 
 impl mach::TaskInfo for MachTaskBasicInfo {
     const FLAVOR: u32 = mach::task_info::MACH_TASK_BASIC_INFO;
 }
 
+/// From <usr/include/mach/task_info.h>, this includes times for currently
+/// live threads in the task.
 #[repr(C, packed(4))]
-#[derive(Debug)]
 struct TaskThreadsTimeInfo {
-    user_time: TimeValue,   // total user run time for live threads
-    system_time: TimeValue, // total system run time for live threads
+    /// Total user run time for live threads
+    user_time: TimeValue,
+    /// total system run time for live threads
+    system_time: TimeValue,
 }
 
 impl mach::TaskInfo for TaskThreadsTimeInfo {
@@ -52,6 +64,14 @@ impl mach::TaskInfo for TaskThreadsTimeInfo {
 }
 
 impl MinidumpWriter {
+    /// Writes the [`MDStreamType::MiscInfoStream`] stream.
+    ///
+    /// On MacOS, we write a [`minidump_common::format::MINIDUMP_MISC_INFO_2`]
+    /// to this stream, which includes the start time of the process at second
+    /// granularity, and the (approximate) amount of time spent in user and
+    /// system (kernel) time for the lifetime of the task. We attempt to also
+    /// retrieve power ie CPU usage statistics, though this information is only
+    /// currently available on x86_64, not aarch64 at the moment.
     pub(crate) fn write_misc_info(
         &mut self,
         buffer: &mut DumpBuf,
@@ -88,8 +108,6 @@ impl MinidumpWriter {
         //
         // SAFETY: syscall
         misc_info.process_create_time = unsafe {
-            let pid = dumper.pid_for_task()?;
-
             // Breakpad was using an old method to retrieve this, let's try the
             // BSD method instead which is already implemented in libc
             let mut proc_info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();

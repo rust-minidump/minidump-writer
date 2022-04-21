@@ -291,7 +291,7 @@ pub trait TaskInfo {
 }
 
 // usr/include/mach-o/loader.h, the file type for the main executable image
-const MH_EXECUTE: u32 = 0x2;
+//const MH_EXECUTE: u32 = 0x2;
 // usr/include/mach-o/loader.h, magic number for MachHeader
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
 // usr/include/mach-o/loader.h, command to map a segment
@@ -301,77 +301,98 @@ pub const LC_ID_DYLIB: u32 = 0xd;
 // usr/include/mach-o/loader.h, the uuid
 pub const LC_UUID: u32 = 0x1b;
 
-// usr/include/mach-o/loader.h
+/// The header at the beginning of every (valid) Mach image
+///
+/// <usr/include/mach-o/loader.h>
 #[repr(C)]
 #[derive(Clone)]
 pub struct MachHeader {
-    pub magic: u32,         // mach magic number identifier
-    pub cpu_type: i32,      // cpu_type_t cpu specifier
-    pub cpu_sub_type: i32,  // cpu_subtype_t machine specifier
-    pub file_type: u32,     // type of file
-    pub num_commands: u32,  // number of load commands
-    pub size_commands: u32, // size of all the load commands
+    /// Mach magic number identifier, this is used to validate the header is valid
+    pub magic: u32,
+    /// `cpu_type_t` cpu specifier
+    pub cpu_type: i32,
+    /// `cpu_subtype_t` machine specifier
+    pub cpu_sub_type: i32,
+    /// Type of file, eg. [`MH_EXECUTE`] for the main executable
+    pub file_type: u32,
+    /// Number of load commands for the image
+    pub num_commands: u32,
+    /// Size in bytes of all of the load commands
+    pub size_commands: u32,
     pub flags: u32,
     __reserved: u32,
 }
 
-// usr/include/mach-o/loader.h
+/// Every load command is a variable sized struct depending on its type, but
+/// they all include the fields in this struct at the beginning
+///
+/// <usr/include/mach-o/loader.h>
 #[repr(C)]
 pub struct LoadCommandBase {
-    pub cmd: u32,      // type of load command
-    pub cmd_size: u32, // total size of the command in bytes
+    /// Type of load command `LC_*`
+    pub cmd: u32,
+    /// Total size of the command in bytes
+    pub cmd_size: u32,
 }
 
-/*
- * The 64-bit segment load command indicates that a part of this file is to be
- * mapped into a 64-bit task's address space.  If the 64-bit segment has
- * sections then section_64 structures directly follow the 64-bit segment
- * command and their size is reflected in cmdsize.
- */
+/// The 64-bit segment load command indicates that a part of this file is to be
+/// mapped into a 64-bit task's address space.  If the 64-bit segment has
+/// sections then section_64 structures directly follow the 64-bit segment
+/// command and their size is reflected in `cmdsize`.
 #[repr(C)]
 pub struct SegmentCommand64 {
-    cmd: u32,                   // type of load command
-    cmd_size: u32,              // total size of the command in bytes
-    pub segment_name: [u8; 16], // string name of the section
-    pub vm_addr: u64,           // memory address the segment is mapped to
-    pub vm_size: u64,           // total size of the segment
-    pub file_off: u64,          // file offset of the segment
-    pub file_size: u64,         // amount mapped from the file
-    pub max_prot: i32,          // maximum VM protection
-    pub init_prot: i32,         // initial VM protection
-    pub num_sections: u32,      // number of sections in the segment
+    cmd: u32,
+    pub cmd_size: u32,
+    /// String name of the section
+    pub segment_name: [u8; 16],
+    /// Memory address the segment is mapped to
+    pub vm_addr: u64,
+    /// Total size of the segment
+    pub vm_size: u64,
+    /// File offset of the segment
+    pub file_off: u64,
+    /// Amount mapped from the file
+    pub file_size: u64,
+    /// Maximum VM protection
+    pub max_prot: i32,
+    /// Initial VM protection
+    pub init_prot: i32,
+    /// Number of sections in the segment
+    pub num_sections: u32,
     pub flags: u32,
 }
 
-/*
- * Dynamically linked shared libraries are identified by two things.  The
- * pathname (the name of the library as found for execution), and the
- * compatibility version number.  The pathname must match and the compatibility
- * number in the user of the library must be greater than or equal to the
- * library being used.  The time stamp is used to record the time a library was
- * built and copied into user so it can be use to determined if the library used
- * at runtime is exactly the same as used to built the program.
- */
+/// Dynamically linked shared libraries are identified by two things.  The
+/// pathname (the name of the library as found for execution), and the
+/// compatibility version number.  The pathname must match and the compatibility
+/// number in the user of the library must be greater than or equal to the
+/// library being used.  The time stamp is used to record the time a library was
+/// built and copied into user so it can be use to determined if the library used
+/// at runtime is exactly the same as used to built the program.
 #[repr(C)]
 pub struct Dylib {
-    pub name: u32,                  // offset from the load command start to the pathname
-    pub timestamp: u32,             // library's build time stamp
-    pub current_version: u32,       // library's current version number
-    pub compatibility_version: u32, // library's compatibility vers number
+    /// Offset from the load command start to the pathname
+    pub name: u32,
+    /// Library's build time stamp
+    pub timestamp: u32,
+    /// Library's current version number
+    pub current_version: u32,
+    /// Library's compatibility version number
+    pub compatibility_version: u32,
 }
 
-/*
- * A dynamically linked shared library (filetype == MH_DYLIB in the mach header)
- * contains a dylib_command (cmd == LC_ID_DYLIB) to identify the library.
- * An object that uses a dynamically linked shared library also contains a
- * dylib_command (cmd == LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, or
- * LC_REEXPORT_DYLIB) for each library it uses.
- */
+/// A dynamically linked shared library (filetype == MH_DYLIB in the mach header)
+/// contains a dylib_command (cmd == LC_ID_DYLIB) to identify the library.
+/// An object that uses a dynamically linked shared library also contains a
+/// dylib_command (cmd == LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, or
+/// LC_REEXPORT_DYLIB) for each library it uses.
 #[repr(C)]
 pub struct DylibCommand {
-    cmd: u32,         // type of load command
-    cmd_size: u32,    // total size of the command in bytes, including pathname string
-    pub dylib: Dylib, // library identification
+    cmd: u32,
+    /// Total size of the command in bytes, including pathname string
+    pub cmd_size: u32,
+    /// Library identification
+    pub dylib: Dylib,
 }
 
 /// The uuid load command contains a single 128-bit unique random number that
@@ -379,7 +400,8 @@ pub struct DylibCommand {
 #[repr(C)]
 pub struct UuidCommand {
     cmd: u32,
-    cmd_size: u32,
+    pub cmd_size: u32,
+    /// The UUID. The components are in big-endian regardless of the host architecture
     pub uuid: [u8; 16],
 }
 
@@ -392,6 +414,7 @@ pub struct LoadCommands {
 }
 
 impl LoadCommands {
+    /// Retrieves an iterator over the load commands in the contained buffer
     #[inline]
     pub fn iter(&self) -> LoadCommandsIter<'_> {
         LoadCommandsIter {
@@ -401,6 +424,7 @@ impl LoadCommands {
     }
 }
 
+/// A single load command
 pub enum LoadCommand<'buf> {
     Segment(&'buf SegmentCommand64),
     Dylib(&'buf DylibCommand),
@@ -533,4 +557,14 @@ pub fn sysctl_string(name: &[u8]) -> String {
     };
 
     String::from_utf8(string_buf).unwrap_or_default()
+}
+
+extern "C" {
+    /// From <usr/include/mach/mach_traps.h>, this retrieves the normal PID for
+    /// the specified task as the syscalls from BSD use PIDs, not mach ports.
+    ///
+    /// This seems to be marked as "obsolete" in the header, but of course being
+    /// Apple, there is no mention of a replacement function or when/if it might
+    /// eventually disappear.
+    pub fn pid_for_task(task: mach_port_name_t, pid: *mut i32) -> kern_return_t;
 }

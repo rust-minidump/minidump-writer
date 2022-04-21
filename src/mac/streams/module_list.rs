@@ -1,6 +1,13 @@
 use super::*;
 
 impl MinidumpWriter {
+    /// Writes the [`MDStreamType::ModuleListStream`] to the minidump, which is
+    /// the last of all loaded modules (images) in the process.
+    ///
+    /// Notably, this includes the UUID of the image which is needed to look up
+    /// debug symbols for the module, as well as the address range covered by
+    /// the module to know which debug symbols are used to resolve which instruction
+    /// addresses
     pub(crate) fn write_module_list(
         &mut self,
         buffer: &mut DumpBuf,

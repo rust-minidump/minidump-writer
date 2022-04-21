@@ -11,8 +11,10 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_arch = "aarch64")] {
         /// This is the number of general purpose registers _not_ counting
         /// the stack pointer
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         pub(crate) const GP_REG_COUNT: usize = 31;
         /// The number of floating point registers in the floating point save area
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         pub(crate) const FP_REG_COUNT: usize = 32;
 
         pub type RawContextCPU = minidump_common::format::CONTEXT_ARM64_OLD;

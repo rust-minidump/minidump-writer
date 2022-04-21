@@ -40,12 +40,28 @@ macro_rules! mach_call {
     }};
 }
 
-// dyld_image_info
+/// `dyld_all_image_infos` from <usr/include/mach-o/dyld_images.h>
+///
+/// This struct is truncated as we only need a couple of fields at the beginning
+/// of the struct
+#[repr(C)]
+struct AllImagesInfo {
+    version: u32, // == 1 in Mac OS X 10.4
+    /// The number of [`ImageInfo`] structs at that following address
+    info_array_count: u32,
+    /// The address in the process where the array of [`ImageInfo`] structs is
+    info_array_addr: u64,
+}
+
+/// `dyld_image_info` from <usr/include/mach-o/dyld_images.h>
 #[repr(C)]
 #[derive(Clone)]
 pub struct ImageInfo {
+    /// The address in the process where the image is loaded
     pub load_address: u64,
+    /// The address in the process where the image's file path can be read
     pub file_path: u64,
+    /// Timestamp for when the image's file was last modified
     pub file_mod_date: u64,
 }
 
@@ -93,6 +109,10 @@ impl TaskDumper {
     }
 
     /// Reads a block of memory from the task
+    ///
+    /// # Errors
+    ///
+    /// The syscall to read the task's memory fails for some reason, eg bad address.
     pub fn read_task_memory<T>(&self, address: u64, count: usize) -> Result<Vec<T>, TaskDumpError>
     where
         T: Sized + Clone,
@@ -191,14 +211,19 @@ impl TaskDumper {
     }
 
     /// Retrives information on the virtual memory region the specified address
-    /// is located within
+    /// is located within.
+    ///
+    /// # Errors
+    ///
+    /// The syscall to retrieve the VM region information fails for some reason,
+    /// eg. a bad address.
     pub fn get_vm_region(&self, addr: u64) -> Result<VMRegionInfo, TaskDumpError> {
         let mut region_base = addr;
         let mut region_size = 0;
         let mut nesting_level = 0;
         let mut submap_info = std::mem::MaybeUninit::<mach::vm_region_submap_info_64>::uninit();
 
-        // mach/vm_region.h
+        // <user/include/mach/vm_region.h>
         const VM_REGION_SUBMAP_INFO_COUNT_64: u32 =
             (std::mem::size_of::<mach::vm_region_submap_info_64>() / std::mem::size_of::<u32>())
                 as u32;
@@ -221,8 +246,13 @@ impl TaskDumper {
         })
     }
 
-    /// Retrieves the state of the specified thread. The state is is an architecture
+    /// Retrieves the state of the specified thread. The state is an architecture
     /// specific block of CPU context ie register state.
+    ///
+    /// # Errors
+    ///
+    /// The specified thread id is invalid, or the thread is in a task that is
+    /// compiled for a different architecture than this local task.
     pub fn read_thread_state(&self, tid: u32) -> Result<mach::ThreadState, TaskDumpError> {
         let mut thread_state = mach::ThreadState::default();
 
@@ -236,7 +266,12 @@ impl TaskDumper {
         Ok(thread_state)
     }
 
-    /// Reads the specified task information
+    /// Reads the specified task information.
+    ///
+    /// # Errors
+    ///
+    /// The syscall to receive the task information failed for some reason, eg.
+    /// the specified type and the flavor are mismatched and considered invalid.
     pub fn task_info<T: mach::TaskInfo>(&self) -> Result<T, TaskDumpError> {
         let mut info = std::mem::MaybeUninit::<T>::uninit();
         let mut count = (std::mem::size_of::<T>() / std::mem::size_of::<u32>()) as u32;
@@ -252,8 +287,14 @@ impl TaskDumper {
         unsafe { Ok(info.assume_init()) }
     }
 
-    /// Retrieves all of the images loaded in the task. Note that there may be
-    /// multiple images with the same load address.
+    /// Retrieves all of the images loaded in the task.
+    ///
+    /// Note that there may be multiple images with the same load address.
+    ///
+    /// # Errors
+    ///
+    /// The syscall to retrieve the location of the loaded images fails, or
+    /// the syscall to read the loaded images from the process memory fails
     pub fn read_images(&self) -> Result<Vec<ImageInfo>, TaskDumpError> {
         impl mach::TaskInfo for mach::task_info::task_dyld_info {
             const FLAVOR: u32 = mach::task_info::TASK_DYLD_INFO;
@@ -265,15 +306,6 @@ impl TaskDumper {
             let dyld_info = self.task_info::<mach::task_info::task_dyld_info>()?;
             dyld_info.all_image_info_addr
         };
-
-        // dyld_all_image_infos defined in usr/include/mach-o/dyld_images.h, we
-        // only need a couple of fields at the beginning
-        #[repr(C)]
-        struct AllImagesInfo {
-            version: u32, // == 1 in Mac OS X 10.4
-            info_array_count: u32,
-            info_array_addr: u64,
-        }
 
         // Here we make the assumption that dyld loaded at the same address in
         // the crashed process vs. this one.  This is an assumption made in
@@ -290,6 +322,12 @@ impl TaskDumper {
     }
 
     /// Retrieves the load commands for the specified image
+    ///
+    /// # Errors
+    ///
+    /// We fail to read the image header for the specified image, the header we
+    /// read is determined to be invalid, or we fail to read the block of memory
+    /// containing the load commands themselves.
     pub fn read_load_commands(&self, img: &ImageInfo) -> Result<mach::LoadCommands, TaskDumpError> {
         let mach_header = self.read_task_memory::<mach::MachHeader>(img.load_address, 1)?;
 
@@ -315,6 +353,10 @@ impl TaskDumper {
     }
 
     /// Gets a list of all of the thread ids in the task
+    ///
+    /// # Errors
+    ///
+    /// The syscall to retrieve the list of threads fails
     pub fn read_threads(&self) -> Result<&'static [u32], TaskDumpError> {
         let mut threads = std::ptr::null_mut();
         let mut thread_count = 0;
@@ -332,17 +374,14 @@ impl TaskDumper {
     }
 
     /// Retrieves the PID for the task
+    ///
+    /// # Errors
+    ///
+    /// Presumably the only way this would fail would be if the task we are
+    /// dumping disappears.
     pub fn pid_for_task(&self) -> Result<i32, TaskDumpError> {
-        extern "C" {
-            /// /usr/include/mach/mach_traps.h
-            ///
-            /// This seems to be marked as "obsolete" so might disappear at some point?
-            fn pid_for_task(task: mach::mach_port_name_t, pid: *mut i32) -> mach::kern_return_t;
-        }
-
         let mut pid = 0;
-        mach_call!(pid_for_task(self.task, &mut pid))?;
-
+        mach_call!(mach::pid_for_task(self.task, &mut pid))?;
         Ok(pid)
     }
 }

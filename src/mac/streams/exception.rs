@@ -1,6 +1,10 @@
 use super::*;
 
 impl MinidumpWriter {
+    /// Writes the [`minidump_common::format::MINIDUMP_EXCEPTION_STREAM`] stream.
+    ///
+    /// This stream is optional on MacOS as a user requested minidump could
+    /// choose not to specify the exception information.
     pub(crate) fn write_exception(
         &mut self,
         buffer: &mut DumpBuf,

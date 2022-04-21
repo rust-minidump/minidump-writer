@@ -1,6 +1,9 @@
 use super::*;
 
 impl MinidumpWriter {
+    /// Writes the [`MDStreamType::MemoryListStream`]. The memory blocks that are
+    /// written into this stream are the raw thread contexts that were retrieved
+    /// and added by [`Self::write_thread_list`]
     pub(crate) fn write_memory_list(
         &mut self,
         buffer: &mut DumpBuf,
@@ -8,9 +11,9 @@ impl MinidumpWriter {
     ) -> Result<MDRawDirectory, WriterError> {
         // Include some memory around the instruction pointer if the crash was
         // due to an exception
-        const IP_MEM_SIZE: u64 = 256;
-
         if self.crash_context.exception.is_some() {
+            const IP_MEM_SIZE: u64 = 256;
+
             let get_ip_block = |tid| -> Option<std::ops::Range<u64>> {
                 let thread_state = dumper.read_thread_state(tid).ok()?;
 

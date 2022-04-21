@@ -146,6 +146,7 @@ pub struct MemoryArrayWriter<T> {
     phantom: std::marker::PhantomData<T>,
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 impl MemoryArrayWriter<u8> {
     #[inline]
     pub fn write_bytes(buffer: &mut Buffer, slice: &[u8]) -> Self {
