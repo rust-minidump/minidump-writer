@@ -125,6 +125,7 @@ impl MinidumpWriter {
             };
 
             // TODO: derive Pwrite for MINIDUMP_BREAKPAD_INFO
+            // https://github.com/rust-minidump/rust-minidump/pull/534
             let mut offset = 0;
             offset += breakpad_info.pwrite(bp_info.validity, offset)?;
             offset += breakpad_info.pwrite(bp_info.dump_thread_id, offset)?;
