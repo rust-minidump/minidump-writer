@@ -301,7 +301,7 @@ mod windows {
         Foundation::CloseHandle,
         System::{
             Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-            Threading::{GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS},
+            Threading::{GetCurrentProcessId, GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS},
         },
     };
 
@@ -317,6 +317,7 @@ mod windows {
             exception_context.ContextFlags =
                 minidump_common::format::ContextFlagsAmd64::CONTEXT_AMD64_ALL.bits();
 
+            let pid = GetCurrentProcessId();
             let tid = GetCurrentThreadId();
 
             let thread_handle = OpenThread(THREAD_ALL_ACCESS, 0, tid);
@@ -332,7 +333,7 @@ mod windows {
 
             let exc_ptr_addr = &exception_ptrs as *const _ as usize;
 
-            println!("{exc_ptr_addr} {tid} {exception_code:x}");
+            println!("{pid} {exc_ptr_addr} {tid} {exception_code:x}");
 
             // Wait until we're killed
             loop {
