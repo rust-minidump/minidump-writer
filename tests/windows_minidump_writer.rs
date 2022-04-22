@@ -87,7 +87,7 @@ fn dump_external_process() {
 
     let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION));
 
-    let (exception_pointers, thread_id, exception_code) = {
+    let (process_id, exception_pointers, thread_id, exception_code) = {
         let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
         let mut buf = String::new();
         f.read_line(&mut buf).expect("failed to read stdout");
@@ -95,11 +95,12 @@ fn dump_external_process() {
 
         let mut biter = buf.trim().split(' ');
 
+        let process_id: u32 = biter.next().unwrap().parse().unwrap();
         let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
         let thread_id: u32 = biter.next().unwrap().parse().unwrap();
         let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap() as i32;
 
-        (exception_pointers, thread_id, exception_code)
+        (process_id, exception_pointers, thread_id, exception_code)
     };
 
     assert_eq!(exception_code, EXCEPTION_ILLEGAL_INSTRUCTION);
@@ -115,7 +116,7 @@ fn dump_external_process() {
         .tempfile()
         .unwrap();
 
-    let dumper = MinidumpWriter::external_process(crash_context, child.id())
+    let dumper = MinidumpWriter::external_process(crash_context, process_id)
         .expect("failed to create MinidumpWriter");
 
     dumper
