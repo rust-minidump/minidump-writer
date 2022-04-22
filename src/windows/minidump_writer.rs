@@ -5,15 +5,8 @@ use std::{ffi::c_void, os::windows::io::AsRawHandle};
 pub use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::{
     Foundation::{CloseHandle, ERROR_SUCCESS, STATUS_INVALID_HANDLE},
-    System::{
-        ApplicationVerifier as av,
-        Diagnostics::Debug as md,
-        Threading::{GetCurrentThreadId, OpenProcess},
-    },
+    System::{ApplicationVerifier as av, Diagnostics::Debug as md, Threading as threading},
 };
-
-// For some reason this is defined in SystemServices which is massive and not worth bringing in for ONE constant
-const GENERIC_ALL: u32 = 268435456;
 
 pub struct MinidumpWriter {
     /// The crash context as captured by an exception handler
@@ -34,15 +27,20 @@ pub struct MinidumpWriter {
 
 impl MinidumpWriter {
     /// Creates a minidump writer for a crash that occurred in an external process.
+    ///
+    /// # Errors
+    ///
+    /// Fails if we are unable to open the external process for some reason
     pub fn external_process(
         crash_context: crash_context::CrashContext,
         pid: u32,
     ) -> Result<Self, Error> {
+        // SAFETY: syscall
         let crashing_process = unsafe {
-            OpenProcess(
-                GENERIC_ALL, // desired access
-                0,           // inherit handles
-                pid,         // pid
+            threading::OpenProcess(
+                threading::PROCESS_ALL_ACCESS, // desired access
+                0,                             // inherit handles
+                pid,                           // pid
             )
         };
 
@@ -60,30 +58,20 @@ impl MinidumpWriter {
 
     /// Creates a minidump writer for a crash that occurred in the current process.
     ///
-    /// # Errors
-    ///
-    /// Fails if we are unable to open a `HANDLE` to the current process
-    pub fn current_process(crash_context: crash_context::CrashContext) -> Result<Self, Error> {
+    /// Note that in-process dumping is inherently unreliable, it is recommended
+    /// to use the [`Self::external_process`] in a different process than the
+    /// one that crashed when possible.
+    pub fn current_process(crash_context: crash_context::CrashContext) -> Self {
         let crashing_pid = std::process::id();
 
         // SAFETY: syscall
-        let crashing_process = unsafe {
-            OpenProcess(
-                GENERIC_ALL, // desired access
-                0,           // inherit handles
-                crashing_pid,
-            )
-        };
+        let crashing_process = unsafe { threading::GetCurrentProcess() };
 
-        if crashing_process == 0 {
-            Err(std::io::Error::last_os_error().into())
-        } else {
-            Ok(Self {
-                crash_context,
-                crashing_process,
-                crashing_pid,
-                is_external_process: false,
-            })
+        Self {
+            crash_context,
+            crashing_process,
+            crashing_pid,
+            is_external_process: false,
         }
     }
 
@@ -121,15 +109,15 @@ impl MinidumpWriter {
                     | BreakpadInfoValid::RequestingThreadId.bits(),
                 dump_thread_id: self.crash_context.thread_id,
                 // Safety: syscall
-                requesting_thread_id: unsafe { GetCurrentThreadId() },
+                requesting_thread_id: unsafe { threading::GetCurrentThreadId() },
             };
 
             // TODO: derive Pwrite for MINIDUMP_BREAKPAD_INFO
             // https://github.com/rust-minidump/rust-minidump/pull/534
             let mut offset = 0;
-            offset += breakpad_info.pwrite(bp_info.validity, offset)?;
-            offset += breakpad_info.pwrite(bp_info.dump_thread_id, offset)?;
-            breakpad_info.pwrite(bp_info.requesting_thread_id, offset)?;
+            breakpad_info.gwrite(bp_info.validity, &mut offset)?;
+            breakpad_info.gwrite(bp_info.dump_thread_id, &mut offset)?;
+            breakpad_info.gwrite(bp_info.requesting_thread_id, &mut offset)?;
 
             user_streams.push(md::MINIDUMP_USER_STREAM {
                 Type: MINIDUMP_STREAM_TYPE::BreakpadInfoStream as u32,
@@ -139,16 +127,23 @@ impl MinidumpWriter {
             });
         }
 
-        let handle_stream = self.fill_handle_stream();
+        let mut handle_stream_buffer = self.fill_handle_stream();
 
         // Note that we do this by ref, as the buffer inside the option needs
         // to stay alive for as long as we're writing the minidump since
         // the user stream has a pointer to it
-        if let Some((_buf, handle_stream)) = &handle_stream {
-            user_streams.push(*handle_stream);
+        if let Some(buf) = &mut handle_stream_buffer {
+            let handle_stream = md::MINIDUMP_USER_STREAM {
+                Type: MINIDUMP_STREAM_TYPE::HandleOperationListStream as u32,
+                BufferSize: buf.len() as u32,
+                // Still not getting over the mut pointers here
+                Buffer: buf.as_mut_ptr().cast(),
+            };
+
+            user_streams.push(handle_stream);
         }
 
-        let user_stream = md::MINIDUMP_USER_STREAM_INFORMATION {
+        let user_stream_infos = md::MINIDUMP_USER_STREAM_INFORMATION {
             UserStreamCount: user_streams.len() as u32,
             UserStreamArray: user_streams.as_mut_ptr(),
         };
@@ -165,8 +160,8 @@ impl MinidumpWriter {
                 exc_info
                     .as_ref()
                     .map_or(std::ptr::null(), |ei| ei as *const _), // exceptionparam - the actual exception information
-                &user_stream,     // user streams
-                std::ptr::null(), // callback, unused
+                &user_stream_infos, // user streams
+                std::ptr::null(),   // callback, unused
             )
         };
 
@@ -181,8 +176,8 @@ impl MinidumpWriter {
     /// enumerates all of the handle operations that occurred within the crashing
     /// process and fills out a minidump user stream with the ops pertaining to
     /// the last invalid handle that is enumerated, which is, presumably
-    /// (hopfully?), the one that led to the exception
-    fn fill_handle_stream(&self) -> Option<(Vec<u8>, md::MINIDUMP_USER_STREAM)> {
+    /// (hopefully?), the one that led to the exception
+    fn fill_handle_stream(&self) -> Option<Vec<u8>> {
         if self.crash_context.exception_code != STATUS_INVALID_HANDLE {
             return None;
         }
@@ -227,7 +222,7 @@ impl MinidumpWriter {
                 Some(enum_callback),                  // enumeration callback
                 (&mut hs as *mut HandleState).cast(), // enumeration context
             )
-        } != 0
+        } == 0
         {
             let mut stream_buf = Vec::new();
 
@@ -243,9 +238,11 @@ impl MinidumpWriter {
 
             #[inline]
             fn to_bytes<T: Sized>(v: &T) -> &[u8] {
-                let s = std::slice::from_ref(v);
-
-                unsafe { std::slice::from_raw_parts(s.as_ptr().cast(), std::mem::size_of::<T>()) }
+                // SAFETY: both AVRF_HANDLE_OPERATION and MINIDUMP_HANDLE_OPERATION_LIST
+                // are POD types
+                unsafe {
+                    std::slice::from_raw_parts((v as *const T).cast(), std::mem::size_of::<T>())
+                }
             }
 
             for op in hs.ops.into_iter().filter(|op| op.Handle == hs.last_invalid) {
@@ -255,14 +252,7 @@ impl MinidumpWriter {
 
             stream_buf[..md_list.SizeOfHeader as usize].copy_from_slice(to_bytes(&md_list));
 
-            let handle_stream = md::MINIDUMP_USER_STREAM {
-                Type: MINIDUMP_STREAM_TYPE::HandleOperationListStream as u32,
-                BufferSize: stream_buf.len() as u32,
-                // Still not getting over the mut pointers here
-                Buffer: stream_buf.as_mut_ptr().cast(),
-            };
-
-            Some((stream_buf, handle_stream))
+            Some(stream_buf)
         } else {
             // We don't _particularly_ care if this fails, it's better if we had
             // the info, but not critical
