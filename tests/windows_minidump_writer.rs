@@ -135,6 +135,6 @@ fn dump_external_process() {
 
     assert_eq!(
         crash_reason,
-        CrashReason::from_windows_error(EXCEPTION_ILLEGAL_INSTRUCTION as u32)
+        CrashReason::from_windows_code(EXCEPTION_ILLEGAL_INSTRUCTION as u32)
     );
 }
