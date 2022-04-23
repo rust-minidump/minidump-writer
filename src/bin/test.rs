@@ -301,7 +301,7 @@ mod windows {
         Foundation::CloseHandle,
         System::{
             Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-            Threading::{GetCurrentProcessId, GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS},
+            Threading::{GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId},
         },
     };
 
@@ -320,7 +320,7 @@ mod windows {
             let pid = GetCurrentProcessId();
             let tid = GetCurrentThreadId();
 
-            let thread_handle = OpenThread(THREAD_ALL_ACCESS, 0, tid);
+            let thread_handle = GetCurrentThread();
             GetThreadContext(thread_handle, &mut exception_context);
             CloseHandle(thread_handle);
 

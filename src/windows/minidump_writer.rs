@@ -94,36 +94,14 @@ impl MinidumpWriter {
         // (currently) a real target of this crate, so this allocation is fine
         let mut user_streams = Vec::with_capacity(2);
 
-        // Add an MDRawBreakpadInfo stream to the minidump, to provide additional
-        // information about the exception handler to the Breakpad processor.
-        // The information will help the processor determine which threads are
-        // relevant. The Breakpad processor does not require this information but
-        // can function better with Breakpad-generated dumps when it is present.
-        // The native debugger is not harmed by the presence of this information.
-        //
-        // This info is only relevant for in-process dumping
-        let mut breakpad_info = [0u8; 12];
-        if !self.is_external_process {
-            let bp_info = MINIDUMP_BREAKPAD_INFO {
-                validity: BreakpadInfoValid::DumpThreadId.bits()
-                    | BreakpadInfoValid::RequestingThreadId.bits(),
-                dump_thread_id: self.crash_context.thread_id,
-                // Safety: syscall
-                requesting_thread_id: unsafe { threading::GetCurrentThreadId() },
-            };
+        let mut breakpad_info = self.fill_breakpad_stream();
 
-            // TODO: derive Pwrite for MINIDUMP_BREAKPAD_INFO
-            // https://github.com/rust-minidump/rust-minidump/pull/534
-            let mut offset = 0;
-            breakpad_info.gwrite(bp_info.validity, &mut offset)?;
-            breakpad_info.gwrite(bp_info.dump_thread_id, &mut offset)?;
-            breakpad_info.gwrite(bp_info.requesting_thread_id, &mut offset)?;
-
+        if let Some(bp_info) = &mut breakpad_info {
             user_streams.push(md::MINIDUMP_USER_STREAM {
                 Type: MINIDUMP_STREAM_TYPE::BreakpadInfoStream as u32,
-                BufferSize: breakpad_info.len() as u32,
+                BufferSize: bp_info.len() as u32,
                 // Again with the mut pointer
-                Buffer: breakpad_info.as_mut_ptr().cast(),
+                Buffer: bp_info.as_mut_ptr().cast(),
             });
         }
 
@@ -170,6 +148,43 @@ impl MinidumpWriter {
         } else {
             Ok(())
         }
+    }
+
+    /// Create an MDRawBreakpadInfo stream to the minidump, to provide additional
+    /// information about the exception handler to the Breakpad processor.
+    /// The information will help the processor determine which threads are
+    /// relevant. The Breakpad processor does not require this information but
+    /// can function better with Breakpad-generated dumps when it is present.
+    /// The native debugger is not harmed by the presence of this information.
+    ///
+    /// This info is only relevant for in-process dumping
+    fn fill_breakpad_stream(&self) -> Option<[u8; 12]> {
+        if self.is_external_process {
+            return None;
+        }
+
+        let mut breakpad_info = [0u8; 12];
+
+        let bp_info = MINIDUMP_BREAKPAD_INFO {
+            validity: BreakpadInfoValid::DumpThreadId.bits()
+                | BreakpadInfoValid::RequestingThreadId.bits(),
+            dump_thread_id: self.crash_context.thread_id,
+            // Safety: syscall
+            requesting_thread_id: unsafe { threading::GetCurrentThreadId() },
+        };
+
+        // TODO: derive Pwrite for MINIDUMP_BREAKPAD_INFO
+        // https://github.com/rust-minidump/rust-minidump/pull/534
+        let mut offset = 0;
+        breakpad_info.gwrite(bp_info.validity, &mut offset).ok()?;
+        breakpad_info
+            .gwrite(bp_info.dump_thread_id, &mut offset)
+            .ok()?;
+        breakpad_info
+            .gwrite(bp_info.requesting_thread_id, &mut offset)
+            .ok()?;
+
+        Some(breakpad_info)
     }
 
     /// In the case of a `STATUS_INVALID_HANDLE` exception, this function
@@ -222,7 +237,7 @@ impl MinidumpWriter {
                 Some(enum_callback),                  // enumeration callback
                 (&mut hs as *mut HandleState).cast(), // enumeration context
             )
-        } == 0
+        } == ERROR_SUCCESS
         {
             let mut stream_buf = Vec::new();
 
