@@ -159,7 +159,7 @@ impl MinidumpWriter {
 
                 let processor_revision = ((model as u16) << 8) | stepping as u16;
             } else if #[cfg(target_arch = "aarch64")] {
-                let processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM64;
+                let processor_architecture = MDCPUArchitecture::PROCESSOR_ARCHITECTURE_ARM64_OLD;
 
                 let family: u32 = mach::sysctl_by_name(b"hw.cpufamily\0");
 
