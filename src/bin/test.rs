@@ -320,9 +320,7 @@ mod windows {
             let pid = GetCurrentProcessId();
             let tid = GetCurrentThreadId();
 
-            let thread_handle = GetCurrentThread();
-            GetThreadContext(thread_handle, &mut exception_context);
-            CloseHandle(thread_handle);
+            GetThreadContext(GetCurrentThread(), &mut exception_context);
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
