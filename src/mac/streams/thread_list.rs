@@ -202,7 +202,7 @@ impl MinidumpWriter {
                 out.context_flags = format::ContextFlagsArm64Old::CONTEXT_ARM64_OLD_FULL.bits() as u64;
 
                 out.cpsr = ts.cpsr;
-                out.iregs[..28].copy_from_slice(&ts.x[..28]);
+                out.iregs[..29].copy_from_slice(&ts.x[..29]);
                 out.iregs[29] = ts.fp;
                 out.iregs[30] = ts.lr;
                 out.sp = ts.sp;
