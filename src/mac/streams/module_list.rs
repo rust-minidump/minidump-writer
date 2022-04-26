@@ -153,12 +153,7 @@ impl MinidumpWriter {
             raw_module.version_info.struct_version = format::VS_FFI_STRUCVERSION;
 
             // Convert MAC dylib version format, which is a 32 bit number, to the
-            // format used by minidump.  The mac format is <16 bits>.<8 bits>.<8 bits>
-            // so it fits nicely into the windows version with some massaging
-            // The mapping is:
-            //    1) upper 16 bits of MAC version go to lower 16 bits of product HI
-            //    2) Next most significant 8 bits go to upper 16 bits of product LO
-            //    3) Least significant 8 bits go to lower 16 bits of product LO
+            // format used by minidump.
             raw_module.version_info.file_version_hi = version >> 16;
             raw_module.version_info.file_version_lo = ((version & 0xff00) << 8) | (version & 0xff);
         }
