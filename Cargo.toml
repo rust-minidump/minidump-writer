@@ -2,6 +2,9 @@
 name = "minidump-writer"
 version = "0.1.0"
 authors = ["Martin Sirringhaus"]
+description = "Rust rewrite of breakpad's minidump_writer"
+repository = "https://github.com/rust-minidump/minidump-writer"
+homepage = "https://github.com/rust-minidump/minidump-writer"
 edition = "2021"
 license = "MIT"
 
