@@ -95,7 +95,7 @@ impl MinidumpWriter {
                     mach::LoadCommand::Segment(seg) if sizes.is_none() => {
                         if &seg.segment_name[..7] == b"__TEXT\0" {
                             let slide = if seg.file_off == 0 && seg.file_size != 0 {
-                                (image.load_address - seg.vm_addr) as isize
+                                image.load_address as isize - seg.vm_addr as isize
                             } else {
                                 0
                             };
