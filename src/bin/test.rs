@@ -347,17 +347,42 @@ mod mac {
 
     #[inline(never)]
     pub(super) fn real_main(_args: Vec<String>) -> Result<()> {
-        unsafe {
-            let task = mach2::traps::mach_task_self();
-            let thread = mach2::mach_init::mach_thread_self();
 
-            println!("{task} {thread}");
+        dbg!(unsafe { libc::_dyld_image_count() });
+        std::thread::Builder::new()
+            .name("test-thread".to_owned())
+            .spawn(move || {
+                #[inline(never)]
+                fn wait_until_killed() {
+                    unsafe {
+                        let task = dbg!(mach2::traps::mach_task_self());
+                        let pid = dbg!(std::process::id());
+                        let thread = dbg!(mach2::mach_init::mach_thread_self());
 
-            // Wait until we're killed
-            loop {
-                std::thread::park();
-            }
-        }
+                        let mut real_task = 0;
+                        dbg!(mach2::traps::task_for_pid(
+                            task,
+                            pid as i32,
+                            &mut real_task
+                        ));
+                        dbg!(real_task);
+
+                        println!("{task} {thread}");
+
+                        // Wait until we're killed
+                        loop {
+                            std::thread::park();
+                        }
+                    }
+                }
+
+                wait_until_killed()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        Ok(())
     }
 }
 

@@ -27,14 +27,15 @@ fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
     )
 }
 
-#[test]
-fn dump_external_process() {
+struct Captured<'md> {
+    task: u32,
+    thread: u32,
+    minidump: Minidump<'md, memmap2::Mmap>,
+}
+
+fn capture_minidump(name: &str) -> Captured<'_> {
     use std::io::BufRead;
 
-    let approximate_proc_start_time = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
     let mut child = start_child_and_return("");
 
     let (task, thread) = {
@@ -51,6 +52,9 @@ fn dump_external_process() {
         (task, thread)
     };
 
+    let pid = dbg!(std::process::id());
+    assert!(task != unsafe { dbg!(mach2::traps::mach_task_self()) });
+
     let crash_context = crash_context::CrashContext {
         task,
         thread,
@@ -62,10 +66,7 @@ fn dump_external_process() {
         }),
     };
 
-    let mut tmpfile = tempfile::Builder::new()
-        .prefix("mac_external_process")
-        .tempfile()
-        .unwrap();
+    let mut tmpfile = tempfile::Builder::new().prefix(name).tempfile().unwrap();
 
     let mut dumper = MinidumpWriter::new(crash_context);
 
@@ -75,7 +76,23 @@ fn dump_external_process() {
 
     child.kill().expect("failed to kill child");
 
-    let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+    let minidump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+
+    Captured {
+        task,
+        thread,
+        minidump,
+    }
+}
+
+#[test]
+fn dump_external_process() {
+    let approximate_proc_start_time = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let md = capture_minidump("dump_external_process").minidump;
 
     let crash_reason = get_crash_reason(&md);
 
@@ -126,4 +143,55 @@ fn dump_external_process() {
     } else {
         panic!("unexpected misc info type {:?}", misc_info);
     }
+}
+
+/// Validates we can actually walk the stack for each thread in the minidump,
+/// this is using minidump-processor, which (currently) depends on breakpad
+/// symbols, however https://github.com/mozilla/dump_syms is not available as
+/// a library https://github.com/mozilla/dump_syms/issues/253, so we just require
+/// that it already be installed, hence the ignore
+#[test]
+#[ignore = "ignored, requires dump_syms installed"]
+fn stackwalks() {
+    println!("generating minidump...");
+    let md = capture_minidump("stackwalks");
+
+    // Generate the breakpad symbols
+    println!("generating symbols...");
+    let mut cmd = std::process::Command::new("dump_syms");
+    cmd.args(["-o", "mac_stackwalks.sym", "target/debug/test"]);
+    assert!(cmd.status().unwrap().success());
+
+    let provider =
+        minidump_processor::Symbolizer::new(minidump_processor::simple_symbol_supplier(vec![
+            ".".into()
+        ]));
+
+    let state = futures::executor::block_on(async {
+        minidump_processor::process_minidump(&md.minidump, &provider).await
+    })
+    .unwrap();
+
+    //state.print(&mut std::io::stdout()).map_err(|_| ()).unwrap();
+
+    // We expect 2 threads, one of which is fake crashing thread
+    let fake_crash_thread = state
+        .threads
+        .iter()
+        .find(|cs| cs.thread_id == md.thread)
+        .expect("failed to find crash thread");
+
+    // The thread _should_ have a name
+    assert_eq!(
+        fake_crash_thread.thread_name.as_deref(),
+        Some("test-thread")
+    );
+
+    assert!(
+        fake_crash_thread
+            .frames
+            .iter()
+            .any(|sf| { sf.function_name.as_deref() == Some("wait_until_killed") }),
+        "unable to locate expected function"
+    );
 }

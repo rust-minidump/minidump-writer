@@ -46,7 +46,11 @@ features = [
 mach2 = "0.4"
 
 [dev-dependencies]
+# Sigh, minidump-processor is async for some reason so we need an executor :(
+futures = { version = "0.3", features = ["executor"] }
 minidump = "0.10"
+minidump-processor = "0.10"
+memmap2 = "0.5"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 similar-asserts = "1.2"
