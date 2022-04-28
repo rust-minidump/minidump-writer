@@ -108,6 +108,7 @@ fn dump_external_process() {
 
     let crash_context = crash_context::CrashContext {
         exception_pointers: exception_pointers as _,
+        process_id,
         thread_id,
         exception_code,
     };
