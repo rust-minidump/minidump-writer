@@ -344,34 +344,52 @@ mod windows {
 #[cfg(target_os = "macos")]
 mod mac {
     use super::*;
+    use std::time::Duration;
 
     #[inline(never)]
-    pub(super) fn real_main(_args: Vec<String>) -> Result<()> {
-        dbg!(unsafe { libc::_dyld_image_count() });
+    pub(super) fn real_main(args: Vec<String>) -> Result<()> {
+        let port_name = args.get(0).ok_or("mach port name not specified")?;
+        let exception: u32 = args.get(1).ok_or("exception code not specified")?.parse()?;
+
+        let client =
+            crash_context::ipc::Client::create(&std::ffi::CString::new(port_name.clone())?)?;
+
         std::thread::Builder::new()
             .name("test-thread".to_owned())
             .spawn(move || {
                 #[inline(never)]
-                fn wait_until_killed() {
-                    unsafe {
-                        let task = dbg!(mach2::traps::mach_task_self());
-                        let pid = dbg!(std::process::id());
-                        let thread = dbg!(mach2::mach_init::mach_thread_self());
-
-                        let mut real_task = 0;
-                        dbg!(mach2::traps::task_for_pid(task, pid as i32, &mut real_task));
-                        dbg!(real_task);
-
-                        println!("{task} {thread}");
-
-                        // Wait until we're killed
-                        loop {
-                            std::thread::park();
+                fn wait_until_killed(client: crash_context::ipc::Client, exception: u32) {
+                    // SAFETY: syscalls
+                    let cc = unsafe {
+                        crash_context::CrashContext {
+                            task: mach2::traps::mach_task_self(),
+                            thread: mach2::mach_init::mach_thread_self(),
+                            handler_thread: mach2::port::MACH_PORT_NULL,
+                            exception: Some(crash_context::ExceptionInfo {
+                                kind: exception as i32,
+                                code: 0,
+                                subcode: None,
+                            }),
                         }
+                    };
+
+                    // Send the crash context to the server and wait for it to
+                    // finish dumping, we should be killed shortly afterwards
+                    client
+                        .send_crash_context(
+                            &cc,
+                            Some(Duration::from_secs(2)),
+                            Some(Duration::from_secs(5)),
+                        )
+                        .expect("failed to send crash context/receive ack");
+
+                    // Wait until we're killed
+                    loop {
+                        std::thread::park();
                     }
                 }
 
-                wait_until_killed()
+                wait_until_killed(client, exception)
             })
             .unwrap()
             .join()

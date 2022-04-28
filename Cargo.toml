@@ -49,7 +49,7 @@ mach2 = "0.4"
 # Sigh, minidump-processor is async for some reason so we need an executor :(
 futures = { version = "0.3", features = ["executor"] }
 minidump = "0.10"
-minidump-processor = "0.10"
+minidump-processor = { version = "0.10", features = ["breakpad-syms"] }
 memmap2 = "0.5"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
@@ -57,4 +57,5 @@ similar-asserts = "1.2"
 uuid = "1.0"
 
 [patch.crates-io]
-minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "main" }
+minidump-common = { git = "https://github.com/rust-minidump/rust-minidump", branch = "main" }
+crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "prep-release" }

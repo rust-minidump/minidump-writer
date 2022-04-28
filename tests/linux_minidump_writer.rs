@@ -48,6 +48,7 @@ fn get_crash_context(tid: Pid) -> CrashContext {
     CrashContext {
         inner: crash_context::CrashContext {
             siginfo,
+            pid: std::process::id() as _,
             tid,
             context,
             float_state,
@@ -98,7 +99,7 @@ fn test_write_dump_with_context() {
 }
 
 fn test_write_and_read_dump_from_parent_helper(context: Context) {
-    let mut child = start_child_and_return("spawn_mmap_wait");
+    let mut child = start_child_and_return(&["spawn_mmap_wait"]);
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()
@@ -214,7 +215,7 @@ fn test_write_and_read_dump_from_parent_with_context() {
 }
 
 fn test_write_with_additional_memory_helper(context: Context) {
-    let mut child = start_child_and_return("spawn_alloc_wait");
+    let mut child = start_child_and_return(&["spawn_alloc_wait"]);
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()
@@ -623,7 +624,7 @@ fn test_sanitized_stacks_with_context() {
 }
 
 fn test_write_early_abort_helper(context: Context) {
-    let mut child = start_child_and_return("spawn_alloc_wait");
+    let mut child = start_child_and_return(&["spawn_alloc_wait"]);
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new()

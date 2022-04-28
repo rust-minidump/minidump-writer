@@ -28,51 +28,40 @@ fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
 }
 
 struct Captured<'md> {
+    #[allow(dead_code)]
     task: u32,
     thread: u32,
     minidump: Minidump<'md, memmap2::Mmap>,
 }
 
-fn capture_minidump(name: &str) -> Captured<'_> {
-    use std::io::BufRead;
+fn capture_minidump(name: &str, exception_kind: u32) -> Captured<'_> {
+    // Create a mach port server to retrieve the crash details from the child
+    let mut server = crash_context::ipc::Server::create(&std::ffi::CString::new(name).unwrap())
+        .expect("failed to create mach port service");
 
-    let mut child = start_child_and_return("");
+    let mut child = start_child_and_return(&[name, &exception_kind.to_string()]);
 
-    let (task, thread) = {
-        let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
-        let mut buf = String::new();
-        f.read_line(&mut buf).expect("failed to read stdout");
-        assert!(!buf.is_empty());
-
-        let mut biter = buf.trim().split(' ');
-
-        let task: u32 = biter.next().unwrap().parse().unwrap();
-        let thread: u32 = biter.next().unwrap().parse().unwrap();
-
-        (task, thread)
-    };
-
-    let pid = dbg!(std::process::id());
-    assert!(task != unsafe { dbg!(mach2::traps::mach_task_self()) });
-
-    let crash_context = crash_context::CrashContext {
-        task,
-        thread,
-        handler_thread: mach2::port::MACH_PORT_NULL,
-        exception: Some(crash_context::ExceptionInfo {
-            kind: mach2::exception_types::EXC_BREAKPOINT as i32,
-            code: 100,
-            subcode: None,
-        }),
-    };
+    // Wait for the child to spinup and report a crash context to us
+    let mut rcc = server
+        .try_recv_crash_context(Some(std::time::Duration::from_secs(5)))
+        .expect("failed to receive context")
+        .expect("receive timed out");
 
     let mut tmpfile = tempfile::Builder::new().prefix(name).tempfile().unwrap();
 
-    let mut dumper = MinidumpWriter::new(crash_context);
+    let task = rcc.crash_context.task;
+    let thread = rcc.crash_context.thread;
+
+    let mut dumper = MinidumpWriter::new(rcc.crash_context);
 
     dumper
         .dump(tmpfile.as_file_mut())
         .expect("failed to write minidump");
+
+    // Signal the child that we've received and processed the crash context
+    rcc.acker
+        .send_ack(1, Some(std::time::Duration::from_secs(2)))
+        .expect("failed to send ack");
 
     child.kill().expect("failed to kill child");
 
@@ -92,7 +81,11 @@ fn dump_external_process() {
         .unwrap()
         .as_secs();
 
-    let md = capture_minidump("dump_external_process").minidump;
+    let md = capture_minidump(
+        "dump_external_process",
+        mach2::exception_types::EXC_BREAKPOINT,
+    )
+    .minidump;
 
     let crash_reason = get_crash_reason(&md);
 
@@ -154,17 +147,17 @@ fn dump_external_process() {
 #[ignore = "ignored, requires dump_syms installed"]
 fn stackwalks() {
     println!("generating minidump...");
-    let md = capture_minidump("stackwalks");
+    let md = capture_minidump("stackwalks", mach2::exception_types::EXC_BREAKPOINT);
 
     // Generate the breakpad symbols
     println!("generating symbols...");
     let mut cmd = std::process::Command::new("dump_syms");
-    cmd.args(["-o", "mac_stackwalks.sym", "target/debug/test"]);
+    cmd.args(["-s", ".test-symbols", "target/debug/test"]);
     assert!(cmd.status().unwrap().success());
 
     let provider =
         minidump_processor::Symbolizer::new(minidump_processor::simple_symbol_supplier(vec![
-            ".".into()
+            ".test-symbols".into(),
         ]));
 
     let state = futures::executor::block_on(async {
@@ -174,24 +167,28 @@ fn stackwalks() {
 
     //state.print(&mut std::io::stdout()).map_err(|_| ()).unwrap();
 
-    // We expect 2 threads, one of which is fake crashing thread
+    // We expect at least 2 threads, one of which is the fake crashing thread
     let fake_crash_thread = state
         .threads
         .iter()
         .find(|cs| cs.thread_id == md.thread)
         .expect("failed to find crash thread");
 
-    // The thread _should_ have a name
-    assert_eq!(
-        fake_crash_thread.thread_name.as_deref(),
-        Some("test-thread")
-    );
+    // The thread is named, however we currently don't retrieve that information
+    // currently, indeed, it appears that you need to retrieve the pthread that
+    // corresponds the mach port for a thread, however that API seems to be
+    // task specific...
+    // assert_eq!(
+    //     fake_crash_thread.thread_name.as_deref(),
+    //     Some("test-thread")
+    // );
 
     assert!(
-        fake_crash_thread
-            .frames
-            .iter()
-            .any(|sf| { sf.function_name.as_deref() == Some("wait_until_killed") }),
+        fake_crash_thread.frames.iter().any(|sf| {
+            sf.function_name
+                .as_ref()
+                .map_or(false, |fname| fname.ends_with("wait_until_killed"))
+        }),
         "unable to locate expected function"
     );
 }

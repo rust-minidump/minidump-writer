@@ -186,7 +186,7 @@ fn test_copy_from_process_self() {
 #[test]
 fn test_sanitize_stack_copy() {
     let num_of_threads = 1;
-    let mut child = start_child_and_return("spawn_alloc_wait");
+    let mut child = start_child_and_return(&["spawn_alloc_wait"]);
     let pid = child.id() as i32;
 
     let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
