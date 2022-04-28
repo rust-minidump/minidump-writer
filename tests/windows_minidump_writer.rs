@@ -51,6 +51,7 @@ fn dump_current_process() {
 
         let crash_context = crash_context::CrashContext {
             exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
+            process_id: std::process::id(),
             thread_id: GetCurrentThreadId(),
             exception_code: STATUS_INVALID_PARAMETER,
         };
