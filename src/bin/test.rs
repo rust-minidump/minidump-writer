@@ -347,7 +347,6 @@ mod mac {
 
     #[inline(never)]
     pub(super) fn real_main(_args: Vec<String>) -> Result<()> {
-
         dbg!(unsafe { libc::_dyld_image_count() });
         std::thread::Builder::new()
             .name("test-thread".to_owned())
@@ -360,11 +359,7 @@ mod mac {
                         let thread = dbg!(mach2::mach_init::mach_thread_self());
 
                         let mut real_task = 0;
-                        dbg!(mach2::traps::task_for_pid(
-                            task,
-                            pid as i32,
-                            &mut real_task
-                        ));
+                        dbg!(mach2::traps::task_for_pid(task, pid as i32, &mut real_task));
                         dbg!(real_task);
 
                         println!("{task} {thread}");
