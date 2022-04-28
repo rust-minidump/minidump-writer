@@ -86,7 +86,7 @@ fn dump_current_process() {
 fn dump_external_process() {
     use std::io::BufRead;
 
-    let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION));
+    let mut child = start_child_and_return(&[&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION)]);
 
     let (process_id, exception_pointers, thread_id, exception_code) = {
         let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
