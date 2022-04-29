@@ -81,30 +81,46 @@ impl MinidumpWriter {
 
         let stack_size = self.calculate_stack_size(start, dumper);
 
-        let stack_location = if stack_size == 0 {
-            // In some situations the stack address for the thread can come back 0.
-            // In these cases we skip over the threads in question and stuff the
-            // stack with a clearly borked value.
-            thread.stack.start_of_memory_range = 0xdeadbeef;
+        // In some situations the stack address for the thread can come back 0.
+        // In these cases we skip over the threads in question and stuff the
+        // stack with a clearly borked value.
+        //
+        // In other cases, notably a stack overflow, we might fail to read the
+        // stack eg. InvalidAddress in which case we use a different borked
+        // value to indicate the different failure
+        let stack_location = if stack_size != 0 {
+            dumper
+                .read_task_memory(start, stack_size)
+                .map(|stack_buffer| {
+                    let stack_location = MDLocationDescriptor {
+                        data_size: stack_buffer.len() as u32,
+                        rva: buffer.position() as u32,
+                    };
+                    buffer.write_all(&stack_buffer);
+                    stack_location
+                })
+                .ok()
+        } else {
+            None
+        };
+
+        thread.stack.memory = stack_location.unwrap_or_else(|| {
+            let borked = if stack_size == 0 {
+                0xdeadbeef
+            } else {
+                0xdeaddead
+            };
+
+            thread.stack.start_of_memory_range = borked;
 
             let stack_location = MDLocationDescriptor {
                 data_size: 16,
                 rva: buffer.position() as u32,
             };
-            buffer.write_all(&0xdeadbeefu64.to_ne_bytes());
-            buffer.write_all(&0xdeadbeefu64.to_ne_bytes());
+            buffer.write_all(&borked.to_ne_bytes());
+            buffer.write_all(&borked.to_ne_bytes());
             stack_location
-        } else {
-            let stack_buffer = dumper.read_task_memory(start, stack_size)?;
-            let stack_location = MDLocationDescriptor {
-                data_size: stack_buffer.len() as u32,
-                rva: buffer.position() as u32,
-            };
-            buffer.write_all(&stack_buffer);
-            stack_location
-        };
-
-        thread.stack.memory = stack_location;
+        });
 
         // Add the stack memory as a raw block of memory, this is written to
         // the minidump as part of the memory list stream
