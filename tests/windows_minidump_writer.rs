@@ -56,7 +56,7 @@ fn dump_current_process() {
             exception_code: STATUS_INVALID_PARAMETER,
         };
 
-        let dumper = MinidumpWriter::current_process(crash_context);
+        let dumper = MinidumpWriter::new(crash_context);
 
         dumper
             .dump(tmpfile.as_file_mut())
@@ -118,8 +118,7 @@ fn dump_external_process() {
         .tempfile()
         .unwrap();
 
-    let dumper = MinidumpWriter::external_process(crash_context, process_id)
-        .expect("failed to create MinidumpWriter");
+    let dumper = MinidumpWriter::new(crash_context).expect("failed to create MinidumpWriter");
 
     dumper
         .dump(tmpfile.as_file_mut())
