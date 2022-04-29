@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 byteorder = "1.3.2"
 cfg-if = "1.0"
-crash-context = "0.1"
+crash-context = "0.2"
 memoffset = "0.6"
 minidump-common = "0.10"
 scroll = "0.11"
@@ -58,4 +58,3 @@ uuid = "1.0"
 
 [patch.crates-io]
 minidump-common = { git = "https://github.com/rust-minidump/rust-minidump", branch = "main" }
-crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "prep-release" }
