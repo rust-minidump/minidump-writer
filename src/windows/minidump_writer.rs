@@ -41,7 +41,7 @@ impl MinidumpWriter {
                 let proc = threading::OpenProcess(
                     threading::PROCESS_ALL_ACCESS, // desired access
                     0,                             // inherit handles
-                    pid,                           // pid
+                    crash_context.process_id,      // pid
                 );
 
                 if proc == 0 {
