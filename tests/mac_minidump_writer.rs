@@ -153,6 +153,17 @@ fn stackwalks() {
     dump_syms::dumper::single_file(
         dump_syms::dumper::Config {
             output: dump_syms::dumper::Output::Store(".test-symbols".into()),
+            symbol_server: None,
+            debug_id: None,
+            code_id: None,
+            arch: "",
+            file_type: dump_syms::common::FileType::Macho,
+            num_jobs: 2, // default this
+            check_cfi: false,
+            mapping_var: None,
+            mapping_src: None,
+            mapping_dest: None,
+            mapping_file: None,
         },
         "target/debug/test",
     )
