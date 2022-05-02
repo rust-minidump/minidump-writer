@@ -63,8 +63,9 @@ uuid = "1.0"
 
 [patch.crates-io]
 # PR https://github.com/rust-minidump/rust-minidump/pull/534, not released yet
-minidump-common = { git = "https://github.com/rust-minidump/rust-minidump", branch = "main" }
+minidump-common = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "main" }
 # PR https://github.com/rust-minidump/rust-minidump/pull/548
 minidump-processor = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "main" }
+minidump = { git = "https://github.com/EmbarkStudios/rust-minidump", branch = "main" }           # need to patch minidump as well so types are the same
 # PR https://github.com/mozilla/dump_syms/pull/356
 dump_syms = { git = "https://github.com/EmbarkStudios/dump_syms", branch = "master" }

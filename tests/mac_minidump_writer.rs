@@ -151,7 +151,7 @@ fn stackwalks() {
     // Generate the breakpad symbols
     println!("generating symbols...");
     dump_syms::dumper::single_file(
-        dump_syms::dumper::Config {
+        &dump_syms::dumper::Config {
             output: dump_syms::dumper::Output::Store(".test-symbols".into()),
             symbol_server: None,
             debug_id: None,
