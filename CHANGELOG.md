@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Initial implementation of support for `x86_64-apple-darwin` and `aarch64-apple-darwin`
+- [PR#21](https://github.com/rust-minidump/minidump-writer/pull/21) added an initial implementation for `x86_64-apple-darwin` and `aarch64-apple-darwin`
 
 ## [0.1.0] - 2022-04-26
 ### Added
