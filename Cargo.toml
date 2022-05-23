@@ -2,7 +2,7 @@
 name = "minidump-writer"
 version = "0.1.0"
 authors = ["Martin Sirringhaus"]
-description = "Rust rewrite of breakpad's minidump_writer"
+description = "Rust rewrite of Breakpad's minidump_writer"
 repository = "https://github.com/rust-minidump/minidump-writer"
 homepage = "https://github.com/rust-minidump/minidump-writer"
 edition = "2021"
@@ -24,10 +24,10 @@ goblin = "0.5"
 memmap2 = "0.5"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-nix = "0.23"
+nix = "0.24"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
-version = "0.34" # Latest is 0.35 (for now), but a vast majority of the ecosystem uses 0.34
+version = "0.36" # Latest is 0.35 (for now), but a vast majority of the ecosystem uses 0.34
 features = [
     # MiniDumpWriteDump requires...a lot of features
     "Win32_Foundation",
@@ -46,7 +46,7 @@ features = [
 mach2 = "0.4"
 
 [dev-dependencies]
-# Sigh, minidump-processor is async for some reason so we need an executor :(
+# Minidump-processor is async so we need an executor
 futures = { version = "0.3", features = ["executor"] }
 minidump = "0.11"
 memmap2 = "0.5"

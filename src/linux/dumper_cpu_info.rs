@@ -25,20 +25,48 @@ use nix::sys::utsname::uname;
 
 /// Retrieves the [`MDOSPlatform`] and synthesized version information
 pub fn os_information() -> (PlatformId, String) {
-    let info = uname();
-    let vers = format!(
-        "{} {} {} {}",
-        info.sysname(),
-        info.release(),
-        info.version(),
-        info.machine()
-    );
-
     let platform_id = if cfg!(target_os = "android") {
         PlatformId::Android
     } else {
         PlatformId::Linux
     };
 
-    (platform_id, vers)
+    // This is quite unfortunate, but the primary reason that uname could fail
+    // would be if it failed to fill out the nodename (hostname) field, even
+    // though we don't care about that particular field at all
+    let info = uname().map_or_else(
+        |_e| {
+            let os = if platform_id == PlatformId::Linux {
+                "Linux"
+            } else {
+                "Android"
+            };
+
+            let machine = if cfg!(target_arch = "x86_64") {
+                "x86_64"
+            } else if cfg!(target_arch = "x86") {
+                "x86"
+            } else if cfg!(target_arch = "aarch64") {
+                "aarch64"
+            } else if cfg!(target_arch = "arm") {
+                "arm"
+            } else {
+                "<unknown>"
+            };
+
+            // TODO: Fallback to other sources of information, eg /etc/os-release
+            format!("{os} <unknown> <unknown> {machine}")
+        },
+        |info| {
+            format!(
+                "{} {} {} {}",
+                info.sysname().to_str().unwrap_or("<unknown>"),
+                info.release().to_str().unwrap_or("<unknown>"),
+                info.version().to_str().unwrap_or("<unknown>"),
+                info.machine().to_str().unwrap_or("<unknown>"),
+            )
+        },
+    );
+
+    (platform_id, info)
 }
