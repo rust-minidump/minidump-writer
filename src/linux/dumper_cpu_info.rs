@@ -34,17 +34,8 @@ pub fn os_information() -> (PlatformId, String) {
     // This is quite unfortunate, but the primary reason that uname could fail
     // would be if it failed to fill out the nodename (hostname) field, even
     // though we don't care about that particular field at all
-    let info = uname()
-        .map(|info| {
-            format!(
-                "{} {} {} {}",
-                info.sysname().to_str().unwrap_or("<unknown>"),
-                info.release().to_str().unwrap_or("<unknown>"),
-                info.version().to_str().unwrap_or("<unknown>"),
-                info.machine().to_str().unwrap_or("<unknown>"),
-            )
-        })
-        .unwrap_or_else(|_e| {
+    let info = uname().map_or_else(
+        |_e| {
             let os = if platform_id == PlatformId::Linux {
                 "Linux"
             } else {
@@ -65,7 +56,17 @@ pub fn os_information() -> (PlatformId, String) {
 
             // TODO: Fallback to other sources of information, eg /etc/os-release
             format!("{os} <unknown> <unknown> {machine}")
-        });
+        },
+        |info| {
+            format!(
+                "{} {} {} {}",
+                info.sysname().to_str().unwrap_or("<unknown>"),
+                info.release().to_str().unwrap_or("<unknown>"),
+                info.version().to_str().unwrap_or("<unknown>"),
+                info.machine().to_str().unwrap_or("<unknown>"),
+            )
+        },
+    );
 
     (platform_id, info)
 }
