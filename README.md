@@ -72,9 +72,9 @@ fn write_minidump(crash_context: crash_context::CrashContext) {
 | Arch | unknown-linux-gnu | unknown-linux-musl | linux-android | pc-windows-msvc | apple-darwin | apple-ios
 --- | --- | --- | --- | --- | --- | --- |
 `x86_64` | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⭕️ |
-`i686` | ✅ | ✅ | ❌ | ⚠️ | ❌ | | ❌ |
-`arm` | ✅ | ✅ | ⚠️ | ⭕️ | ❌ | ❌ |
-`aarch64` | ✅ | ✅ | ⚠️ | ⭕️ | ✅ | ⭕️ |
+`i686` | ✅ | ✅ | ❌ | ⚠️ | ❌ | ❌ | ⭕️ |
+`arm` | ⚠️ | ⚠️ | ⚠️ | ⭕️ | ❌ | ❌ |
+`aarch64` | ⚠️ | ⚠️ | ⚠️ | ⭕️ | ✅ | ⭕️ |
 `mips` | ⭕️ | ⭕️ | ❌ | ❌ | ❌ | ❌ |
 `mips64` | ⭕️ | ⭕️ | ❌ | ❌ | ❌ | ❌ |
 `powerpc` | ⭕️ | ⭕️ | ❌ | ❌ | ❌ | ❌ |
