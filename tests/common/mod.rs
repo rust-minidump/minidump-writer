@@ -78,7 +78,7 @@ pub fn wait_for_threads(child: &mut Child, num: usize) {
 }
 
 #[allow(unused)]
-pub fn start_child_and_return(command: &str) -> Child {
+pub fn start_child_and_return(args: &[&str]) -> Child {
     let mut child = Command::new("cargo")
         .env("RUST_BACKTRACE", "1")
         .arg("run")
@@ -86,7 +86,7 @@ pub fn start_child_and_return(command: &str) -> Child {
         .arg("--bin")
         .arg("test")
         .arg("--")
-        .arg(command)
+        .args(args)
         .stdout(Stdio::piped())
         .spawn()
         .expect("failed to execute child");

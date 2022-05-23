@@ -51,11 +51,12 @@ fn dump_current_process() {
 
         let crash_context = crash_context::CrashContext {
             exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
+            process_id: std::process::id(),
             thread_id: GetCurrentThreadId(),
             exception_code: STATUS_INVALID_PARAMETER,
         };
 
-        let dumper = MinidumpWriter::current_process(crash_context);
+        let dumper = MinidumpWriter::new(crash_context).expect("failed to create MinidumpWriter");
 
         dumper
             .dump(tmpfile.as_file_mut())
@@ -85,7 +86,7 @@ fn dump_current_process() {
 fn dump_external_process() {
     use std::io::BufRead;
 
-    let mut child = start_child_and_return(&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION));
+    let mut child = start_child_and_return(&[&format!("{:x}", EXCEPTION_ILLEGAL_INSTRUCTION)]);
 
     let (process_id, exception_pointers, thread_id, exception_code) = {
         let mut f = std::io::BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
@@ -107,6 +108,7 @@ fn dump_external_process() {
 
     let crash_context = crash_context::CrashContext {
         exception_pointers: exception_pointers as _,
+        process_id,
         thread_id,
         exception_code,
     };
@@ -116,8 +118,7 @@ fn dump_external_process() {
         .tempfile()
         .unwrap();
 
-    let dumper = MinidumpWriter::external_process(crash_context, process_id)
-        .expect("failed to create MinidumpWriter");
+    let dumper = MinidumpWriter::new(crash_context).expect("failed to create MinidumpWriter");
 
     dumper
         .dump(tmpfile.as_file_mut())

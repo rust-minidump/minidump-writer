@@ -1,4 +1,6 @@
+use crate::dir_section::FileWriterError;
 use crate::maps_reader::MappingInfo;
+use crate::mem_writer::MemoryWriterError;
 use crate::thread_info::Pid;
 use goblin;
 use thiserror::Error;
@@ -121,16 +123,6 @@ pub enum DumperError {
 }
 
 #[derive(Debug, Error)]
-pub enum MemoryWriterError {
-    #[error("IO error when writing to DumpBuf")]
-    IOError(#[from] std::io::Error),
-    #[error("Failed integer conversion")]
-    TryFromIntError(#[from] std::num::TryFromIntError),
-    #[error("Failed to write to buffer")]
-    Scroll(#[from] scroll::Error),
-}
-
-#[derive(Debug, Error)]
 pub enum SectionAppMemoryError {
     #[error("Failed to copy memory from process")]
     CopyFromProcessError(#[from] DumperError),
@@ -200,14 +192,6 @@ pub enum SectionDsoDebugError {
     CopyFromProcessError(#[from] DumperError),
     #[error("Failed to copy memory from process")]
     FromUTF8Error(#[from] std::string::FromUtf8Error),
-}
-
-#[derive(Debug, Error)]
-pub enum FileWriterError {
-    #[error("IO error")]
-    IOError(#[from] std::io::Error),
-    #[error("Failed to write to memory")]
-    MemoryWriterError(#[from] MemoryWriterError),
 }
 
 #[derive(Debug, Error)]
