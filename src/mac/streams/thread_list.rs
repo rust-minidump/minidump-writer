@@ -18,7 +18,7 @@ impl MinidumpWriter {
             location: list_header.location(),
         };
 
-        let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, thread_count)?;
+        let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, threads.len())?;
         dirent.location.data_size += thread_list.location().data_size;
 
         for (i, tid) in threads.iter().enumerate() {

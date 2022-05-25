@@ -24,6 +24,7 @@ impl MinidumpWriter {
         Self {
             crash_context,
             memory_blocks: Vec::new(),
+            threads: Vec::new(),
         }
     }
 
@@ -92,7 +93,7 @@ impl MinidumpWriter {
     /// Retrieves the list of active threads in the target process, but removes
     /// the handler thread if it is known to simplify dump analysis
     #[inline]
-    fn threads(&mut self, dumper: &TaskDumper) -> &[u32] {
+    pub(crate) fn threads(&mut self, dumper: &TaskDumper) -> &[u32] {
         if self.threads.is_empty() {
             if let Ok(threads) = dumper.read_threads() {
                 self.threads = threads.into();
