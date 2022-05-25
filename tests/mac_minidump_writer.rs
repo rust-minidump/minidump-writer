@@ -156,7 +156,13 @@ fn stackwalks() {
             symbol_server: None,
             debug_id: None,
             code_id: None,
-            arch: "",
+            arch: if cfg!(target_arch = "aarch64") {
+                "aarch64"
+            } else if cfg!(target_arch = "x86_64") {
+                "x86_64"
+            } else {
+                panic!("invalid MacOS target architecture")
+            },
             file_type: dump_syms::common::FileType::Macho,
             num_jobs: 2, // default this
             check_cfi: false,
