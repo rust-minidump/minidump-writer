@@ -35,7 +35,7 @@ impl MinidumpWriter {
         {
             // It's unfortunate if we can't grab a thread name, but it's also
             // not a critical failure
-            let name_loc = match Self::write_thread_name(buffer, *tid) {
+            let name_loc = match Self::write_thread_name(buffer, dumper, *tid) {
                 Ok(loc) => loc,
                 Err(_err) => {
                     // TODO: log error
@@ -58,39 +58,29 @@ impl MinidumpWriter {
     /// location if successful
     fn write_thread_name(
         buffer: &mut Buffer,
+        dumper: &TaskDumper,
         tid: u32,
     ) -> Result<MDLocationDescriptor, WriterError> {
-        const THREAD_INFO_COUNT: u32 =
-            (std::mem::size_of::<libc::proc_threadinfo>() / std::mem::size_of::<u32>()) as u32;
-
-        // SAFETY: syscalls
-        unsafe {
-            let mut thread_info = std::mem::MaybeUninit::<libc::proc_threadinfo>::uninit();
-            let mut count = THREAD_INFO_COUNT;
-
-            // As noted in usr/include/mach/thread_info.h, the THREAD_EXTENDED_INFO
-            // return is exactly the same as proc_pidinfo(..., proc_threadinfo)
-
-            mach_call!(mach::thread_info(
-                tid,
-                5, // THREAD_EXTENDED_INFO
-                thread_info.as_mut_ptr().cast(),
-                &mut size,
-            ))?;
-
-            let thread_info = thread_info.assume_init();
-            let name = dbg!(std::str::from_utf8(std::slice::from_raw_parts(
-                thread_info.pth_name.as_ptr().cast(),
-                thread_info.pth_name.len(),
-            )))?;
-
-            // Ignore the null terminator
-            let tname = match name.find('\0') {
-                Some(i) => &name[..i],
-                None => name,
-            };
-
-            Ok(write_string_to_location(buffer, tname)?)
+        // As noted in usr/include/mach/thread_info.h, the THREAD_EXTENDED_INFO
+        // return is exactly the same as proc_pidinfo(..., proc_threadinfo)
+        impl mach::ThreadInfo for libc::proc_threadinfo {
+            const FLAVOR: u32 = 5; // THREAD_EXTENDED_INFO
         }
+
+        let thread_info: libc::proc_threadinfo = dumper.thread_info(tid)?;
+
+        let name = dbg!(std::str::from_utf8(std::slice::from_raw_parts(
+            thread_info.pth_name.as_ptr().cast(),
+            thread_info.pth_name.len(),
+        )))
+        .map_err(|err| TaskDumpError::from(err))?;
+
+        // Ignore the null terminator
+        let tname = match name.find('\0') {
+            Some(i) => &name[..i],
+            None => name,
+        };
+
+        Ok(write_string_to_location(buffer, tname)?)
     }
 }

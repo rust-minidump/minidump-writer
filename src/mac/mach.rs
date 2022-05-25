@@ -290,6 +290,15 @@ pub trait TaskInfo {
     const FLAVOR: u32;
 }
 
+/// Minimal trait that just pairs a structure that can be filled out by
+/// [`thread_info`] with the "flavor" that tells it the info we
+/// actually want to retrieve
+pub trait ThreadInfo {
+    /// One of the `THREAD_*` integers. I assume it's very bad if you implement
+    /// this trait and provide the wrong flavor for the struct
+    const FLAVOR: u32;
+}
+
 /// <usr/include/mach-o/loader.h>, the file type for the main executable image
 pub const MH_EXECUTE: u32 = 0x2;
 // usr/include/mach-o/loader.h, magic number for MachHeader
@@ -571,8 +580,11 @@ extern "C" {
 
     /// Fomr <user/include/mach/thread_act.h>, this retrieves thread info for the
     /// for the specified thread.
+    ///
+    /// Note that the info_size parameter is actually the size of the thread_info / 4
+    /// as it is the number of words in the thread info
     pub fn thread_info(
-        thread: mach_port_t,
+        thread: u32,
         flavor: i32,
         thread_info: *mut i32,
         info_size: *mut u32,
