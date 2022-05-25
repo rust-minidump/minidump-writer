@@ -58,19 +58,19 @@ impl MinidumpWriter {
         unsafe {
             let mut thread_info = std::mem::MaybeUninit::<libc::proc_threadinfo>::uninit();
             let size = std::mem::size_of::<libc::proc_threadinfo>() as i32;
-            if libc::proc_pidinfo(
-                tid as _,
+            if dbg!(libc::proc_pidinfo(
+                dbg!(tid as _),
                 libc::PROC_PIDTHREADINFO,
                 0,
                 thread_info.as_mut_ptr().cast(),
                 size,
-            ) == size
+            )) == size
             {
                 let thread_info = thread_info.assume_init();
-                let name = std::str::from_utf8(std::slice::from_raw_parts(
+                let name = dbg!(std::str::from_utf8(std::slice::from_raw_parts(
                     thread_info.pth_name.as_ptr().cast(),
                     thread_info.pth_name.len(),
-                ))
+                )))
                 .ok()?;
 
                 // Ignore the null terminator
