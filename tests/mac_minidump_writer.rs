@@ -138,71 +138,67 @@ fn dump_external_process() {
     }
 }
 
-// /// Validates we can actually walk the stack for each thread in the minidump,
-// /// this is using minidump-processor, which (currently) depends on breakpad
-// /// symbols, however https://github.com/mozilla/dump_syms is not available as
-// /// a library https://github.com/mozilla/dump_syms/issues/253, so we just require
-// /// that it already be installed, hence the ignore
-// #[test]
-// fn stackwalks() {
-//     println!("generating minidump...");
-//     let md = capture_minidump("stackwalks", mach2::exception_types::EXC_BREAKPOINT);
+/// Validates we can actually walk the stack for each thread in the minidump,
+/// this is using minidump-processor, which (currently) depends on breakpad
+/// symbols, however https://github.com/mozilla/dump_syms is not available as
+/// a library https://github.com/mozilla/dump_syms/issues/253, so we just require
+/// that it already be installed, hence the ignore
+#[test]
+fn stackwalks() {
+    println!("generating minidump...");
+    let md = capture_minidump("stackwalks", mach2::exception_types::EXC_BREAKPOINT);
 
-//     // Generate the breakpad symbols
-//     println!("generating symbols...");
-//     dump_syms::dumper::single_file(
-//         &dump_syms::dumper::Config {
-//             output: dump_syms::dumper::Output::Store(".test-symbols".into()),
-//             symbol_server: None,
-//             debug_id: None,
-//             code_id: None,
-//             arch: "",
-//             file_type: dump_syms::common::FileType::Macho,
-//             num_jobs: 2, // default this
-//             check_cfi: false,
-//             mapping_var: None,
-//             mapping_src: None,
-//             mapping_dest: None,
-//             mapping_file: None,
-//         },
-//         "target/debug/test",
-//     )
-//     .expect("failed to dump symbols");
+    // Generate the breakpad symbols
+    println!("generating symbols...");
+    dump_syms::dumper::single_file(
+        &dump_syms::dumper::Config {
+            output: dump_syms::dumper::Output::Store(".test-symbols".into()),
+            symbol_server: None,
+            debug_id: None,
+            code_id: None,
+            arch: "",
+            file_type: dump_syms::common::FileType::Macho,
+            num_jobs: 2, // default this
+            check_cfi: false,
+            mapping_var: None,
+            mapping_src: None,
+            mapping_dest: None,
+            mapping_file: None,
+        },
+        "target/debug/test",
+    )
+    .expect("failed to dump symbols");
 
-//     let provider =
-//         minidump_processor::Symbolizer::new(minidump_processor::simple_symbol_supplier(vec![
-//             ".test-symbols".into(),
-//         ]));
+    let provider =
+        minidump_processor::Symbolizer::new(minidump_processor::simple_symbol_supplier(vec![
+            ".test-symbols".into(),
+        ]));
 
-//     let state = futures::executor::block_on(async {
-//         minidump_processor::process_minidump(&md.minidump, &provider).await
-//     })
-//     .unwrap();
+    let state = futures::executor::block_on(async {
+        minidump_processor::process_minidump(&md.minidump, &provider).await
+    })
+    .unwrap();
 
-//     //state.print(&mut std::io::stdout()).map_err(|_| ()).unwrap();
+    //state.print(&mut std::io::stdout()).map_err(|_| ()).unwrap();
 
-//     // We expect at least 2 threads, one of which is the fake crashing thread
-//     let fake_crash_thread = state
-//         .threads
-//         .iter()
-//         .find(|cs| cs.thread_id == md.thread)
-//         .expect("failed to find crash thread");
+    // We expect at least 2 threads, one of which is the fake crashing thread
+    let fake_crash_thread = state
+        .threads
+        .iter()
+        .find(|cs| cs.thread_id == md.thread)
+        .expect("failed to find crash thread");
 
-//     // The thread is named, however we currently don't retrieve that information
-//     // currently, indeed, it appears that you need to retrieve the pthread that
-//     // corresponds the mach port for a thread, however that API seems to be
-//     // task specific...
-//     // assert_eq!(
-//     //     fake_crash_thread.thread_name.as_deref(),
-//     //     Some("test-thread")
-//     // );
+    assert_eq!(
+        fake_crash_thread.thread_name.as_deref(),
+        Some("test-thread")
+    );
 
-//     assert!(
-//         fake_crash_thread.frames.iter().any(|sf| {
-//             sf.function_name
-//                 .as_ref()
-//                 .map_or(false, |fname| fname.ends_with("wait_until_killed"))
-//         }),
-//         "unable to locate expected function"
-//     );
-// }
+    assert!(
+        fake_crash_thread.frames.iter().any(|sf| {
+            sf.function_name
+                .as_ref()
+                .map_or(false, |fname| fname.ends_with("wait_until_killed"))
+        }),
+        "unable to locate expected function"
+    );
+}
