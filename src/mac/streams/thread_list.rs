@@ -23,7 +23,7 @@ impl MinidumpWriter {
         dirent.location.data_size += thread_list.location().data_size;
 
         for (i, tid) in threads.enumerate() {
-            let thread = self.write_thread(*tid, buffer, dumper)?;
+            let thread = self.write_thread(tid, buffer, dumper)?;
             thread_list.set_value_at(buffer, thread, i)?;
         }
 

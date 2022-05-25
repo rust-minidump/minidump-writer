@@ -23,7 +23,7 @@ impl MinidumpWriter {
         for (i, tid) in threads.enumerate() {
             // It's unfortunate if we can't grab a thread name, but it's also
             // not a critical failure
-            let name_loc = match Self::write_thread_name(buffer, dumper, *tid) {
+            let name_loc = match Self::write_thread_name(buffer, dumper, tid) {
                 Ok(loc) => loc,
                 Err(_err) => {
                     // TODO: log error
@@ -32,7 +32,7 @@ impl MinidumpWriter {
             };
 
             let thread = MDRawThreadName {
-                thread_id: *tid,
+                thread_id: tid,
                 thread_name_rva: name_loc.rva.into(),
             };
 
