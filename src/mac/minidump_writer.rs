@@ -14,6 +14,8 @@ pub struct MinidumpWriter {
     /// List of raw blocks of memory we've written into the stream. These are
     /// referenced by other streams (eg thread list)
     pub(crate) memory_blocks: Vec<MDMemoryDescriptor>,
+    /// List of threads, minus the handler thread
+    threads: Vec<u32>,
 }
 
 impl MinidumpWriter {
@@ -85,5 +87,29 @@ impl MinidumpWriter {
         }
 
         Ok(buffer.into())
+    }
+
+    /// Retrieves the list of active threads in the target process, but removes
+    /// the handler thread if it is known to simplify dump analysis
+    #[inline]
+    fn threads(&mut self, dumper: &TaskDumper) -> &[u32] {
+        if self.threads.is_empty() {
+            if let Ok(threads) = dumper.read_threads() {
+                self.threads = threads.into();
+                // Ignore the thread that handled the exception
+                if self.crash_context.handler_thread != mach2::port::MACH_PORT_NULL {
+                    if let Some(ind) = self
+                        .threads
+                        .iter()
+                        .position(|tid| *tid == self.crash_context.handler_thread)
+                    {
+                        // Preserves order, but not sure if that is actually relevant in most cases
+                        self.threads.remove(ind);
+                    }
+                }
+            }
+        }
+
+        &self.threads
     }
 }

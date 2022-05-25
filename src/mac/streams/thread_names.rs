@@ -8,16 +8,9 @@ impl MinidumpWriter {
         buffer: &mut DumpBuf,
         dumper: &TaskDumper,
     ) -> Result<MDRawDirectory, WriterError> {
-        let threads = dumper.read_threads()?;
+        let threads = self.threads(dumper);
 
-        // Ignore the thread that handled the exception
-        let thread_count = if self.crash_context.handler_thread != mach2::port::MACH_PORT_NULL {
-            threads.len() - 1
-        } else {
-            threads.len()
-        };
-
-        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, thread_count as u32)?;
+        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, threads.len() as u32)?;
 
         let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ThreadNamesStream as u32,
@@ -27,12 +20,7 @@ impl MinidumpWriter {
         let mut names = MemoryArrayWriter::<MDRawThreadName>::alloc_array(buffer, thread_count)?;
         dirent.location.data_size += names.location().data_size;
 
-        let handler_thread = self.crash_context.handler_thread;
-        for (i, tid) in threads
-            .iter()
-            .filter(|tid| **tid != handler_thread)
-            .enumerate()
-        {
+        for (i, tid) in threads.iter().enumerate() {
             // It's unfortunate if we can't grab a thread name, but it's also
             // not a critical failure
             let name_loc = match Self::write_thread_name(buffer, dumper, *tid) {
