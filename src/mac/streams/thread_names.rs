@@ -10,17 +10,17 @@ impl MinidumpWriter {
     ) -> Result<MDRawDirectory, WriterError> {
         let threads = self.threads(dumper);
 
-        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, threads.len() as u32)?;
+        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, threads.count() as u32)?;
 
         let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ThreadNamesStream as u32,
             location: list_header.location(),
         };
 
-        let mut names = MemoryArrayWriter::<MDRawThreadName>::alloc_array(buffer, threads.len())?;
+        let mut names = MemoryArrayWriter::<MDRawThreadName>::alloc_array(buffer, threads.count())?;
         dirent.location.data_size += names.location().data_size;
 
-        for (i, tid) in threads.iter().enumerate() {
+        for (i, tid) in threads.enumerate() {
             // It's unfortunate if we can't grab a thread name, but it's also
             // not a critical failure
             let name_loc = match Self::write_thread_name(buffer, dumper, *tid) {

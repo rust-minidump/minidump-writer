@@ -11,17 +11,18 @@ impl MinidumpWriter {
     ) -> Result<MDRawDirectory, WriterError> {
         let threads = self.threads(dumper);
 
-        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, threads.len() as u32)?;
+        let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, threads.count() as u32)?;
 
         let mut dirent = MDRawDirectory {
             stream_type: MDStreamType::ThreadListStream as u32,
             location: list_header.location(),
         };
 
-        let mut thread_list = MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, threads.len())?;
+        let mut thread_list =
+            MemoryArrayWriter::<MDRawThread>::alloc_array(buffer, threads.count())?;
         dirent.location.data_size += thread_list.location().data_size;
 
-        for (i, tid) in threads.iter().enumerate() {
+        for (i, tid) in threads.enumerate() {
             let thread = self.write_thread(*tid, buffer, dumper)?;
             thread_list.set_value_at(buffer, thread, i)?;
         }

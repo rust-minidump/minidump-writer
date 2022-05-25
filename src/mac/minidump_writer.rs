@@ -14,8 +14,6 @@ pub struct MinidumpWriter {
     /// List of raw blocks of memory we've written into the stream. These are
     /// referenced by other streams (eg thread list)
     pub(crate) memory_blocks: Vec<MDMemoryDescriptor>,
-    /// List of threads, minus the handler thread
-    threads: Vec<u32>,
 }
 
 impl MinidumpWriter {
@@ -24,7 +22,6 @@ impl MinidumpWriter {
         Self {
             crash_context,
             memory_blocks: Vec::new(),
-            threads: Vec::new(),
         }
     }
 
@@ -90,27 +87,50 @@ impl MinidumpWriter {
         Ok(buffer.into())
     }
 
-    /// Retrieves the list of active threads in the target process, but removes
-    /// the handler thread if it is known to simplify dump analysis
+    /// Retrieves the list of active threads in the target process, except
+    /// the handler thread if it is known, to simplify dump analysis
     #[inline]
-    pub(crate) fn threads(&mut self, dumper: &TaskDumper) -> &[u32] {
-        if self.threads.is_empty() {
-            if let Ok(threads) = dumper.read_threads() {
-                self.threads = threads.into();
-                // Ignore the thread that handled the exception
-                if self.crash_context.handler_thread != mach2::port::MACH_PORT_NULL {
-                    if let Some(ind) = self
-                        .threads
-                        .iter()
-                        .position(|tid| *tid == self.crash_context.handler_thread)
-                    {
-                        // Preserves order, but not sure if that is actually relevant in most cases
-                        self.threads.remove(ind);
-                    }
-                }
+    pub(crate) fn threads(&self, dumper: &TaskDumper) -> ActiveThreads {
+        ActiveThreads {
+            threads: dumper.read_threads().unwrap_or_default(),
+            handler_thread: self.crash_context.handler_thread,
+            i: 0,
+        }
+    }
+}
+
+pub(crate) struct ActiveThreads {
+    threads: &'static [u32],
+    handler_thread: u32,
+    i: usize,
+}
+
+impl ActiveThreads {
+    #[inline]
+    pub(crate) fn count(&self) -> usize {
+        let mut len = self.threads.len();
+
+        if self.handler_thread != mach2::port::MACH_PORT_NULL {
+            len -= 1;
+        }
+
+        len
+    }
+}
+
+impl Iterator for ActiveThreads {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.i < self.threads.len() {
+            let i = self.i;
+            self.i += 1;
+
+            if self.threads[i] != self.handler_thread {
+                return Some(self.threads[i]);
             }
         }
 
-        &self.threads
+        None
     }
 }
