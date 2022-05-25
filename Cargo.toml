@@ -60,3 +60,6 @@ minidump-processor = { version = "0.11", default-features = false, features = [
 ] }
 similar-asserts = "1.2"
 uuid = "1.0"
+
+[patch.crates-io]
+dump_syms = { git = "https://github.com/EmbarkStudios/dump_syms", rev = "6531018" }
