@@ -107,7 +107,7 @@ pub(crate) struct ActiveThreads {
 
 impl ActiveThreads {
     #[inline]
-    pub(crate) fn count(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         let mut len = self.threads.len();
 
         if self.handler_thread != mach2::port::MACH_PORT_NULL {
