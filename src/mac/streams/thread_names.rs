@@ -69,15 +69,15 @@ impl MinidumpWriter {
 
         let thread_info: libc::proc_threadinfo = dumper.thread_info(tid)?;
 
-        let name = dbg!(std::str::from_utf8(
+        let name = std::str::from_utf8(
             // SAFETY: This is an initialized block of static size
             unsafe {
                 std::slice::from_raw_parts(
                     thread_info.pth_name.as_ptr().cast(),
                     thread_info.pth_name.len(),
                 )
-            }
-        ))
+            },
+        )
         .unwrap_or_default();
 
         // Ignore the null terminator
