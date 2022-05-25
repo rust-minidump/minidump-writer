@@ -568,4 +568,13 @@ extern "C" {
     /// Apple, there is no mention of a replacement function or when/if it might
     /// eventually disappear.
     pub fn pid_for_task(task: mach_port_name_t, pid: *mut i32) -> kern_return_t;
+
+    /// Fomr <user/include/mach/thread_act.h>, this retrieves thread info for the
+    /// for the specified thread.
+    pub fn thread_info(
+        thread: mach_port_t,
+        flavor: i32,
+        thread_info: *mut i32,
+        info_size: *mut u32,
+    ) -> kern_return_t;
 }

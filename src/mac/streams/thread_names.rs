@@ -53,36 +53,41 @@ impl MinidumpWriter {
 
     /// Attempts to retrieve and write the threadname, returning the threa names
     /// location if successful
-    fn write_thread_name(buffer: &mut Buffer, tid: u32) -> Option<MDLocationDescriptor> {
+    fn write_thread_name(
+        buffer: &mut Buffer,
+        tid: u32,
+    ) -> Result<MDLocationDescriptor, TaskDumpError> {
+        const THREAD_INFO_COUNT: u32 =
+            (std::mem::size_of::<libc::proc_threadinfo>() / std::mem::size_of::<u32>()) as u32;
+
         // SAFETY: syscalls
         unsafe {
             let mut thread_info = std::mem::MaybeUninit::<libc::proc_threadinfo>::uninit();
-            let size = std::mem::size_of::<libc::proc_threadinfo>() as i32;
-            if dbg!(libc::proc_pidinfo(
-                dbg!(tid as _),
-                libc::PROC_PIDTHREADINFO,
-                0,
+            let mut count = THREAD_INFO_COUNT;
+
+            // As noted in usr/include/mach/thread_info.h, the THREAD_EXTENDED_INFO
+            // return is exactly the same as proc_pidinfo(..., proc_threadinfo)
+
+            mach_call!(mach::thread_info(
+                tid,
+                5, // THREAD_EXTENDED_INFO
                 thread_info.as_mut_ptr().cast(),
-                size,
-            )) == size
-            {
-                let thread_info = thread_info.assume_init();
-                let name = dbg!(std::str::from_utf8(std::slice::from_raw_parts(
-                    thread_info.pth_name.as_ptr().cast(),
-                    thread_info.pth_name.len(),
-                )))
-                .ok()?;
+                &mut size,
+            ))?;
 
-                // Ignore the null terminator
-                let tname = match name.find('\0') {
-                    Some(i) => &name[..i],
-                    None => name,
-                };
+            let thread_info = thread_info.assume_init();
+            let name = dbg!(std::str::from_utf8(std::slice::from_raw_parts(
+                thread_info.pth_name.as_ptr().cast(),
+                thread_info.pth_name.len(),
+            )))?;
 
-                write_string_to_location(buffer, tname).ok()
-            } else {
-                None
-            }
+            // Ignore the null terminator
+            let tname = match name.find('\0') {
+                Some(i) => &name[..i],
+                None => name,
+            };
+
+            Ok(write_string_to_location(buffer, tname)?)
         }
     }
 }
