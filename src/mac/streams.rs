@@ -5,6 +5,7 @@ mod misc_info;
 mod module_list;
 mod system_info;
 mod thread_list;
+mod thread_names;
 
 use super::{
     errors::WriterError,

@@ -287,6 +287,28 @@ impl TaskDumper {
         unsafe { Ok(info.assume_init()) }
     }
 
+    /// Reads the specified task information.
+    ///
+    /// # Errors
+    ///
+    /// The syscall to receive the task information failed for some reason, eg.
+    /// the specified type and the flavor are mismatched and considered invalid,
+    /// or the thread no longer exists
+    pub fn thread_info<T: mach::ThreadInfo>(&self, tid: u32) -> Result<T, TaskDumpError> {
+        let mut thread_info = std::mem::MaybeUninit::<T>::uninit();
+        let mut count = (std::mem::size_of::<T>() / std::mem::size_of::<u32>()) as u32;
+
+        mach_call!(mach::thread_info(
+            tid,
+            T::FLAVOR,
+            thread_info.as_mut_ptr().cast(),
+            &mut count,
+        ))?;
+
+        // SAFETY: this will be initialized if the call succeeded
+        unsafe { Ok(thread_info.assume_init()) }
+    }
+
     /// Retrieves all of the images loaded in the task.
     ///
     /// Note that there may be multiple images with the same load address.

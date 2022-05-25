@@ -37,6 +37,7 @@ impl MinidumpWriter {
                 Box::new(|mw, buffer, dumper| mw.write_module_list(buffer, dumper)),
                 Box::new(|mw, buffer, dumper| mw.write_misc_info(buffer, dumper)),
                 Box::new(|mw, buffer, dumper| mw.write_breakpad_info(buffer, dumper)),
+                Box::new(|mw, buffer, dumper| mw.write_thread_names(buffer, dumper)),
             ];
 
             // Exception stream needs to be the last entry in this array as it may
@@ -84,5 +85,52 @@ impl MinidumpWriter {
         }
 
         Ok(buffer.into())
+    }
+
+    /// Retrieves the list of active threads in the target process, except
+    /// the handler thread if it is known, to simplify dump analysis
+    #[inline]
+    pub(crate) fn threads(&self, dumper: &TaskDumper) -> ActiveThreads {
+        ActiveThreads {
+            threads: dumper.read_threads().unwrap_or_default(),
+            handler_thread: self.crash_context.handler_thread,
+            i: 0,
+        }
+    }
+}
+
+pub(crate) struct ActiveThreads {
+    threads: &'static [u32],
+    handler_thread: u32,
+    i: usize,
+}
+
+impl ActiveThreads {
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        let mut len = self.threads.len();
+
+        if self.handler_thread != mach2::port::MACH_PORT_NULL {
+            len -= 1;
+        }
+
+        len
+    }
+}
+
+impl Iterator for ActiveThreads {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.i < self.threads.len() {
+            let i = self.i;
+            self.i += 1;
+
+            if self.threads[i] != self.handler_thread {
+                return Some(self.threads[i]);
+            }
+        }
+
+        None
     }
 }
