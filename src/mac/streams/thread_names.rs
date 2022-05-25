@@ -73,7 +73,7 @@ impl MinidumpWriter {
             thread_info.pth_name.as_ptr().cast(),
             thread_info.pth_name.len(),
         )))
-        .map_err(|err| TaskDumpError::from(err))?;
+        .unwrap_or_default();
 
         // Ignore the null terminator
         let tname = match name.find('\0') {

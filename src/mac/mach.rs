@@ -585,7 +585,7 @@ extern "C" {
     /// as it is the number of words in the thread info
     pub fn thread_info(
         thread: u32,
-        flavor: i32,
+        flavor: u32,
         thread_info: *mut i32,
         info_size: *mut u32,
     ) -> kern_return_t;
