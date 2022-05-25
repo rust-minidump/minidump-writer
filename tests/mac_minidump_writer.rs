@@ -196,7 +196,7 @@ fn stackwalks() {
 
     assert_eq!(
         fake_crash_thread.thread_name.as_deref(),
-        Some("test-thread")
+        Some("test-thread-just-for-giggles")
     );
 
     assert!(
