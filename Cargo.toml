@@ -62,4 +62,5 @@ similar-asserts = "1.2"
 uuid = "1.0"
 
 [patch.crates-io]
+# PR: https://github.com/mozilla/dump_syms/pull/376
 dump_syms = { git = "https://github.com/EmbarkStudios/dump_syms", rev = "6531018" }
