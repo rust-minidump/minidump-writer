@@ -36,8 +36,11 @@ impl MinidumpWriter {
             // It's unfortunate if we can't grab a thread name, but it's also
             // not a critical failure
             let name_loc = match Self::write_thread_name(buffer, *tid) {
-                Some(loc) => loc,
-                None => write_string_to_location(buffer, "")?,
+                Ok(loc) => loc,
+                Err(_err) => {
+                    // TODO: log error
+                    write_string_to_location(buffer, "")?
+                }
             };
 
             let thread = MDRawThreadName {
@@ -56,7 +59,7 @@ impl MinidumpWriter {
     fn write_thread_name(
         buffer: &mut Buffer,
         tid: u32,
-    ) -> Result<MDLocationDescriptor, TaskDumpError> {
+    ) -> Result<MDLocationDescriptor, WriterError> {
         const THREAD_INFO_COUNT: u32 =
             (std::mem::size_of::<libc::proc_threadinfo>() / std::mem::size_of::<u32>()) as u32;
 
