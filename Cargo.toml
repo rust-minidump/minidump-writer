@@ -24,7 +24,7 @@ goblin = "0.5"
 memmap2 = "0.5"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-nix = "0.24"
+nix = { version = "0.24", default-features = false, features = ["mman", "process", "ptrace", "user"] }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 version = "0.36"
