@@ -54,13 +54,9 @@ memmap2 = "0.5"
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # We dump symbols for the `test` executable so that we can validate that minidumps
 # created by this crate can be processed by minidump-processor
-dump_syms = { version = "0.0.7", default-features = false }
+dump_syms = { version = "1.0.1", default-features = false }
 minidump-processor = { version = "0.11", default-features = false, features = [
     "breakpad-syms",
 ] }
 similar-asserts = "1.2"
 uuid = "1.0"
-
-[patch.crates-io]
-# PR: https://github.com/mozilla/dump_syms/pull/376
-dump_syms = { git = "https://github.com/EmbarkStudios/dump_syms", rev = "6531018" }
