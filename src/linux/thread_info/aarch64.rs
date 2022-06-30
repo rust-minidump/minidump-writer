@@ -116,7 +116,7 @@ impl ThreadInfoAarch64 {
         let regs = Self::getregs(tid)?;
         let fpregs = Self::getfpregs(tid)?;
 
-        let stack_pointer = regs.regs[13] as usize;
+        let stack_pointer = regs.sp as usize;
 
         Ok(Self {
             stack_pointer,
