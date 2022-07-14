@@ -132,7 +132,10 @@ impl MinidumpWriter {
         })?;
 
         let file_path = if image.file_path != 0 {
-            dumper.read_string(image.file_path)?.unwrap_or_default()
+            dumper
+                .read_string(image.file_path)
+                .unwrap_or_default()
+                .unwrap_or_default()
         } else {
             String::new()
         };
