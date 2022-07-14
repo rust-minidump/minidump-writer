@@ -197,7 +197,8 @@ impl TaskDumper {
         };
 
         if let Ok(size_to_end) = get_region_size() {
-            let mut bytes = self.read_task_memory(addr, size_to_end as usize)?;
+            let mut bytes =
+                self.read_task_memory(addr, std::cmp::min(size_to_end as usize, 8 * 1024))?;
 
             // Find the null terminator and truncate our string
             if let Some(null_pos) = bytes.iter().position(|c| *c == 0) {
