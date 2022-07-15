@@ -1,5 +1,28 @@
 use super::*;
 
+struct ImageLoadInfo {
+    /// The preferred load address of the TEXT segment
+    vm_addr: u64,
+    /// The size of the TEXT segment
+    vm_size: u64,
+    /// The difference between the images preferred and actual load address
+    slide: isize,
+}
+
+struct ImageDetails {
+    /// Unique identifier for the module
+    uuid: [u8; 16],
+    /// The load info for the image indicating the range of addresses it covers
+    load_info: ImageLoadInfo,
+    /// Path to the module on the local filesystem. Note that as of MacOS 11.0.1
+    /// for system libraries, this path won't actually exist on the filesystem.
+    /// This data is more useful as human readable information in a minidump,
+    /// but is not required, as the real identifier is the UUID
+    file_path: Option<String>,
+    /// Version information, not present for the main executable
+    version: Option<u32>,
+}
+
 impl MinidumpWriter {
     /// Writes the [`MDStreamType::ModuleListStream`] to the minidump, which is
     /// the last of all loaded modules (images) in the process.
@@ -16,7 +39,9 @@ impl MinidumpWriter {
         // The list of modules is pretty critical information, but there could
         // still be useful information in the minidump without them if we can't
         // retrieve them for some reason
-        let modules = self.read_loaded_modules(buffer, dumper).unwrap_or_default();
+        let modules = self
+            .write_loaded_modules(buffer, dumper)
+            .unwrap_or_default();
 
         let list_header = MemoryWriter::<u32>::alloc_with_val(buffer, modules.len() as u32)?;
 
@@ -33,7 +58,7 @@ impl MinidumpWriter {
         Ok(dirent)
     }
 
-    fn read_loaded_modules(
+    fn write_loaded_modules(
         &self,
         buf: &mut DumpBuf,
         dumper: &TaskDumper,
@@ -50,17 +75,21 @@ impl MinidumpWriter {
         let mut has_main_executable = false;
 
         for image in images {
-            if let Ok((module, is_main_executable)) = self.read_module(image, buf, dumper) {
-                // We want to keep the modules sorted by their load address except
-                // in the case of the main executable image which we want to put
-                // first as it is most likely the culprit, or at least generally
-                // the most interesting module for human and machine inspectors
-                if is_main_executable {
-                    modules.insert(0, module);
-                    has_main_executable = true;
-                } else {
-                    modules.push(module)
-                };
+            if let Ok(image_details) = self.read_image(image, dumper) {
+                let is_main_executable = image_details.version.is_none();
+
+                if let Ok(module) = self.write_module(image_details, buf) {
+                    // We want to keep the modules sorted by their load address except
+                    // in the case of the main executable image which we want to put
+                    // first, as it is most likely the culprit, or at least generally
+                    // the most interesting module for human and machine inspectors
+                    if is_main_executable {
+                        modules.insert(0, module);
+                        has_main_executable = true;
+                    } else {
+                        modules.push(module)
+                    };
+                }
             }
         }
 
@@ -71,19 +100,18 @@ impl MinidumpWriter {
         }
     }
 
-    fn read_module(
+    /// Obtains important image metadata by traversing the image's load commands
+    ///
+    /// # Errors
+    ///
+    /// The image's load commands cannot be traversed, or a required load command
+    /// is missing
+    fn read_image(
         &self,
         image: ImageInfo,
-        buf: &mut DumpBuf,
         dumper: &TaskDumper,
-    ) -> Result<(MDRawModule, bool), WriterError> {
-        struct ImageSizes {
-            vm_addr: u64,
-            vm_size: u64,
-            slide: isize,
-        }
-
-        let mut sizes = None;
+    ) -> Result<ImageDetails, TaskDumpError> {
+        let mut load_info = None;
         let mut version = None;
         let mut uuid = None;
 
@@ -92,15 +120,11 @@ impl MinidumpWriter {
 
             for lc in load_commands.iter() {
                 match lc {
-                    mach::LoadCommand::Segment(seg) if sizes.is_none() => {
+                    mach::LoadCommand::Segment(seg) if load_info.is_none() => {
                         if &seg.segment_name[..7] == b"__TEXT\0" {
-                            let slide = if seg.file_off == 0 && seg.file_size != 0 {
-                                image.load_address as isize - seg.vm_addr as isize
-                            } else {
-                                0
-                            };
+                            let slide = image.load_address as isize - seg.vm_addr as isize;
 
-                            sizes = Some(ImageSizes {
+                            load_info = Some(ImageLoadInfo {
                                 vm_addr: seg.vm_addr,
                                 vm_size: seg.vm_size,
                                 slide,
@@ -116,13 +140,13 @@ impl MinidumpWriter {
                     _ => {}
                 }
 
-                if sizes.is_some() && version.is_some() && uuid.is_some() {
+                if load_info.is_some() && version.is_some() && uuid.is_some() {
                     break;
                 }
             }
         }
 
-        let sizes = sizes.ok_or(TaskDumpError::MissingLoadCommand {
+        let load_info = load_info.ok_or(TaskDumpError::MissingLoadCommand {
             name: "LC_SEGMENT_64",
             id: mach::LC_SEGMENT_64,
         })?;
@@ -132,26 +156,37 @@ impl MinidumpWriter {
         })?;
 
         let file_path = if image.file_path != 0 {
-            dumper
-                .read_string(image.file_path)
-                .unwrap_or_default()
-                .unwrap_or_default()
+            dumper.read_string(image.file_path).unwrap_or_default()
         } else {
-            String::new()
+            None
         };
 
-        let module_name = write_string_to_location(buf, &file_path)?;
+        Ok(ImageDetails {
+            uuid,
+            load_info,
+            file_path,
+            version,
+        })
+    }
+
+    fn write_module(
+        &self,
+        image: ImageDetails,
+        buf: &mut DumpBuf,
+    ) -> Result<MDRawModule, WriterError> {
+        let file_path = image.file_path.as_deref().unwrap_or_default();
+        let module_name = write_string_to_location(buf, file_path)?;
 
         let mut raw_module = MDRawModule {
-            base_of_image: (sizes.vm_addr as isize + sizes.slide) as u64,
-            size_of_image: sizes.vm_size as u32,
+            base_of_image: (image.load_info.vm_addr as isize + image.load_info.slide) as u64,
+            size_of_image: image.load_info.vm_size as u32,
             module_name_rva: module_name.rva,
             ..Default::default()
         };
 
         // Version info is not available for the main executable image since
         // it doesn't issue a LC_ID_DYLIB load command
-        if let Some(version) = &version {
+        if let Some(version) = image.version {
             raw_module.version_info.signature = format::VS_FFI_SIGNATURE;
             raw_module.version_info.struct_version = format::VS_FFI_STRUCVERSION;
 
@@ -166,7 +201,7 @@ impl MinidumpWriter {
         } else if file_path.is_empty() {
             "<Unknown>"
         } else {
-            &file_path
+            file_path
         };
 
         #[derive(scroll::Pwrite, scroll::SizeWith)]
@@ -181,7 +216,7 @@ impl MinidumpWriter {
             CvInfoPdb {
                 cv_signature: format::CvSignature::Pdb70 as u32,
                 age: 0,
-                signature: uuid.into(),
+                signature: image.uuid.into(),
             },
         )?;
 
@@ -195,6 +230,89 @@ impl MinidumpWriter {
         cv_location.data_size += module_name.len() as u32 + 1;
         raw_module.cv_record = cv_location;
 
-        Ok((raw_module, version.is_none()))
+        Ok(raw_module)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// This function isn't declared in libc nor mach2. And is also undocumented
+    /// by apple, I know, SHOCKING
+    extern "C" {
+        fn getsegmentdata(
+            header: *const libc::mach_header,
+            segname: *const u8,
+            size: &mut u64,
+        ) -> *const u8;
+    }
+
+    /// Tests that the images we write as modules to the minidump are consistent
+    /// with those reported by the kernel. The kernel function used as the source
+    /// of truth can only be used to obtain info for the current process, which
+    /// is why they aren't used in the actual implementation as we want to handle
+    /// both the local and intra-process scenarios
+    #[test]
+    /// The libc functions used here are all marked as deprecated, saying you
+    /// should use the mach2 crate, however, the mach2 crate does not expose
+    /// any of these functions so...
+    #[allow(deprecated)]
+    fn images_match() {
+        let mdw = MinidumpWriter::new(None, None);
+        let td = TaskDumper::new(mdw.task);
+
+        let images = td.read_images().unwrap();
+
+        let actual_image_count = unsafe { libc::_dyld_image_count() } as u32;
+
+        assert_eq!(actual_image_count, images.len() as u32);
+
+        for index in 0..actual_image_count {
+            let expected_img_hdr = unsafe { libc::_dyld_get_image_header(index) };
+
+            let actual_img = &images[index as usize];
+
+            assert_eq!(actual_img.load_address, expected_img_hdr as u64);
+
+            let mut expect_segment_size = 0;
+            let expect_segment_data = unsafe {
+                getsegmentdata(
+                    expected_img_hdr,
+                    b"__TEXT\0".as_ptr(),
+                    &mut expect_segment_size,
+                )
+            };
+
+            let actual_img_details = mdw
+                .read_image(actual_img.clone(), &td)
+                .expect("failed to get image details");
+
+            let expected_image_name =
+                unsafe { std::ffi::CStr::from_ptr(libc::_dyld_get_image_name(index)) };
+
+            let expected_slide = unsafe { libc::_dyld_get_image_vmaddr_slide(index) };
+            assert_eq!(
+                expected_slide, actual_img_details.load_info.slide,
+                "image {index}({expected_image_name:?}) slide is incorrect"
+            );
+
+            // The segment pointer has already been adjusted by the slide
+            assert_eq!(
+                expect_segment_data as u64,
+                (actual_img_details.load_info.vm_addr as isize + actual_img_details.load_info.slide)
+                    as u64,
+                "image {index}({expected_image_name:?}) TEXT address is incorrect"
+            );
+            assert_eq!(
+                expect_segment_size, actual_img_details.load_info.vm_size,
+                "image {index}({expected_image_name:?}) TEXT size is incorrect"
+            );
+
+            assert_eq!(
+                expected_image_name.to_str().unwrap(),
+                actual_img_details.file_path.unwrap()
+            );
+        }
     }
 }
