@@ -52,7 +52,7 @@ fn capture_minidump(name: &str, exception_kind: u32) -> Captured<'_> {
     let task = rcc.crash_context.task;
     let thread = rcc.crash_context.thread;
 
-    let mut dumper = MinidumpWriter::new(rcc.crash_context);
+    let mut dumper = MinidumpWriter::with_crash_context(rcc.crash_context);
 
     dumper
         .dump(tmpfile.as_file_mut())
