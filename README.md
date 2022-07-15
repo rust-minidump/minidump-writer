@@ -117,7 +117,7 @@ fn write_minidump(crash_context: crash_context::CrashContext) {
 
 ```rust
 fn write_minidump() {
-    // Passing the defaults to dumping the current process and thread.
+    // Defaults to dumping the current process and thread.
     let mut writer = minidump_writer::minidump_writer::MinidumpWriter::new(None, None)?;
 
     let mut minidump_file = std::fs::File::create("example_dump.mdmp").expect("failed to create file");
