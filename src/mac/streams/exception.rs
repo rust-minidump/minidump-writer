@@ -10,7 +10,14 @@ impl MinidumpWriter {
         buffer: &mut DumpBuf,
         dumper: &TaskDumper,
     ) -> Result<MDRawDirectory, WriterError> {
-        let thread_state = dumper.read_thread_state(self.crash_context.thread).ok();
+        // This shouldn't fail since we won't be writing this stream if the crash context is
+        // not present
+        let crash_context = self
+            .crash_context
+            .as_ref()
+            .ok_or(WriterError::NoCrashContext)?;
+
+        let thread_state = dumper.read_thread_state(crash_context.thread).ok();
 
         let thread_context = if let Some(ts) = &thread_state {
             let mut cpu = Default::default();
@@ -22,8 +29,7 @@ impl MinidumpWriter {
             None
         };
 
-        let exception_record = self
-            .crash_context
+        let exception_record = crash_context
             .exception
             .as_ref()
             .map(|exc| {
@@ -46,7 +52,7 @@ impl MinidumpWriter {
             .unwrap_or_default();
 
         let stream = MDRawExceptionStream {
-            thread_id: self.crash_context.thread,
+            thread_id: crash_context.thread,
             exception_record,
             thread_context: thread_context.unwrap_or_default(),
             __align: 0,
