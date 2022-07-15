@@ -1,15 +1,11 @@
 #![cfg(all(target_os = "windows", target_arch = "x86_64"))]
 
-use minidump::{CrashReason, Minidump, MinidumpMemoryList, MinidumpSystemInfo, MinidumpThreadList};
-use minidump_writer::minidump_writer::MinidumpWriter;
-use std::mem;
-use windows_sys::Win32::{
-    Foundation::{EXCEPTION_ILLEGAL_INSTRUCTION, STATUS_INVALID_PARAMETER},
-    System::{
-        Diagnostics::Debug::{RtlCaptureContext, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-        Threading::GetCurrentThreadId,
-    },
+use minidump::{
+    CrashReason, Minidump, MinidumpBreakpadInfo, MinidumpMemoryList, MinidumpSystemInfo,
+    MinidumpThreadList,
 };
+use minidump_writer::minidump_writer::MinidumpWriter;
+use windows_sys::Win32::Foundation::{EXCEPTION_ILLEGAL_INSTRUCTION, STATUS_INVALID_PARAMETER};
 mod common;
 use common::start_child_and_return;
 
@@ -34,12 +30,8 @@ fn dump_current_process() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriter::dump_current_context(
-        Some(STATUS_INVALID_PARAMETER),
-        true,
-        tmpfile.as_file_mut(),
-    )
-    .expect("failed to write minidump");
+    MinidumpWriter::dump_local_context(Some(STATUS_INVALID_PARAMETER), None, tmpfile.as_file_mut())
+        .expect("failed to write minidump");
 
     let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
 
@@ -53,6 +45,68 @@ fn dump_current_process() {
         crash_reason,
         CrashReason::from_windows_error(STATUS_INVALID_PARAMETER as u32)
     );
+
+    // SAFETY: syscall
+    let thread_id = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+
+    let bp_info: MinidumpBreakpadInfo =
+        md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");
+
+    assert_eq!(bp_info.dump_thread_id.unwrap(), thread_id);
+    assert_eq!(bp_info.requesting_thread_id.unwrap(), thread_id);
+}
+
+#[test]
+fn dump_specific_thread() {
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("windows_current_process")
+        .tempfile()
+        .unwrap();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let jh = std::thread::spawn(move || {
+        // SAFETY: syscall
+        let thread_id = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+        while tx.send(thread_id).is_ok() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    });
+
+    let crashing_thread_id = rx.recv().unwrap();
+
+    MinidumpWriter::dump_local_context(
+        Some(STATUS_INVALID_PARAMETER),
+        Some(crashing_thread_id),
+        tmpfile.as_file_mut(),
+    )
+    .expect("failed to write minidump");
+
+    drop(rx);
+    jh.join().unwrap();
+
+    let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+
+    let _: MinidumpThreadList = md.get_stream().expect("Couldn't find MinidumpThreadList");
+    let _: MinidumpMemoryList = md.get_stream().expect("Couldn't find MinidumpMemoryList");
+    let _: MinidumpSystemInfo = md.get_stream().expect("Couldn't find MinidumpSystemInfo");
+
+    let crash_reason = get_crash_reason(&md);
+
+    assert_eq!(
+        crash_reason,
+        CrashReason::from_windows_error(STATUS_INVALID_PARAMETER as u32)
+    );
+
+    // SAFETY: syscall
+    let requesting_thread_id =
+        unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+
+    let bp_info: MinidumpBreakpadInfo =
+        md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");
+
+    assert_eq!(bp_info.dump_thread_id.unwrap(), crashing_thread_id);
+    assert_eq!(bp_info.requesting_thread_id.unwrap(), requesting_thread_id);
 }
 
 /// Ensures that we can write minidumps for an external process. Unfortunately
