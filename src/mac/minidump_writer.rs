@@ -25,6 +25,21 @@ pub struct MinidumpWriter {
 impl MinidumpWriter {
     /// Creates a minidump writer for the specified mach task (process) and
     /// handler thread. If not specified, defaults to the current task and thread.
+    ///
+    /// ```
+    /// use minidump_writer::{minidump_writer::MinidumpWriter, mach2};
+    ///
+    /// // Note that this is the same as specifying `None` for both the task and
+    /// // handler thread, this is just meant to illustrate how you can setup
+    /// // a MinidumpWriter manually instead of using a `CrashContext`
+    /// // SAFETY: syscalls
+    /// let mdw = unsafe {
+    ///     MinidumpWriter::new(
+    ///         Some(mach2::traps::mach_task_self()),
+    ///         Some(mach2::mach_init::mach_thread_self()),
+    ///     )
+    /// };
+    /// ```
     pub fn new(task: Option<task_t>, handler_thread: Option<thread_t>) -> Self {
         Self {
             crash_context: None,
@@ -54,6 +69,8 @@ impl MinidumpWriter {
         }
     }
 
+    /// Writes a minidump to the specified destination, returning the raw minidump
+    /// contents upon success
     pub fn dump(&mut self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>> {
         let writers = {
             #[allow(clippy::type_complexity)]
