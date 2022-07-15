@@ -4,44 +4,96 @@ use scroll::Pwrite;
 use std::{ffi::c_void, os::windows::io::AsRawHandle};
 pub use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_SUCCESS, STATUS_INVALID_HANDLE},
+    Foundation::{
+        CloseHandle, ERROR_SUCCESS, STATUS_INVALID_HANDLE, STATUS_NONCONTINUABLE_EXCEPTION,
+    },
     System::{ApplicationVerifier as av, Diagnostics::Debug as md, Threading as threading},
 };
 
 pub struct MinidumpWriter {
-    /// The crash context as captured by an exception handler
-    crash_context: crash_context::CrashContext,
+    /// Optional exception information
+    exc_info: Option<md::MINIDUMP_EXCEPTION_INFORMATION>,
     /// Handle to the crashing process, which could be ourselves
     crashing_process: HANDLE,
-    /// The `EXCEPTION_POINTERS` contained in crash context is a pointer into the
-    /// memory of the process that crashed, as it contains an `EXCEPTION_RECORD`
-    /// record which is an internally linked list, so in the case that we are
-    /// dumping a process other than the current one, we need to tell
-    /// MiniDumpWriteDump that the pointers come from an external process so that
-    /// it can use eg ReadProcessMemory to get the contextual information from
-    /// the crash, rather than from the current process
-    is_external_process: bool,
+    /// The id of the process we are dumping
+    pid: u32,
 }
 
 impl MinidumpWriter {
-    /// Creates a minidump writer capable of dumping the process specified by
-    /// the [`crash_context::CrashContext`].
+    /// Creates a minidump of the current process, optionally including an
+    /// exception code and/or the CPU context of the current thread.
     ///
     /// Note that it is inherently unreliable to dump the currently running
-    /// processes, it is recommended to dump from an external process if possible.
+    /// process, at least in the event of an actual exception. It is recommended
+    /// to dump from an external process if possible via [`Self::dump_crash_context`]
+    ///
+    /// # Errors
+    ///
+    /// One or more system calls fail when gathering the minidump information
+    /// or writing it to the specified file
+    pub fn dump_current_context(
+        exception_code: Option<i32>,
+        include_cpu_context: bool,
+        destination: &mut std::fs::File,
+    ) -> Result<(), Error> {
+        let exception_code = exception_code.unwrap_or(STATUS_NONCONTINUABLE_EXCEPTION);
+
+        if include_cpu_context {
+            let mut exception_record: md::EXCEPTION_RECORD = std::mem::zeroed();
+            let mut exception_context = {
+                let mut ec = std::mem::MaybeUninit::uninit();
+
+                md::RtlCaptureContext(exception_context.as_mut_ptr());
+
+                exception_context.assume_init();
+            };
+
+            let exception_ptrs = md::EXCEPTION_POINTERS {
+                ExceptionRecord: &mut exception_record,
+                ContextRecord: &mut exception_context,
+            };
+
+            exception_record.ExceptionCode = exception_code;
+
+            let cc = crash_context::CrashContext {
+                exception_pointers: (&exception_ptrs as *const md::EXCEPTION_POINTERS).cast(),
+                process_id: std::process::id(),
+                thread_id: threading::GetCurrentThreadId(),
+                exception_code,
+            };
+
+            Self::dump_crash_context(cc, destination)
+        } else {
+            let cc = crash_context::CrashContext {
+                exception_pointers: std::ptr::null(),
+                process_id: std::process::id(),
+                thread_id: 0,
+                exception_code,
+            };
+
+            Self::dump_crash_context(cc, destination)
+        }
+    }
+
+    /// Writes a minidump for the context described by [`crash_context::CrashContext`].
     ///
     /// # Errors
     ///
     /// Fails if the process specified in the context is not the local process
     /// and we are unable to open it due to eg. security reasons.
-    pub fn new(crash_context: crash_context::CrashContext) -> Result<Self, Error> {
+    pub fn dump_crash_context(
+        crash_context: crash_context::CrashContext,
+        destination: &mut std::fs::File,
+    ) -> Result<(), Error> {
+        let pid = crash_context.process_id;
+
         // SAFETY: syscalls
         let (crashing_process, is_external_process) = unsafe {
-            if crash_context.process_id != std::process::id() {
+            if pid != std::process::id() {
                 let proc = threading::OpenProcess(
                     threading::PROCESS_ALL_ACCESS, // desired access
                     0,                             // inherit handles
-                    crash_context.process_id,      // pid
+                    pid,                           // pid
                 );
 
                 if proc == 0 {
@@ -54,30 +106,38 @@ impl MinidumpWriter {
             }
         };
 
-        Ok(Self {
-            crash_context,
+        let pid = crash_context.process_id;
+
+        let exc_info = (!crash_context.exception_pointers.is_null()).then(||
+            // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_exception_information
+            md::MINIDUMP_EXCEPTION_INFORMATION {
+                ThreadId: crash_context.thread_id,
+                // This is a mut pointer for some reason...I don't _think_ it is
+                // actually mut in practice...?
+                ExceptionPointers: crash_context.exception_pointers as *mut _,
+                /// The `EXCEPTION_POINTERS` contained in crash context is a pointer into the
+                /// memory of the process that crashed, as it contains an `EXCEPTION_RECORD`
+                /// record which is an internally linked list, so in the case that we are
+                /// dumping a process other than the current one, we need to tell
+                /// `MiniDumpWriteDump` that the pointers come from an external process so that
+                /// it can use eg `ReadProcessMemory` to get the contextual information from
+                /// the crash, rather than from the current process
+                ClientPointers: if is_external_process { 1 } else { 0 },
+            });
+
+        let mdw = Self {
+            exc_info,
             crashing_process,
-            is_external_process: true,
-        })
+            pid,
+        };
+
+        mdw.dump(destination)
     }
 
     /// Writes a minidump to the specified file
-    pub fn dump(&self, destination: &mut std::fs::File) -> Result<(), Error> {
-        let exc_info = if !self.crash_context.exception_pointers.is_null() {
-            // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_exception_information
-            Some(md::MINIDUMP_EXCEPTION_INFORMATION {
-                ThreadId: self.crash_context.thread_id,
-                // This is a mut pointer for some reason...I don't _think_ it is
-                // actually mut in practice...?
-                ExceptionPointers: self.crash_context.exception_pointers as *mut _,
-                ClientPointers: if self.is_external_process { 1 } else { 0 },
-            })
-        } else {
-            None
-        };
+    fn dump(mut self, destination: &mut std::fs::File) -> Result<(), Error> {
+        let exc_info = self.exc_info.take();
 
-        // This is a bit dangerous if doing in-process dumping, but that's not
-        // (currently) a real target of this crate, so this allocation is fine
         let mut user_streams = Vec::with_capacity(2);
 
         let mut breakpad_info = self.fill_breakpad_stream();
@@ -118,7 +178,7 @@ impl MinidumpWriter {
         let ret = unsafe {
             md::MiniDumpWriteDump(
                 self.crashing_process, // HANDLE to the process with the crash we want to capture
-                self.crash_context.process_id, // process id
+                self.pid,              // process id
                 destination.as_raw_handle() as HANDLE, // file to write the minidump to
                 md::MiniDumpNormal,    // MINIDUMP_TYPE - we _might_ want to make this configurable
                 exc_info

@@ -34,34 +34,12 @@ fn dump_current_process() {
         .tempfile()
         .unwrap();
 
-    unsafe {
-        let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
-        let mut exception_context = mem::MaybeUninit::uninit();
-
-        RtlCaptureContext(exception_context.as_mut_ptr());
-
-        let mut exception_context = exception_context.assume_init();
-
-        let exception_ptrs = EXCEPTION_POINTERS {
-            ExceptionRecord: &mut exception_record,
-            ContextRecord: &mut exception_context,
-        };
-
-        exception_record.ExceptionCode = STATUS_INVALID_PARAMETER;
-
-        let crash_context = crash_context::CrashContext {
-            exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
-            process_id: std::process::id(),
-            thread_id: GetCurrentThreadId(),
-            exception_code: STATUS_INVALID_PARAMETER,
-        };
-
-        let dumper = MinidumpWriter::new(crash_context).expect("failed to create MinidumpWriter");
-
-        dumper
-            .dump(tmpfile.as_file_mut())
-            .expect("failed to write minidump");
-    }
+    MinidumpWriter::dump_current_context(
+        Some(STATUS_INVALID_PARAMETER),
+        true,
+        tmpfile.as_file_mut(),
+    )
+    .expect("failed to write minidump");
 
     let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
 
@@ -118,10 +96,7 @@ fn dump_external_process() {
         .tempfile()
         .unwrap();
 
-    let dumper = MinidumpWriter::new(crash_context).expect("failed to create MinidumpWriter");
-
-    dumper
-        .dump(tmpfile.as_file_mut())
+    MinidumpWriter::dump_crash_context(crash_context, tmpfile.as_file_mut())
         .expect("failed to write minidump");
 
     child.kill().expect("failed to kill child");
