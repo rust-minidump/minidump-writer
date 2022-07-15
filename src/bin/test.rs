@@ -297,12 +297,9 @@ mod linux {
 mod windows {
     use super::*;
     use std::mem;
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::{
-            Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-            Threading::{GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId},
-        },
+    use windows_sys::Win32::System::{
+        Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
+        Threading::{GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId},
     };
 
     #[inline(never)]
