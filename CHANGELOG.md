@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
 ### Fixed
-- [PR#42](https://github.com/rust-minidump/minidump-writer/pull/42) resolved [#41](https://github.com/rust-minidump/minidump-writer/issues/41) by capping the VM read of task memory to avoid a syscall failure, as well as made it so that if an error does occur when reading the module's file path, the module is still written to the minidump, as the file path is less important than the UUID.
+- [PR#42](https://github.com/rust-minidump/minidump-writer/pull/42) resolved [#41](https://github.com/rust-minidump/minidump-writer/issues/41) by capping the VM read of task memory to avoid a syscall failure, as well as made it so that if an error does occur when reading the module's file path, the module is still written to the minidump, as the file path is less important than the UUID in terms of module identification.
+- [PR#44](https://github.com/rust-minidump/minidump-writer/pull/44) resolved [#43](https://github.com/rust-minidump/minidump-writer/issues/43) by correctly calculating the base address of each loaded module. The bug was inherited from Breakpad.
+- [PR#44](https://github.com/rust-minidump/minidump-writer/pull/44) and [PR#45](https://github.com/rust-minidump/minidump-writer/pull/45) resolved [#37](https://github.com/rust-minidump/minidump-writer/issues/37) by making the `crash_context::CrashContext` optional on MacOS and Windows, to make creating a minidump without necessarily having an actual crash more convenient for users.
 
 ## [0.2.1] - 2022-05-25
 ### Added
