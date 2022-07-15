@@ -20,9 +20,9 @@ impl MinidumpWriter {
                     | BreakpadInfoValid::RequestingThreadId.bits(),
                 // The thread where the exception port handled the exception, might
                 // be useful to ignore/deprioritize when processing the minidump
-                dump_thread_id: self.crash_context.handler_thread,
+                dump_thread_id: self.handler_thread,
                 // The actual thread where the exception was thrown
-                requesting_thread_id: self.crash_context.thread,
+                requesting_thread_id: self.crash_context.as_ref().map(|cc| cc.thread).unwrap_or(0),
             },
         )?;
 

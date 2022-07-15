@@ -6,25 +6,71 @@ use crate::{
 };
 use std::io::{Seek, Write};
 
+pub use mach2::mach_types::{task_t, thread_t};
+
 type Result<T> = std::result::Result<T, WriterError>;
 
 pub struct MinidumpWriter {
     /// The crash context as captured by an exception handler
-    pub(crate) crash_context: crash_context::CrashContext,
+    pub(crate) crash_context: Option<crash_context::CrashContext>,
     /// List of raw blocks of memory we've written into the stream. These are
     /// referenced by other streams (eg thread list)
     pub(crate) memory_blocks: Vec<MDMemoryDescriptor>,
+    /// The task being dumped
+    pub(crate) task: task_t,
+    /// The handler thread, so it can be ignored/deprioritized
+    pub(crate) handler_thread: thread_t,
 }
 
 impl MinidumpWriter {
-    /// Creates a minidump writer
-    pub fn new(crash_context: crash_context::CrashContext) -> Self {
+    /// Creates a minidump writer for the specified mach task (process) and
+    /// handler thread. If not specified, defaults to the current task and thread.
+    ///
+    /// ```
+    /// use minidump_writer::{minidump_writer::MinidumpWriter, mach2};
+    ///
+    /// // Note that this is the same as specifying `None` for both the task and
+    /// // handler thread, this is just meant to illustrate how you can setup
+    /// // a MinidumpWriter manually instead of using a `CrashContext`
+    /// // SAFETY: syscalls
+    /// let mdw = unsafe {
+    ///     MinidumpWriter::new(
+    ///         Some(mach2::traps::mach_task_self()),
+    ///         Some(mach2::mach_init::mach_thread_self()),
+    ///     )
+    /// };
+    /// ```
+    pub fn new(task: Option<task_t>, handler_thread: Option<thread_t>) -> Self {
         Self {
-            crash_context,
+            crash_context: None,
             memory_blocks: Vec::new(),
+            task: task.unwrap_or_else(|| {
+                // SAFETY: syscall
+                unsafe { mach2::traps::mach_task_self() }
+            }),
+            handler_thread: handler_thread.unwrap_or_else(|| {
+                // SAFETY: syscall
+                unsafe { mach2::mach_init::mach_thread_self() }
+            }),
         }
     }
 
+    /// Creates a minidump writer with the specified crash context, presumably
+    /// for another task
+    pub fn with_crash_context(crash_context: crash_context::CrashContext) -> Self {
+        let task = crash_context.task;
+        let handler_thread = crash_context.handler_thread;
+
+        Self {
+            crash_context: Some(crash_context),
+            memory_blocks: Vec::new(),
+            task,
+            handler_thread,
+        }
+    }
+
+    /// Writes a minidump to the specified destination, returning the raw minidump
+    /// contents upon success
     pub fn dump(&mut self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>> {
         let writers = {
             #[allow(clippy::type_complexity)]
@@ -43,7 +89,12 @@ impl MinidumpWriter {
             // Exception stream needs to be the last entry in this array as it may
             // be omitted in the case where the minidump is written without an
             // exception.
-            if self.crash_context.exception.is_some() {
+            if self
+                .crash_context
+                .as_ref()
+                .and_then(|cc| cc.exception.as_ref())
+                .is_some()
+            {
                 writers.push(Box::new(|mw, buffer, dumper| {
                     mw.write_exception(buffer, dumper)
                 }));
@@ -77,7 +128,7 @@ impl MinidumpWriter {
         // we should have a mostly-intact dump
         dir_section.write_to_file(&mut buffer, None)?;
 
-        let dumper = super::task_dumper::TaskDumper::new(self.crash_context.task);
+        let dumper = super::task_dumper::TaskDumper::new(self.task);
 
         for mut writer in writers {
             let dirent = writer(self, &mut buffer, &dumper)?;
@@ -93,7 +144,7 @@ impl MinidumpWriter {
     pub(crate) fn threads(&self, dumper: &TaskDumper) -> ActiveThreads {
         ActiveThreads {
             threads: dumper.read_threads().unwrap_or_default(),
-            handler_thread: self.crash_context.handler_thread,
+            handler_thread: self.handler_thread,
             i: 0,
         }
     }
