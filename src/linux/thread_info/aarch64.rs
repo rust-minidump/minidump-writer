@@ -3,17 +3,8 @@ use crate::{
     errors::ThreadInfoError,
     minidump_cpu::{RawContextCPU, FP_REG_COUNT, GP_REG_COUNT},
 };
+#[cfg(not(target_os = "android"))]
 use nix::sys::ptrace;
-
-/* Indices into iregs for registers with a dedicated or conventional
- * purpose.
- */
-pub enum MDARM64RegisterNumbers {
-    Fp = 29,
-    Lr = 30,
-    Sp = 31,
-    Pc = 32,
-}
 
 /// https://github.com/rust-lang/libc/pull/2719
 #[derive(Debug)]

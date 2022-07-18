@@ -15,7 +15,7 @@ impl CrashContext {
             crate::minidump_format::format::ContextFlagsArm::CONTEXT_ARM_FULL.bits();
 
         {
-            let mut iregs = &mut out.iregs;
+            let iregs = &mut out.iregs;
             let gregs = &self.inner.context.uc_mcontext;
             iregs[0] = gregs.arm_r0;
             iregs[1] = gregs.arm_r1;

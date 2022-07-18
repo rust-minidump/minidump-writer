@@ -26,7 +26,7 @@ cfg_if::cfg_if! {
 }
 
 #[derive(Debug)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 enum NT_Elf {
     NT_NONE = 0,
     NT_PRSTATUS = 1,
