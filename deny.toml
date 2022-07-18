@@ -1,9 +1,2 @@
 [advisories]
-ignore = [
-    # chrono can segfault due to use of localtime_r, however this is only used
-    # via the `cab` crate, which is not using local time
-    "RUSTSEC-2020-0159",
-    # This is an old version of time that can segfault due to local time, but
-    # again, this functionality is not being used
-    "RUSTSEC-2020-0071",
-]
+ignore = []
