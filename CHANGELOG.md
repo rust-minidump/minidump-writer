@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Fixed
+- [PR#47](https://github.com/rust-minidump/minidump-writer/pull/47) resolved [#46](https://github.com/rust-minidump/minidump-writer/issues/46) by handling the special case of `dyld`.
+
 ## [0.3.0] - 2022-07-15
 ### Fixed
 - [PR#42](https://github.com/rust-minidump/minidump-writer/pull/42) resolved [#41](https://github.com/rust-minidump/minidump-writer/issues/41) by capping the VM read of task memory to avoid a syscall failure, as well as made it so that if an error does occur when reading the module's file path, the module is still written to the minidump, as the file path is less important than the UUID in terms of module identification.
