@@ -1,4 +1,5 @@
 #![cfg(any(target_os = "linux", target_os = "android"))]
+#![allow(unused_imports, unused_variables)]
 
 use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
@@ -88,10 +89,12 @@ fn test_write_dump_helper(context: Context) {
     assert_eq!(mem_slice.len(), in_memory_buffer.len());
     assert_eq!(mem_slice, in_memory_buffer);
 }
+
 #[test]
 fn test_write_dump() {
     test_write_dump_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_write_dump_with_context() {
@@ -204,10 +207,12 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
         .get_raw_stream(LinuxDsoDebug as u32)
         .expect("Couldn't find LinuxDsoDebug");
 }
+
 #[test]
 fn test_write_and_read_dump_from_parent() {
     test_write_and_read_dump_from_parent_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_write_and_read_dump_from_parent_with_context() {
@@ -279,10 +284,12 @@ fn test_write_with_additional_memory_helper(context: Context) {
     // Verify memory contents.
     assert_eq!(region.bytes, values);
 }
+
 #[test]
 fn test_write_with_additional_memory() {
     test_write_with_additional_memory_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_write_with_additional_memory_with_context() {
@@ -552,10 +559,12 @@ fn test_skip_if_requested_helper(context: Context) {
 
     assert!(res.is_err());
 }
+
 #[test]
 fn test_skip_if_requested() {
     test_skip_if_requested_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_skip_if_requested_with_context() {
@@ -613,10 +622,12 @@ fn test_sanitized_stacks_helper(context: Context) {
         assert!(slice.windows(defaced.len()).any(|window| window == defaced));
     }
 }
+
 #[test]
 fn test_sanitized_stacks() {
     test_sanitized_stacks_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_sanitized_stacks_with_context() {
@@ -683,10 +694,12 @@ fn test_write_early_abort_helper(context: Context) {
     // Should be missing:
     assert!(dump.get_stream::<MinidumpMemoryList>().is_err());
 }
+
 #[test]
 fn test_write_early_abort() {
     test_write_early_abort_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_write_early_abort_with_context() {
@@ -740,10 +753,12 @@ fn test_named_threads_helper(context: Context) {
     }
     assert_eq!(expected, names);
 }
+
 #[test]
 fn test_named_threads() {
     test_named_threads_helper(Context::Without)
 }
+
 #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
 #[test]
 fn test_named_threads_with_context() {

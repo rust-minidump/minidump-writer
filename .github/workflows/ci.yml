@@ -12,14 +12,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit_tests:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      matrix:
+        job:
+          - { os: ubuntu-20.04 , target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-20.04,  target: x86_64-unknown-linux-musl }
+          - { os: windows-2022,  target: x86_64-pc-windows-msvc }
+          - { os: macos-12,      target: x86_64-apple-darwin }
+          # TODO: Add macos aarch64 here once it becomes available as a runner
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.job.target }}
+      - name: Fetch
+        run: cargo fetch --target ${{ matrix.job.target }}
+      - name: Build
+        run: cargo test --target ${{ matrix.job.target }} --no-run
+      - name: Test
+        run: cargo test --target ${{ matrix.job.target }}
+
+  # This job builds non-tier1 targets that aren't already tested
+  build_lower_tier:
     name: Build sources
     runs-on: ${{ matrix.job.os }}
     strategy:
       matrix:
         job:
-          - { os: ubuntu-latest , target: x86_64-unknown-linux-gnu,    use-cross: false }
-          - { os: ubuntu-latest,  target: x86_64-unknown-linux-musl,   use-cross: true }
           - { os: ubuntu-latest,  target: i686-unknown-linux-gnu,      use-cross: true }
          #- { os: ubuntu-latest,  target: i686-unknown-linux-musl,     use-cross: true }
           - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu,   use-cross: true }
@@ -29,19 +66,14 @@ jobs:
           - { os: ubuntu-latest,  target: arm-unknown-linux-musleabi,  use-cross: true }
           - { os: ubuntu-latest,  target: arm-linux-androideabi,       use-cross: true }
           - { os: ubuntu-latest,  target: arm-unknown-linux-gnueabihf, use-cross: true }
-          - { os: windows-2022,   target: x86_64-pc-windows-msvc,      use-cross: false }
-          - { os: macos-latest,   target: x86_64-apple-darwin,         use-cross: false }
+          # TODO: Remove this when aarch64 macs can be used as runners
           - { os: macos-latest,   target: aarch64-apple-darwin,        use-cross: false }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           target: ${{ matrix.job.target }}
-          profile: minimal
-          override: true
       #- name: Unit tests
       - name: Build
         uses: actions-rs/cargo@v1
@@ -52,40 +84,3 @@ jobs:
           args: --target ${{ matrix.job.target }} --verbose --all-targets
           #args: --target ${{ matrix.job.target }} --verbose -- --nocapture
           
-  rustfmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-          components: rustfmt
-      - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-          components: clippy
-      - name: Clippy Check
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
