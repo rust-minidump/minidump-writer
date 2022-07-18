@@ -320,11 +320,15 @@ impl MinidumpWriter {
 }
 
 #[cfg(test)]
+// The libc functions used here are all marked as deprecated, saying you
+// should use the mach2 crate, however, the mach2 crate does not expose
+// any of these functions so...
+#[allow(deprecated)]
 mod test {
     use super::*;
 
-    /// This function isn't declared in libc nor mach2. And is also undocumented
-    /// by apple, I know, SHOCKING
+    // This function isn't declared in libc nor mach2. And is also undocumented
+    // by apple, I know, SHOCKING
     extern "C" {
         fn getsegmentdata(
             header: *const libc::mach_header,
@@ -339,10 +343,6 @@ mod test {
     /// is why they aren't used in the actual implementation as we want to handle
     /// both the local and intra-process scenarios
     #[test]
-    /// The libc functions used here are all marked as deprecated, saying you
-    /// should use the mach2 crate, however, the mach2 crate does not expose
-    /// any of these functions so...
-    #[allow(deprecated)]
     fn images_match() {
         let mdw = MinidumpWriter::new(None, None);
         let td = TaskDumper::new(mdw.task);
