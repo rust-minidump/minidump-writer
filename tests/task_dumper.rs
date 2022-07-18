@@ -58,7 +58,7 @@ fn iterates_load_commands() {
             .expect("load cmd didn't end with newline");
         if matches!(
             &block[cmd + 4..cmd + cmd_end],
-            "LC_SEGMENT_64" | "LC_UUID" | "LC_ID_DYLIB"
+            "LC_SEGMENT_64" | "LC_UUID" | "LC_ID_DYLIB" | "LC_LOAD_DYLINKER"
         ) {
             expected.push_str(block);
         }
@@ -136,6 +136,17 @@ fn iterates_load_commands() {
     uuid {uuid_str}
 ",
                         uuid.cmd_size,
+                    )
+                    .unwrap();
+                }
+                LoadCommand::DylinkerCommand(dy_cmd) => {
+                    write!(
+                        &mut actual,
+                        "
+          cmd LC_LOAD_DYLINKER
+      cmdsize {}
+         name {} (offset {})",
+                        dy_cmd.cmd_size, dy_cmd.name, dy_cmd.name_offset,
                     )
                     .unwrap();
                 }

@@ -11,6 +11,6 @@ use super::{
     errors::WriterError,
     mach,
     minidump_writer::MinidumpWriter,
-    task_dumper::{ImageInfo, TaskDumpError, TaskDumper},
+    task_dumper::{self, ImageInfo, TaskDumpError, TaskDumper},
 };
 use crate::{dir_section::DumpBuf, mem_writer::*, minidump_format::*};

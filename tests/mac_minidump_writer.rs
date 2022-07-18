@@ -91,10 +91,7 @@ fn dump_external_process() {
 
     assert!(matches!(
         crash_reason,
-        CrashReason::MacGeneral(
-            minidump_common::errors::ExceptionCodeMac::EXC_BREAKPOINT,
-            100
-        )
+        CrashReason::MacGeneral(minidump_common::errors::ExceptionCodeMac::EXC_BREAKPOINT, _)
     ));
 
     let _: MinidumpModuleList = md.get_stream().expect("Couldn't find MinidumpModuleList");
@@ -207,4 +204,14 @@ fn stackwalks() {
         }),
         "unable to locate expected function"
     );
+
+    let mod_list: MinidumpModuleList = md
+        .minidump
+        .get_stream()
+        .expect("Couldn't find MinidumpModuleList");
+
+    // Ensure we found dyld
+    assert!(mod_list
+        .iter()
+        .any(|module| &module.name == "/usr/lib/dyld"));
 }

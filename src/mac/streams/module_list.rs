@@ -63,7 +63,7 @@ impl MinidumpWriter {
         buf: &mut DumpBuf,
         dumper: &TaskDumper,
     ) -> Result<Vec<MDRawModule>, WriterError> {
-        let mut images = dumper.read_images()?;
+        let (all_images_info, mut images) = dumper.read_images()?;
 
         // Apparently MacOS will happily list the same image multiple times
         // for some reason, so sort the images by load address and remove all
@@ -72,7 +72,6 @@ impl MinidumpWriter {
         images.dedup();
 
         let mut modules = Vec::with_capacity(images.len());
-        let mut has_main_executable = false;
 
         for image in images {
             if let Ok(image_details) = self.read_image(image, dumper) {
@@ -85,7 +84,6 @@ impl MinidumpWriter {
                     // the most interesting module for human and machine inspectors
                     if is_main_executable {
                         modules.insert(0, module);
-                        has_main_executable = true;
                     } else {
                         modules.push(module)
                     };
@@ -93,9 +91,25 @@ impl MinidumpWriter {
             }
         }
 
-        if !has_main_executable {
+        if !modules
+            .get(0)
+            .map(|rm| rm.version_info.signature != format::VS_FFI_SIGNATURE)
+            .unwrap_or_default()
+        {
             Err(TaskDumpError::NoExecutableImage.into())
         } else {
+            // Crashpad also has code for loading the dyld info from the all images
+            // array above, but AFAICT (and from crashpad's own comments) this will
+            // never actually happen. It's more robust in the face of changes from
+            // Apple, which considering their penchant for changings things often
+            // and not actually documenting anything, is fair, but if that ever
+            // happens we can just...change the code.
+            if let Ok(dyld_image) = self.read_dyld(&all_images_info, dumper) {
+                if let Ok(module) = self.write_module(dyld_image, buf) {
+                    modules.push(module);
+                }
+            }
+
             Ok(modules)
         }
     }
@@ -148,18 +162,89 @@ impl MinidumpWriter {
 
         let load_info = load_info.ok_or(TaskDumpError::MissingLoadCommand {
             name: "LC_SEGMENT_64",
-            id: mach::LC_SEGMENT_64,
+            id: mach::LoadCommandKind::Segment,
         })?;
         let uuid = uuid.ok_or(TaskDumpError::MissingLoadCommand {
             name: "LC_UUID",
-            id: mach::LC_UUID,
+            id: mach::LoadCommandKind::Uuid,
         })?;
 
         let file_path = if image.file_path != 0 {
-            dumper.read_string(image.file_path).unwrap_or_default()
+            dumper
+                .read_string(image.file_path, None)
+                .unwrap_or_default()
         } else {
             None
         };
+
+        Ok(ImageDetails {
+            uuid,
+            load_info,
+            file_path,
+            version,
+        })
+    }
+
+    /// Reads the dynamic linker, which is similar but
+    fn read_dyld(
+        &self,
+        all_images: &task_dumper::AllImagesInfo,
+        dumper: &TaskDumper,
+    ) -> Result<ImageDetails, TaskDumpError> {
+        let image = ImageInfo {
+            load_address: all_images.dyld_image_load_address,
+            file_path: 0,
+            file_mod_date: 0,
+        };
+
+        let mut load_info = None;
+        let mut version = None;
+        let mut uuid = None;
+        let mut file_path = None;
+
+        {
+            let load_commands = dumper.read_load_commands(&image)?;
+
+            for lc in load_commands.iter() {
+                match lc {
+                    mach::LoadCommand::Segment(seg) if load_info.is_none() => {
+                        if &seg.segment_name[..7] == b"__TEXT\0" {
+                            let slide = image.load_address as isize - seg.vm_addr as isize;
+
+                            load_info = Some(ImageLoadInfo {
+                                vm_addr: seg.vm_addr,
+                                vm_size: seg.vm_size,
+                                slide,
+                            });
+                        }
+                    }
+                    mach::LoadCommand::Dylib(dylib) if version.is_none() => {
+                        version = Some(dylib.dylib.current_version);
+                    }
+                    mach::LoadCommand::Uuid(img_id) if uuid.is_none() => {
+                        uuid = Some(img_id.uuid);
+                    }
+                    mach::LoadCommand::DylinkerCommand(dy_cmd) if file_path.is_none() => {
+                        file_path = Some(dy_cmd.name.to_owned());
+                    }
+                    _ => {}
+                }
+
+                if load_info.is_some() && version.is_some() && uuid.is_some() && file_path.is_some()
+                {
+                    break;
+                }
+            }
+        }
+
+        let load_info = load_info.ok_or(TaskDumpError::MissingLoadCommand {
+            name: "LC_SEGMENT_64",
+            id: mach::LoadCommandKind::Segment,
+        })?;
+        let uuid = uuid.ok_or(TaskDumpError::MissingLoadCommand {
+            name: "LC_UUID",
+            id: mach::LoadCommandKind::Uuid,
+        })?;
 
         Ok(ImageDetails {
             uuid,
@@ -235,11 +320,15 @@ impl MinidumpWriter {
 }
 
 #[cfg(test)]
+// The libc functions used here are all marked as deprecated, saying you
+// should use the mach2 crate, however, the mach2 crate does not expose
+// any of these functions so...
+#[allow(deprecated)]
 mod test {
     use super::*;
 
-    /// This function isn't declared in libc nor mach2. And is also undocumented
-    /// by apple, I know, SHOCKING
+    // This function isn't declared in libc nor mach2. And is also undocumented
+    // by apple, I know, SHOCKING
     extern "C" {
         fn getsegmentdata(
             header: *const libc::mach_header,
@@ -254,15 +343,11 @@ mod test {
     /// is why they aren't used in the actual implementation as we want to handle
     /// both the local and intra-process scenarios
     #[test]
-    /// The libc functions used here are all marked as deprecated, saying you
-    /// should use the mach2 crate, however, the mach2 crate does not expose
-    /// any of these functions so...
-    #[allow(deprecated)]
     fn images_match() {
         let mdw = MinidumpWriter::new(None, None);
         let td = TaskDumper::new(mdw.task);
 
-        let images = td.read_images().unwrap();
+        let (all_images, images) = td.read_images().unwrap();
 
         let actual_image_count = unsafe { libc::_dyld_image_count() } as u32;
 
@@ -314,5 +399,16 @@ mod test {
                 actual_img_details.file_path.unwrap()
             );
         }
+
+        let dyld = mdw
+            .read_dyld(&all_images, &td)
+            .expect("failed to read dyld");
+
+        // If the user overrides the dynamic linker and runs this test it will
+        // fail, but that's kind of on you, person reading this comment wondering
+        // why the test fails. Or Apple changed the path in whatever MacOS version
+        // in which case, please file a PR!
+        assert_eq!("/usr/lib/dyld", dyld.file_path.as_deref().unwrap());
+        assert!(dyld.load_info.vm_size > 0);
     }
 }
