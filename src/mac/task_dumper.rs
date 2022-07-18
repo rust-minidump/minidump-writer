@@ -15,8 +15,11 @@ pub enum TaskDumpError {
     NonUtf8String(#[from] std::string::FromUtf8Error),
     #[error("unable to find the main executable image for the process")]
     NoExecutableImage,
-    #[error("expected load command {name}({id}) was not found for an image")]
-    MissingLoadCommand { name: &'static str, id: u32 },
+    #[error("expected load command {name}({id:?}) was not found for an image")]
+    MissingLoadCommand {
+        name: &'static str,
+        id: mach::LoadCommandKind,
+    },
 }
 
 /// Wraps a mach call in a Result
@@ -45,17 +48,29 @@ macro_rules! mach_call {
 /// This struct is truncated as we only need a couple of fields at the beginning
 /// of the struct
 #[repr(C)]
-struct AllImagesInfo {
-    version: u32, // == 1 in Mac OS X 10.4
+#[derive(Copy, Clone)]
+pub struct AllImagesInfo {
+    // VERSION 1
+    pub version: u32,
     /// The number of [`ImageInfo`] structs at that following address
     info_array_count: u32,
     /// The address in the process where the array of [`ImageInfo`] structs is
     info_array_addr: u64,
+    /// A function pointer, unused
+    _notification: u64,
+    /// Unused
+    _process_detached_from_shared_region: bool,
+    // VERSION 2
+    lib_system_initialized: bool,
+    // Note that crashpad adds a 32-bit int here to get proper alignment when
+    // building on 32-bit targets...but we explicitly don't care about 32-bit
+    // targets since Apple doesn't
+    pub dyld_image_load_address: u64,
 }
 
 /// `dyld_image_info` from <usr/include/mach-o/dyld_images.h>
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ImageInfo {
     /// The address in the process where the image is loaded
     pub load_address: u64,
@@ -164,15 +179,19 @@ impl TaskDumper {
     /// is a specialization of [`read_task_memory`] since strings can span VM
     /// regions.
     ///
-    /// This string is capped at 8k which should never be close to being hit as
-    /// it is only used for file paths for loaded modules, but then again, this
-    /// is MacOS, so who knows what insanity goes on.
+    /// If not specified, the string is capped at 8k which should never be close
+    /// to being hit in normal scenarios, at least for "system" strings, which is
+    /// all this interface is used to retrieve
     ///
     /// # Errors
     ///
     /// Fails if the address cannot be read for some reason, or the string is
     /// not utf-8.
-    pub fn read_string(&self, addr: u64) -> Result<Option<String>, TaskDumpError> {
+    pub fn read_string(
+        &self,
+        addr: u64,
+        expected_size: Option<usize>,
+    ) -> Result<Option<String>, TaskDumpError> {
         // The problem is we don't know how much to read until we know how long
         // the string is. And we don't know how long the string is, until we've read
         // the memory!  So, we'll try to read kMaxStringLength bytes
@@ -197,8 +216,10 @@ impl TaskDumper {
         };
 
         if let Ok(size_to_end) = get_region_size() {
-            let mut bytes =
-                self.read_task_memory(addr, std::cmp::min(size_to_end as usize, 8 * 1024))?;
+            let mut bytes = self.read_task_memory(
+                addr,
+                std::cmp::min(size_to_end as usize, expected_size.unwrap_or(8 * 1024)),
+            )?;
 
             // Find the null terminator and truncate our string
             if let Some(null_pos) = bytes.iter().position(|c| *c == 0) {
@@ -318,7 +339,7 @@ impl TaskDumper {
     ///
     /// The syscall to retrieve the location of the loaded images fails, or
     /// the syscall to read the loaded images from the process memory fails
-    pub fn read_images(&self) -> Result<Vec<ImageInfo>, TaskDumpError> {
+    pub fn read_images(&self) -> Result<(AllImagesInfo, Vec<ImageInfo>), TaskDumpError> {
         impl mach::TaskInfo for mach::task_info::task_dyld_info {
             const FLAVOR: u32 = mach::task_info::TASK_DYLD_INFO;
         }
@@ -336,12 +357,14 @@ impl TaskDumper {
         let dyld_all_info_buf =
             self.read_task_memory::<u8>(all_images_addr, std::mem::size_of::<AllImagesInfo>())?;
         // SAFETY: this is fine as long as the kernel isn't lying to us
-        let all_dyld_info: &AllImagesInfo = unsafe { &*(dyld_all_info_buf.as_ptr().cast()) };
+        let all_images_info: &AllImagesInfo = unsafe { &*(dyld_all_info_buf.as_ptr().cast()) };
 
-        self.read_task_memory::<ImageInfo>(
-            all_dyld_info.info_array_addr,
-            all_dyld_info.info_array_count as usize,
-        )
+        let images = self.read_task_memory::<ImageInfo>(
+            all_images_info.info_array_addr,
+            all_images_info.info_array_count as usize,
+        )?;
+
+        Ok((*all_images_info, images))
     }
 
     /// Retrieves the main executable image for the task.
@@ -354,7 +377,7 @@ impl TaskDumper {
     /// Any of the errors that apply to [`Self::read_images`] apply here, in
     /// addition to not being able to find the main executable image
     pub fn read_executable_image(&self) -> Result<ImageInfo, TaskDumpError> {
-        let images = self.read_images()?;
+        let (_, images) = self.read_images()?;
 
         for img in images {
             let mach_header = self.read_task_memory::<mach::MachHeader>(img.load_address, 1)?;

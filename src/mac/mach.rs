@@ -301,14 +301,46 @@ pub trait ThreadInfo {
 
 /// <usr/include/mach-o/loader.h>, the file type for the main executable image
 pub const MH_EXECUTE: u32 = 0x2;
+/// <usr/include/mach-o/loader.h>, the file type dyld, the dynamic loader
+pub const MH_DYLINKER: u32 = 0x7;
 // usr/include/mach-o/loader.h, magic number for MachHeader
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
-// usr/include/mach-o/loader.h, command to map a segment
-pub const LC_SEGMENT_64: u32 = 0x19;
-// usr/include/mach-o/loader.h, dynamically linked shared lib ident
-pub const LC_ID_DYLIB: u32 = 0xd;
-// usr/include/mach-o/loader.h, the uuid
-pub const LC_UUID: u32 = 0x1b;
+
+/// Load command constants from usr/include/mach-o/loader.h
+#[repr(u32)]
+#[derive(Debug)]
+pub enum LoadCommandKind {
+    /// Command to map a segment
+    Segment = 0x19,
+    /// Dynamically linked shared lib ident
+    IdDylib = 0xd,
+    /// Image uuid
+    Uuid = 0x1b,
+    /// Load a dynamic linker. Should only be on MH_EXECUTE (main executable)
+    /// images when the dynamic linker is overriden
+    LoadDylinker = 0xe,
+    /// Dynamic linker identification
+    IdDylinker = 0xf,
+}
+
+impl LoadCommandKind {
+    #[inline]
+    fn from_u32(kind: u32) -> Option<Self> {
+        Some(if kind == Self::Segment as u32 {
+            Self::Segment
+        } else if kind == Self::IdDylib as u32 {
+            Self::IdDylib
+        } else if kind == Self::Uuid as u32 {
+            Self::Uuid
+        } else if kind == Self::LoadDylinker as u32 {
+            Self::LoadDylinker
+        } else if kind == Self::IdDylinker as u32 {
+            Self::IdDylinker
+        } else {
+            return None;
+        })
+    }
+}
 
 /// The header at the beginning of every (valid) Mach image
 ///
@@ -405,6 +437,33 @@ pub struct DylibCommand {
     pub dylib: Dylib,
 }
 
+/// A program that uses a dynamic linker contains a dylinker_command to identify
+/// the name of the dynamic linker (LC_LOAD_DYLINKER).  And a dynamic linker
+/// contains a dylinker_command to identify the dynamic linker (LC_ID_DYLINKER).
+/// A file can have at most one of these.
+/// This struct is also used for the LC_DYLD_ENVIRONMENT load command and
+/// contains string for dyld to treat like environment variable.
+#[repr(C)]
+struct DylinkerCommandRepr {
+    /// LC_ID_DYLINKER, LC_LOAD_DYLINKER or LC_DYLD_ENVIRONMENT
+    cmd: u32,
+    /// includes pathname string
+    cmd_size: u32,
+    /// Dynamic linker's path name, an offset from the load command address
+    name: u32,
+}
+
+pub struct DylinkerCommand<'buf> {
+    /// LC_ID_DYLINKER, LC_LOAD_DYLINKER or LC_DYLD_ENVIRONMENT
+    pub cmd: u32,
+    /// includes pathname string
+    pub cmd_size: u32,
+    /// The offset from the load command where the path was read
+    pub name_offset: u32,
+    /// Dynamic linker's path name
+    pub name: &'buf str,
+}
+
 /// The uuid load command contains a single 128-bit unique random number that
 /// identifies an object produced by the static link editor.
 #[repr(C)]
@@ -439,6 +498,7 @@ pub enum LoadCommand<'buf> {
     Segment(&'buf SegmentCommand64),
     Dylib(&'buf DylibCommand),
     Uuid(&'buf UuidCommand),
+    DylinkerCommand(DylinkerCommand<'buf>),
 }
 
 pub struct LoadCommandsIter<'buf> {
@@ -466,19 +526,36 @@ impl<'buf> Iterator for LoadCommandsIter<'buf> {
                     return None;
                 }
 
-                let cmd = match header.cmd {
-                    LC_SEGMENT_64 => Some(LoadCommand::Segment(
-                        &*(self.buffer.as_ptr().cast::<SegmentCommand64>()),
-                    )),
-                    LC_ID_DYLIB => Some(LoadCommand::Dylib(
-                        &*(self.buffer.as_ptr().cast::<DylibCommand>()),
-                    )),
-                    LC_UUID => Some(LoadCommand::Uuid(
-                        &*(self.buffer.as_ptr().cast::<UuidCommand>()),
-                    )),
-                    // Just ignore any other load commands
-                    _ => None,
-                };
+                let cmd = LoadCommandKind::from_u32(header.cmd).and_then(|kind| {
+                    Some(match kind {
+                        LoadCommandKind::Segment => LoadCommand::Segment(
+                            &*(self.buffer.as_ptr().cast::<SegmentCommand64>()),
+                        ),
+                        LoadCommandKind::IdDylib => {
+                            LoadCommand::Dylib(&*(self.buffer.as_ptr().cast::<DylibCommand>()))
+                        }
+                        LoadCommandKind::Uuid => {
+                            LoadCommand::Uuid(&*(self.buffer.as_ptr().cast::<UuidCommand>()))
+                        }
+                        LoadCommandKind::LoadDylinker | LoadCommandKind::IdDylinker => {
+                            let dcr = &*(self.buffer.as_ptr().cast::<DylinkerCommandRepr>());
+
+                            let nul = self.buffer[dcr.name as usize..header.cmd_size as usize]
+                                .iter()
+                                .position(|c| *c == 0)?;
+
+                            LoadCommand::DylinkerCommand(DylinkerCommand {
+                                cmd: dcr.cmd,
+                                cmd_size: dcr.cmd_size,
+                                name_offset: dcr.name,
+                                name: std::str::from_utf8(
+                                    &self.buffer[dcr.name as usize..dcr.name as usize + nul],
+                                )
+                                .ok()?,
+                            })
+                        }
+                    })
+                });
 
                 self.count -= 1;
                 self.buffer = &self.buffer[header.cmd_size as usize..];
