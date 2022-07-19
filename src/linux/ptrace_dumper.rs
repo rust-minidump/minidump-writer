@@ -114,11 +114,11 @@ impl PtraceDumper {
         loop {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
                 Ok(_) => break,
-                Err(e @ Errno::EINTR) => {
+                Err(_e @ Errno::EINTR) => continue,
+                Err(e) => {
                     ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
                     return Err(DumperError::WaitPidError(child, e));
                 }
-                Err(_) => continue,
             }
         }
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
