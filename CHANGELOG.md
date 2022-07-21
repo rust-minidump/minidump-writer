@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#50](https://github.com/rust-minidump/minidump-writer/pull/50) updated `minidump-common` and `crash-context`.
+
+### Fixed
+- [PR#50](https://github.com/rust-minidump/minidump-writer/pull/50) resolved [#33](https://github.com/rust-minidump/minidump-writer/issues/33) by encoding the full exception info in the `exception_information` field of the exception stream.
+- [PR#50](https://github.com/rust-minidump/minidump-writer/pull/50) resolved [#34](https://github.com/rust-minidump/minidump-writer/issues/34) by unwrapping `EXC_CRASH` exceptions to retrieve the wrapped exception.
+
 ## [0.3.1] - 2022-07-18
 ### Fixed
 - [PR#47](https://github.com/rust-minidump/minidump-writer/pull/47) resolved [#46](https://github.com/rust-minidump/minidump-writer/issues/46) by handling the special case of `dyld`.
