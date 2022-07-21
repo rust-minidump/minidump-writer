@@ -65,4 +65,4 @@ similar-asserts = "1.2"
 uuid = "1.0"
 
 [patch.crates-io]
-crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "macos-exc-resource" }
+crash-context = { git = "https://github.com/EmbarkStudios/crash-handling", branch = "macos/exc-guard" }
