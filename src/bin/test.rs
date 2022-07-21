@@ -363,7 +363,7 @@ mod mac {
                             thread: mach2::mach_init::mach_thread_self(),
                             handler_thread: mach2::port::MACH_PORT_NULL,
                             exception: Some(crash_context::ExceptionInfo {
-                                kind: exception as i32,
+                                kind: exception,
                                 code: 0,
                                 subcode: None,
                             }),
