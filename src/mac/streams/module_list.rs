@@ -370,7 +370,7 @@ mod test {
             };
 
             let actual_img_details = mdw
-                .read_image(actual_img.clone(), &td)
+                .read_image(*actual_img, &td)
                 .expect("failed to get image details");
 
             let expected_image_name =

@@ -335,9 +335,9 @@ fn test_minidump_size_limit() {
     // Second, write a minidump with a size limit big enough to not trigger
     // anything.
     {
-        // Set size limit arbitrarily 1MB larger than the normal file size -- such
+        // Set size limit arbitrarily 2MiB larger than the normal file size -- such
         // that the limiting code will not kick in.
-        let minidump_size_limit = normal_file_size + 1024 * 1024;
+        let minidump_size_limit = normal_file_size + 2 * 1024 * 1024;
 
         let mut tmpfile = tempfile::Builder::new()
             .prefix("write_dump_pseudolimited")
