@@ -163,7 +163,7 @@ pub fn write(
                 // while the instruction pointer is already here.
                 config.crashing_thread_context = CrashingThreadContext::CrashContextPlusAddress((
                     cpu_section.location(),
-                    info.get_instruction_pointer(),
+                    instruction_ptr,
                 ));
             }
         }

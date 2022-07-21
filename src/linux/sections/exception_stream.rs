@@ -46,30 +46,21 @@ pub fn write(
     buffer: &mut DumpBuf,
 ) -> Result<MDRawDirectory, errors::SectionExceptionStreamError> {
     let exception = if let Some(context) = &config.crash_context {
-        let sig_addr = context.inner.siginfo.ssi_addr as u64;
-
         MDException {
             exception_code: context.inner.siginfo.ssi_signo as u32,
             exception_flags: context.inner.siginfo.ssi_code as u32,
-            exception_record: 0,
-            exception_address: sig_addr,
-            number_parameters: 0,
-            __align: 0,
-            exception_information: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            exception_address: context.inner.siginfo.ssi_addr as u64,
+            ..Default::default()
         }
     } else {
-        let addr = match config.crashing_thread_context {
-            CrashingThreadContext::CrashContextPlusAddress((_, addr)) => addr,
+        let addr = match &config.crashing_thread_context {
+            CrashingThreadContext::CrashContextPlusAddress((_, addr)) => *addr,
             _ => 0,
         };
         MDException {
             exception_code: MDExceptionCodeLinux::MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED as u32,
-            exception_flags: 0,
-            exception_record: 0,
             exception_address: addr as u64,
-            number_parameters: 0,
-            __align: 0,
-            exception_information: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ..Default::default()
         }
     };
 
