@@ -12,7 +12,7 @@ pub const RESERVED_FLAGS: &str = "---p";
 
 type Result<T> = std::result::Result<T, MapsReaderError>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SystemMappingInfo {
     pub start_address: usize,
     pub end_address: usize,
@@ -20,7 +20,7 @@ pub struct SystemMappingInfo {
 
 // One of these is produced for each mapping in the process (i.e. line in
 // /proc/$x/maps).
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MappingInfo {
     // On Android, relocation packing can mean that the reported start
     // address of the mapping must be adjusted by a bias in order to
