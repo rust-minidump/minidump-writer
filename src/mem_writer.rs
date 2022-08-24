@@ -88,7 +88,7 @@ impl std::ops::Deref for Buffer {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct MemoryWriter<T> {
     pub position: MDRVA,
     pub size: usize,
@@ -139,7 +139,7 @@ where
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct MemoryArrayWriter<T> {
     pub position: MDRVA,
     array_size: usize,

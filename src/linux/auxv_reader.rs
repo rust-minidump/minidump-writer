@@ -19,7 +19,7 @@ pub type AuxvType = u32;
 pub type AuxvType = u64;
 
 /// An auxv key-value pair.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuxvPair {
     pub key: AuxvType,
     pub value: AuxvType,
@@ -38,7 +38,7 @@ impl ProcfsAuxvIter {
         let pair_size = 2 * std::mem::size_of::<AuxvType>();
         let buf: Vec<u8> = Vec::with_capacity(pair_size);
 
-        ProcfsAuxvIter {
+        Self {
             pair_size,
             buf,
             input,
