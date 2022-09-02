@@ -170,9 +170,9 @@ fn stackwalks() {
             } else {
                 panic!("invalid MacOS target architecture")
             },
-            file_type: dump_syms::common::FileType::Macho,
             num_jobs: 2, // default this
             check_cfi: false,
+            emit_inlines: false,
             mapping_var: None,
             mapping_src: None,
             mapping_dest: None,

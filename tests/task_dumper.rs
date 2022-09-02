@@ -154,5 +154,5 @@ fn iterates_load_commands() {
         }
     }
 
-    similar_asserts::assert_str_eq!(expected, actual);
+    similar_asserts::assert_eq!(expected, actual);
 }
