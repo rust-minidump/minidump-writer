@@ -145,7 +145,7 @@ impl MinidumpWriter {
     /// If [`crash_context::CrashContext::exception_pointers`] is specified, it
     /// is the responsibility of the caller to ensure that the pointer is valid
     /// for the duration of this function call.
-    pub unsafe fn dump_crash_context(
+    pub fn dump_crash_context(
         crash_context: crash_context::CrashContext,
         destination: &mut std::fs::File,
     ) -> Result<(), Error> {
