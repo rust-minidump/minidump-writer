@@ -174,7 +174,7 @@ impl MinidumpWriter {
         let tid = crash_context.thread_id;
         let exception_code = crash_context.exception_code;
 
-        let exc_info = (!crash_context.exception_pointers.is_null()).then(||
+        let exc_info = (!crash_context.exception_pointers.is_null()).then_some(
             // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_exception_information
             md::MINIDUMP_EXCEPTION_INFORMATION {
                 ThreadId: crash_context.thread_id,
@@ -189,7 +189,8 @@ impl MinidumpWriter {
                 /// it can use eg `ReadProcessMemory` to get the contextual information from
                 /// the crash, rather than from the current process
                 ClientPointers: if is_external_process { 1 } else { 0 },
-            });
+            },
+        );
 
         let mdw = Self {
             exc_info,
