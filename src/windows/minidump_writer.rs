@@ -1,13 +1,11 @@
 use crate::windows::errors::Error;
 use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
 use scroll::Pwrite;
-use std::{ffi::c_void, os::windows::io::AsRawHandle};
+use std::os::windows::io::AsRawHandle;
 pub use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::{
-    Foundation::{
-        CloseHandle, ERROR_SUCCESS, STATUS_INVALID_HANDLE, STATUS_NONCONTINUABLE_EXCEPTION,
-    },
-    System::{ApplicationVerifier as av, Diagnostics::Debug as md, Threading as threading},
+    Foundation::{CloseHandle, STATUS_NONCONTINUABLE_EXCEPTION},
+    System::{Diagnostics::Debug as md, Threading as threading},
 };
 
 pub struct MinidumpWriter {
@@ -20,6 +18,7 @@ pub struct MinidumpWriter {
     /// The id of the 'crashing' thread
     tid: u32,
     /// The exception code for the dump
+    #[allow(dead_code)]
     exception_code: i32,
     /// Whether we are dumping the current process or not
     is_external_process: bool,
@@ -208,7 +207,7 @@ impl MinidumpWriter {
     fn dump(mut self, destination: &mut std::fs::File) -> Result<(), Error> {
         let exc_info = self.exc_info.take();
 
-        let mut user_streams = Vec::with_capacity(2);
+        let mut user_streams = Vec::with_capacity(1);
 
         let mut breakpad_info = self.fill_breakpad_stream();
 
@@ -219,26 +218,6 @@ impl MinidumpWriter {
                 // Again with the mut pointer
                 Buffer: bp_info.as_mut_ptr().cast(),
             });
-        }
-
-        let mut handle_stream_buffer = if self.exception_code == STATUS_INVALID_HANDLE {
-            self.fill_handle_stream()
-        } else {
-            None
-        };
-
-        // Note that we do this by ref, as the buffer inside the option needs
-        // to stay alive for as long as we're writing the minidump since
-        // the user stream has a pointer to it
-        if let Some(buf) = &mut handle_stream_buffer {
-            let handle_stream = md::MINIDUMP_USER_STREAM {
-                Type: MINIDUMP_STREAM_TYPE::HandleOperationListStream as u32,
-                BufferSize: buf.len() as u32,
-                // Still not getting over the mut pointers here
-                Buffer: buf.as_mut_ptr().cast(),
-            };
-
-            user_streams.push(handle_stream);
         }
 
         let user_stream_infos = md::MINIDUMP_USER_STREAM_INFORMATION {
@@ -305,90 +284,6 @@ impl MinidumpWriter {
             .ok()?;
 
         Some(breakpad_info)
-    }
-
-    /// In the case of a `STATUS_INVALID_HANDLE` exception, this function
-    /// enumerates all of the handle operations that occurred within the crashing
-    /// process and fills out a minidump user stream with the ops pertaining to
-    /// the last invalid handle that is enumerated, which is, presumably
-    /// (hopefully?), the one that led to the exception
-    fn fill_handle_stream(&self) -> Option<Vec<u8>> {
-        // State object we pass to the enumeration
-        struct HandleState {
-            ops: Vec<av::AVRF_HANDLE_OPERATION>,
-            last_invalid: u64,
-        }
-
-        unsafe extern "system" fn enum_callback(
-            resource_description: *mut c_void,
-            enumeration_context: *mut c_void,
-            enumeration_level: *mut u32,
-        ) -> u32 {
-            let description = &*resource_description.cast::<av::AVRF_HANDLE_OPERATION>();
-            let mut hs = &mut *enumeration_context.cast::<HandleState>();
-
-            // Remember the last invalid handle operation.
-            if description.OperationType == av::OperationDbBADREF as u32 {
-                hs.last_invalid = description.Handle;
-            }
-
-            // Record all handle operations.
-            hs.ops.push(*description);
-            *enumeration_level = av::HeapEnumerationEverything as u32;
-            ERROR_SUCCESS
-        }
-
-        let mut hs = HandleState {
-            ops: Vec::new(),
-            last_invalid: 0,
-        };
-
-        // https://docs.microsoft.com/en-us/windows/win32/api/avrfsdk/nf-avrfsdk-verifierenumerateresource
-        // SAFETY: syscall
-        if unsafe {
-            av::VerifierEnumerateResource(
-                self.crashing_process,                // process to enumerate the handles for
-                0,                                    // flags
-                av::AvrfResourceHandleTrace,          // resource typea, we want to trace handles
-                Some(enum_callback),                  // enumeration callback
-                (&mut hs as *mut HandleState).cast(), // enumeration context
-            )
-        } == ERROR_SUCCESS
-        {
-            let mut stream_buf = Vec::new();
-
-            // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_operation_list
-            let mut md_list = md::MINIDUMP_HANDLE_OPERATION_LIST {
-                SizeOfHeader: std::mem::size_of::<md::MINIDUMP_HANDLE_OPERATION_LIST>() as u32,
-                SizeOfEntry: std::mem::size_of::<av::AVRF_HANDLE_OPERATION>() as u32,
-                NumberOfEntries: 0,
-                Reserved: 0,
-            };
-
-            stream_buf.resize(md_list.SizeOfHeader as usize, 0);
-
-            #[inline]
-            fn to_bytes<T: Sized>(v: &T) -> &[u8] {
-                // SAFETY: both AVRF_HANDLE_OPERATION and MINIDUMP_HANDLE_OPERATION_LIST
-                // are POD types
-                unsafe {
-                    std::slice::from_raw_parts((v as *const T).cast(), std::mem::size_of::<T>())
-                }
-            }
-
-            for op in hs.ops.into_iter().filter(|op| op.Handle == hs.last_invalid) {
-                stream_buf.extend_from_slice(to_bytes(&op));
-                md_list.NumberOfEntries += 1;
-            }
-
-            stream_buf[..md_list.SizeOfHeader as usize].copy_from_slice(to_bytes(&md_list));
-
-            Some(stream_buf)
-        } else {
-            // We don't _particularly_ care if this fails, it's better if we had
-            // the info, but not critical
-            None
-        }
     }
 }
 
