@@ -31,18 +31,9 @@ nix = { version = "0.25", default-features = false, features = [
     "user",
 ] }
 
-[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
-version = "0.42"
-features = [
-    # MiniDumpWriteDump requires...a lot of features
-    "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_Kernel",
-    "Win32_System_Memory",
-    # GetCurrentThreadId & OpenProcess
-    "Win32_System_Threading",
-]
+[target.'cfg(target_os = "windows")'.dependencies.winapi]
+version = "0.3"
+features = ["dbghelp", "handleapi", "ntstatus", "processthreadsapi", "winnt"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Binds some additional mac specifics not in libc

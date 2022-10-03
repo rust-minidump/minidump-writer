@@ -2,15 +2,27 @@ use crate::windows::errors::Error;
 use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
 use scroll::Pwrite;
 use std::os::windows::io::AsRawHandle;
-pub use windows_sys::Win32::Foundation::HANDLE;
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, STATUS_NONCONTINUABLE_EXCEPTION},
-    System::{Diagnostics::Debug as md, Threading as threading},
+use winapi::{
+    shared::{
+        basetsd::ULONG32,
+        minwindef::{BOOL, DWORD, FALSE, TRUE, ULONG},
+        ntstatus::STATUS_NONCONTINUABLE_EXCEPTION,
+    },
+    um::{
+        handleapi::CloseHandle,
+        processthreadsapi as threading,
+        winnt::{
+            RtlCaptureContext, EXCEPTION_POINTERS, EXCEPTION_RECORD, HANDLE, PEXCEPTION_POINTERS,
+            PROCESS_ALL_ACCESS, PVOID, THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION,
+            THREAD_SUSPEND_RESUME,
+        },
+    },
+    STRUCT,
 };
 
 pub struct MinidumpWriter {
     /// Optional exception information
-    exc_info: Option<md::MINIDUMP_EXCEPTION_INFORMATION>,
+    exc_info: Option<MINIDUMP_EXCEPTION_INFORMATION>,
     /// Handle to the crashing process, which could be ourselves
     crashing_process: HANDLE,
     /// The id of the process we are dumping
@@ -54,21 +66,19 @@ impl MinidumpWriter {
                 // We need to suspend the thread to get its context, which would be bad
                 // if it's the current thread, so we check it early before regrets happen
                 if tid == threading::GetCurrentThreadId() {
-                    md::RtlCaptureContext(ec.as_mut_ptr());
+                    RtlCaptureContext(ec.as_mut_ptr());
                 } else {
                     // We _could_ just fallback to the current thread if we can't get the
                     // thread handle, but probably better for this to fail with a specific
                     // error so that the caller can do that themselves if they want to
                     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
                     let thread_handle = threading::OpenThread(
-                        threading::THREAD_GET_CONTEXT
-                            | threading::THREAD_QUERY_INFORMATION
-                            | threading::THREAD_SUSPEND_RESUME, // desired access rights, we only need to get the context, which also requires suspension
-                        0,   // inherit handles
-                        tid, // thread id
+                        THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME, // desired access rights, we only need to get the context, which also requires suspension
+                        FALSE, // inherit handles
+                        tid,   // thread id
                     );
 
-                    if thread_handle == 0 {
+                    if thread_handle.is_null() {
                         return Err(Error::ThreadOpen(std::io::Error::last_os_error()));
                     }
 
@@ -90,7 +100,7 @@ impl MinidumpWriter {
                     }
 
                     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadcontext
-                    if md::GetThreadContext(thread_handle.0, ec.as_mut_ptr()) == 0 {
+                    if threading::GetThreadContext(thread_handle.0, ec.as_mut_ptr()) == 0 {
                         // Try to be a good citizen and resume the thread
                         threading::ResumeThread(thread_handle.0);
 
@@ -106,21 +116,21 @@ impl MinidumpWriter {
                 ec.assume_init()
             } else {
                 let mut ec = std::mem::MaybeUninit::uninit();
-                md::RtlCaptureContext(ec.as_mut_ptr());
+                RtlCaptureContext(ec.as_mut_ptr());
                 ec.assume_init()
             };
 
-            let mut exception_record: md::EXCEPTION_RECORD = std::mem::zeroed();
+            let mut exception_record: EXCEPTION_RECORD = std::mem::zeroed();
 
-            let exception_ptrs = md::EXCEPTION_POINTERS {
+            let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
                 ContextRecord: &mut exception_context,
             };
 
-            exception_record.ExceptionCode = exception_code;
+            exception_record.ExceptionCode = exception_code as _;
 
             let cc = crash_context::CrashContext {
-                exception_pointers: (&exception_ptrs as *const md::EXCEPTION_POINTERS).cast(),
+                exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
                 process_id: std::process::id(),
                 thread_id: thread_id.unwrap_or_else(|| threading::GetCurrentThreadId()),
                 exception_code,
@@ -154,12 +164,12 @@ impl MinidumpWriter {
         let (crashing_process, is_external_process) = unsafe {
             if pid != std::process::id() {
                 let proc = threading::OpenProcess(
-                    threading::PROCESS_ALL_ACCESS, // desired access
-                    0,                             // inherit handles
-                    pid,                           // pid
+                    PROCESS_ALL_ACCESS, // desired access
+                    FALSE,              // inherit handles
+                    pid,                // pid
                 );
 
-                if proc == 0 {
+                if proc.is_null() {
                     return Err(std::io::Error::last_os_error().into());
                 }
 
@@ -175,7 +185,7 @@ impl MinidumpWriter {
 
         let exc_info = (!crash_context.exception_pointers.is_null()).then_some(
             // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_exception_information
-            md::MINIDUMP_EXCEPTION_INFORMATION {
+            MINIDUMP_EXCEPTION_INFORMATION {
                 ThreadId: crash_context.thread_id,
                 // This is a mut pointer for some reason...I don't _think_ it is
                 // actually mut in practice...?
@@ -187,7 +197,7 @@ impl MinidumpWriter {
                 /// `MiniDumpWriteDump` that the pointers come from an external process so that
                 /// it can use eg `ReadProcessMemory` to get the contextual information from
                 /// the crash, rather than from the current process
-                ClientPointers: if is_external_process { 1 } else { 0 },
+                ClientPointers: if is_external_process { TRUE } else { FALSE },
             },
         );
 
@@ -205,14 +215,14 @@ impl MinidumpWriter {
 
     /// Writes a minidump to the specified file
     fn dump(mut self, destination: &mut std::fs::File) -> Result<(), Error> {
-        let exc_info = self.exc_info.take();
+        let mut exc_info = self.exc_info.take();
 
         let mut user_streams = Vec::with_capacity(1);
 
         let mut breakpad_info = self.fill_breakpad_stream();
 
         if let Some(bp_info) = &mut breakpad_info {
-            user_streams.push(md::MINIDUMP_USER_STREAM {
+            user_streams.push(MINIDUMP_USER_STREAM {
                 Type: MINIDUMP_STREAM_TYPE::BreakpadInfoStream as u32,
                 BufferSize: bp_info.len() as u32,
                 // Again with the mut pointer
@@ -220,7 +230,7 @@ impl MinidumpWriter {
             });
         }
 
-        let user_stream_infos = md::MINIDUMP_USER_STREAM_INFORMATION {
+        let user_stream_infos = MINIDUMP_USER_STREAM_INFORMATION {
             UserStreamCount: user_streams.len() as u32,
             UserStreamArray: user_streams.as_mut_ptr(),
         };
@@ -229,14 +239,14 @@ impl MinidumpWriter {
         // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/nf-minidumpapiset-minidumpwritedump
         // SAFETY: syscall
         let ret = unsafe {
-            md::MiniDumpWriteDump(
+            MiniDumpWriteDump(
                 self.crashing_process, // HANDLE to the process with the crash we want to capture
                 self.pid,              // process id
                 destination.as_raw_handle() as HANDLE, // file to write the minidump to
-                md::MiniDumpNormal,    // MINIDUMP_TYPE - we _might_ want to make this configurable
+                MiniDumpNormal,        // MINIDUMP_TYPE - we _might_ want to make this configurable
                 exc_info
-                    .as_ref()
-                    .map_or(std::ptr::null(), |ei| ei as *const _), // exceptionparam - the actual exception information
+                    .as_mut()
+                    .map_or(std::ptr::null_mut(), |ei| ei as *mut _), // exceptionparam - the actual exception information
                 &user_stream_infos, // user streams
                 std::ptr::null(),   // callback, unused
             )
@@ -297,4 +307,127 @@ impl Drop for MinidumpWriter {
         // SAFETY: syscall
         unsafe { CloseHandle(self.crashing_process) };
     }
+}
+
+/******************************************************************************
+ * The stuff below is missing from the winapi crate                           *
+ ******************************************************************************/
+
+// we can't use winapi's ENUM macro directly because it doesn't support
+// attributes, so let's define this one here until we migrate this code
+macro_rules! ENUM {
+    {enum $name:ident { $($variant:ident = $value:expr,)+ }} => {
+        #[allow(non_camel_case_types)] pub type $name = u32;
+        $(#[allow(non_upper_case_globals)] pub const $variant: $name = $value;)+
+    };
+}
+
+// winapi doesn't export the FN macro, so we duplicate it here
+macro_rules! FN {
+    (stdcall $func:ident($($t:ty,)*) -> $ret:ty) => (
+        #[allow(non_camel_case_types)] pub type $func = Option<unsafe extern "system" fn($($t,)*) -> $ret>;
+    );
+    (stdcall $func:ident($($p:ident: $t:ty,)*) -> $ret:ty) => (
+        #[allow(non_camel_case_types)] pub type $func = Option<unsafe extern "system" fn($($p: $t,)*) -> $ret>;
+    );
+}
+
+// From minidumpapiset.h
+
+STRUCT! {#[allow(non_snake_case)] #[repr(C, packed(4))] struct MINIDUMP_EXCEPTION_INFORMATION {
+    ThreadId: DWORD,
+    ExceptionPointers: PEXCEPTION_POINTERS,
+    ClientPointers: BOOL,
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_EXCEPTION_INFORMATION = *mut MINIDUMP_EXCEPTION_INFORMATION;
+
+ENUM! { enum MINIDUMP_TYPE {
+    MiniDumpNormal                         = 0x00000000,
+    MiniDumpWithDataSegs                   = 0x00000001,
+    MiniDumpWithFullMemory                 = 0x00000002,
+    MiniDumpWithHandleData                 = 0x00000004,
+    MiniDumpFilterMemory                   = 0x00000008,
+    MiniDumpScanMemory                     = 0x00000010,
+    MiniDumpWithUnloadedModules            = 0x00000020,
+    MiniDumpWithIndirectlyReferencedMemory = 0x00000040,
+    MiniDumpFilterModulePaths              = 0x00000080,
+    MiniDumpWithProcessThreadData          = 0x00000100,
+    MiniDumpWithPrivateReadWriteMemory     = 0x00000200,
+    MiniDumpWithoutOptionalData            = 0x00000400,
+    MiniDumpWithFullMemoryInfo             = 0x00000800,
+    MiniDumpWithThreadInfo                 = 0x00001000,
+    MiniDumpWithCodeSegs                   = 0x00002000,
+    MiniDumpWithoutAuxiliaryState          = 0x00004000,
+    MiniDumpWithFullAuxiliaryState         = 0x00008000,
+    MiniDumpWithPrivateWriteCopyMemory     = 0x00010000,
+    MiniDumpIgnoreInaccessibleMemory       = 0x00020000,
+    MiniDumpWithTokenInformation           = 0x00040000,
+    MiniDumpWithModuleHeaders              = 0x00080000,
+    MiniDumpFilterTriage                   = 0x00100000,
+    MiniDumpWithAvxXStateContext           = 0x00200000,
+    MiniDumpWithIptTrace                   = 0x00400000,
+    MiniDumpScanInaccessiblePartialPages   = 0x00800000,
+    MiniDumpValidTypeFlags                 = 0x00ffffff,
+}}
+
+// We don't actually need the following three structs so we use placeholders
+STRUCT! {#[allow(non_snake_case)] struct MINIDUMP_CALLBACK_INPUT {
+    dummy: u32,
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_CALLBACK_INPUT = *const MINIDUMP_CALLBACK_INPUT;
+
+STRUCT! {#[allow(non_snake_case)] #[repr(C, packed(4))] struct MINIDUMP_USER_STREAM {
+    Type: ULONG32,
+    BufferSize: ULONG,
+    Buffer: PVOID,
+
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_USER_STREAM = *const MINIDUMP_USER_STREAM;
+
+STRUCT! {#[allow(non_snake_case)] #[repr(C, packed(4))] struct MINIDUMP_USER_STREAM_INFORMATION {
+    UserStreamCount: ULONG,
+    UserStreamArray: PMINIDUMP_USER_STREAM,
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_USER_STREAM_INFORMATION = *const MINIDUMP_USER_STREAM_INFORMATION;
+
+STRUCT! {#[allow(non_snake_case)] #[repr(C, packed(4))] struct MINIDUMP_CALLBACK_OUTPUT {
+    dummy: u32,
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_CALLBACK_OUTPUT = *const MINIDUMP_CALLBACK_OUTPUT;
+
+// MiniDumpWriteDump() function and structs
+FN! {stdcall MINIDUMP_CALLBACK_ROUTINE(
+CallbackParam: PVOID,
+CallbackInput: PMINIDUMP_CALLBACK_INPUT,
+CallbackOutput: PMINIDUMP_CALLBACK_OUTPUT,
+) -> BOOL}
+
+STRUCT! {#[allow(non_snake_case)] #[repr(C, packed(4))] struct MINIDUMP_CALLBACK_INFORMATION {
+    CallbackRoutine: MINIDUMP_CALLBACK_ROUTINE,
+    CallbackParam: PVOID,
+}}
+
+#[allow(non_camel_case_types)]
+pub type PMINIDUMP_CALLBACK_INFORMATION = *const MINIDUMP_CALLBACK_INFORMATION;
+
+extern "system" {
+    pub fn MiniDumpWriteDump(
+        hProcess: HANDLE,
+        ProcessId: DWORD,
+        hFile: HANDLE,
+        DumpType: MINIDUMP_TYPE,
+        ExceptionParam: PMINIDUMP_EXCEPTION_INFORMATION,
+        UserStreamParam: PMINIDUMP_USER_STREAM_INFORMATION,
+        CallbackParam: PMINIDUMP_CALLBACK_INFORMATION,
+    ) -> BOOL;
 }

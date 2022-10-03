@@ -297,14 +297,16 @@ mod linux {
 mod windows {
     use super::*;
     use std::mem;
-    use windows_sys::Win32::System::{
-        Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-        Threading::{GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId},
+    use winapi::um::{
+        processthreadsapi::{
+            GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetThreadContext,
+        },
+        winnt::{CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
     };
 
     #[inline(never)]
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
-        let exception_code = u32::from_str_radix(&args[0], 16).unwrap() as i32;
+        let exception_code = u32::from_str_radix(&args[0], 16).unwrap();
 
         // Generate the exception and communicate back where the exception pointers
         // are
