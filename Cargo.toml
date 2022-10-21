@@ -32,7 +32,7 @@ nix = { version = "0.25", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
-version = "0.36"
+version = "0.42"
 features = [
     # MiniDumpWriteDump requires...a lot of features
     "Win32_Foundation",
