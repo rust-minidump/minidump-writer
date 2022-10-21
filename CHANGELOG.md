@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#53](https://github.com/rust-minidump/minidump-writer/pull/53) made the `mem_writer` and `dir_section` modules public. Thanks [@sage-msft](https://github.com/sage-msft)!
+- [PR#55](https://github.com/rust-minidump/minidump-writer/pull/55) bumped `nix`, `minidump-common`, `minidump`, `minidump-processor` and `dump_syms`. Thanks
+[@sfackler](https://github.com/sfackler)!
+- [PR#57](https://github.com/rust-minidump/minidump-writer/pull/57) bumped `windows-sys` to 0.42.
+
+### Removed
+- [PR#56](https://github.com/rust-minidump/minidump-writer/pull/56) removed the writing of the [HandleOperationListStream](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_operation_list) stream, as it was essentially untested and was of dubious usefulness.
+
 ## [0.4.0] - 2022-07-21
 ### Changed
 - [PR#50](https://github.com/rust-minidump/minidump-writer/pull/50) updated `minidump-common` and `crash-context`.
