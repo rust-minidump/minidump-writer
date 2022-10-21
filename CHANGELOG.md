@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.5.0] - 2022-10-21
 ### Changed
 - [PR#53](https://github.com/rust-minidump/minidump-writer/pull/53) made the `mem_writer` and `dir_section` modules public. Thanks [@sage-msft](https://github.com/sage-msft)!
 - [PR#55](https://github.com/rust-minidump/minidump-writer/pull/55) bumped `nix`, `minidump-common`, `minidump`, `minidump-processor` and `dump_syms`. Thanks
@@ -48,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/rust-minidump/minidump-writer/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/rust-minidump/minidump-writer/compare/0.3.1...0.4.0
 [0.3.1]: https://github.com/rust-minidump/minidump-writer/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/rust-minidump/minidump-writer/compare/0.2.1...0.3.0
