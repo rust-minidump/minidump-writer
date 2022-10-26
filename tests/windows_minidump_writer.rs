@@ -5,9 +5,17 @@ use minidump::{
     MinidumpThreadList,
 };
 use minidump_writer::minidump_writer::MinidumpWriter;
-use windows_sys::Win32::Foundation::{EXCEPTION_ILLEGAL_INSTRUCTION, STATUS_INVALID_PARAMETER};
 mod common;
 use common::start_child_and_return;
+
+type NTSTATUS = i32;
+
+const EXCEPTION_ILLEGAL_INSTRUCTION: NTSTATUS = -1073741795i32;
+const STATUS_INVALID_PARAMETER: NTSTATUS = -1073741811i32;
+
+extern "system" {
+    pub(crate) fn GetCurrentThreadId() -> u32;
+}
 
 fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
     md: &Minidump<'a, T>,
@@ -47,7 +55,7 @@ fn dump_current_process() {
     );
 
     // SAFETY: syscall
-    let thread_id = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+    let thread_id = unsafe { GetCurrentThreadId() };
 
     let bp_info: MinidumpBreakpadInfo =
         md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");
@@ -67,7 +75,7 @@ fn dump_specific_thread() {
 
     let jh = std::thread::spawn(move || {
         // SAFETY: syscall
-        let thread_id = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+        let thread_id = unsafe { GetCurrentThreadId() };
         while tx.send(thread_id).is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -99,8 +107,7 @@ fn dump_specific_thread() {
     );
 
     // SAFETY: syscall
-    let requesting_thread_id =
-        unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+    let requesting_thread_id = unsafe { GetCurrentThreadId() };
 
     let bp_info: MinidumpBreakpadInfo =
         md.get_stream().expect("Couldn't find MinidumpBreakpadInfo");

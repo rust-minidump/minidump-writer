@@ -295,12 +295,13 @@ mod linux {
 
 #[cfg(target_os = "windows")]
 mod windows {
+    use minidump_writer::ffi::{
+        GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetThreadContext, CONTEXT,
+        EXCEPTION_POINTERS, EXCEPTION_RECORD,
+    };
+
     use super::*;
     use std::mem;
-    use windows_sys::Win32::System::{
-        Diagnostics::Debug::{GetThreadContext, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD},
-        Threading::{GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId},
-    };
 
     #[inline(never)]
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
