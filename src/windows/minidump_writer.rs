@@ -1,16 +1,19 @@
 use crate::windows::errors::Error;
+use crate::windows::ffi::{
+    CloseHandle, GetCurrentProcess, GetCurrentThreadId, GetThreadContext, MiniDumpNormal,
+    MiniDumpWriteDump, OpenProcess, OpenThread, ResumeThread, RtlCaptureContext, SuspendThread,
+    EXCEPTION_POINTERS, EXCEPTION_RECORD, FALSE, HANDLE, MINIDUMP_EXCEPTION_INFORMATION,
+    MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION, PROCESS_ALL_ACCESS,
+    STATUS_NONCONTINUABLE_EXCEPTION, THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION,
+    THREAD_SUSPEND_RESUME,
+};
 use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
 use scroll::Pwrite;
 use std::os::windows::io::AsRawHandle;
-pub use windows_sys::Win32::Foundation::HANDLE;
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, STATUS_NONCONTINUABLE_EXCEPTION},
-    System::{Diagnostics::Debug as md, Threading as threading},
-};
 
 pub struct MinidumpWriter {
     /// Optional exception information
-    exc_info: Option<md::MINIDUMP_EXCEPTION_INFORMATION>,
+    exc_info: Option<MINIDUMP_EXCEPTION_INFORMATION>,
     /// Handle to the crashing process, which could be ourselves
     crashing_process: HANDLE,
     /// The id of the process we are dumping
@@ -53,19 +56,17 @@ impl MinidumpWriter {
 
                 // We need to suspend the thread to get its context, which would be bad
                 // if it's the current thread, so we check it early before regrets happen
-                if tid == threading::GetCurrentThreadId() {
-                    md::RtlCaptureContext(ec.as_mut_ptr());
+                if tid == GetCurrentThreadId() {
+                    RtlCaptureContext(ec.as_mut_ptr());
                 } else {
                     // We _could_ just fallback to the current thread if we can't get the
                     // thread handle, but probably better for this to fail with a specific
                     // error so that the caller can do that themselves if they want to
                     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openthread
-                    let thread_handle = threading::OpenThread(
-                        threading::THREAD_GET_CONTEXT
-                            | threading::THREAD_QUERY_INFORMATION
-                            | threading::THREAD_SUSPEND_RESUME, // desired access rights, we only need to get the context, which also requires suspension
-                        0,   // inherit handles
-                        tid, // thread id
+                    let thread_handle = OpenThread(
+                        THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME, // desired access rights, we only need to get the context, which also requires suspension
+                        FALSE, // inherit handles
+                        tid,   // thread id
                     );
 
                     if thread_handle == 0 {
@@ -85,14 +86,14 @@ impl MinidumpWriter {
 
                     // As noted in the GetThreadContext docs, we have to suspend the thread before we can get its context
                     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread
-                    if threading::SuspendThread(thread_handle.0) == u32::MAX {
+                    if SuspendThread(thread_handle.0) == u32::MAX {
                         return Err(Error::ThreadSuspend(std::io::Error::last_os_error()));
                     }
 
                     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadcontext
-                    if md::GetThreadContext(thread_handle.0, ec.as_mut_ptr()) == 0 {
+                    if GetThreadContext(thread_handle.0, ec.as_mut_ptr()) == 0 {
                         // Try to be a good citizen and resume the thread
-                        threading::ResumeThread(thread_handle.0);
+                        ResumeThread(thread_handle.0);
 
                         return Err(Error::ThreadContext(std::io::Error::last_os_error()));
                     }
@@ -100,19 +101,19 @@ impl MinidumpWriter {
                     // _presumably_ this will not fail if SuspendThread succeeded, but if it does
                     // there's really not much we can do about it, thus we don't bother checking the
                     // return value
-                    threading::ResumeThread(thread_handle.0);
+                    ResumeThread(thread_handle.0);
                 }
 
                 ec.assume_init()
             } else {
                 let mut ec = std::mem::MaybeUninit::uninit();
-                md::RtlCaptureContext(ec.as_mut_ptr());
+                RtlCaptureContext(ec.as_mut_ptr());
                 ec.assume_init()
             };
 
-            let mut exception_record: md::EXCEPTION_RECORD = std::mem::zeroed();
+            let mut exception_record: EXCEPTION_RECORD = std::mem::zeroed();
 
-            let exception_ptrs = md::EXCEPTION_POINTERS {
+            let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
                 ContextRecord: &mut exception_context,
             };
@@ -120,9 +121,9 @@ impl MinidumpWriter {
             exception_record.ExceptionCode = exception_code;
 
             let cc = crash_context::CrashContext {
-                exception_pointers: (&exception_ptrs as *const md::EXCEPTION_POINTERS).cast(),
+                exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),
                 process_id: std::process::id(),
-                thread_id: thread_id.unwrap_or_else(|| threading::GetCurrentThreadId()),
+                thread_id: thread_id.unwrap_or_else(|| GetCurrentThreadId()),
                 exception_code,
             };
 
@@ -153,10 +154,10 @@ impl MinidumpWriter {
         // SAFETY: syscalls
         let (crashing_process, is_external_process) = unsafe {
             if pid != std::process::id() {
-                let proc = threading::OpenProcess(
-                    threading::PROCESS_ALL_ACCESS, // desired access
-                    0,                             // inherit handles
-                    pid,                           // pid
+                let proc = OpenProcess(
+                    PROCESS_ALL_ACCESS, // desired access
+                    FALSE,              // inherit handles
+                    pid,                // pid
                 );
 
                 if proc == 0 {
@@ -165,7 +166,7 @@ impl MinidumpWriter {
 
                 (proc, true)
             } else {
-                (threading::GetCurrentProcess(), false)
+                (GetCurrentProcess(), false)
             }
         };
 
@@ -175,7 +176,7 @@ impl MinidumpWriter {
 
         let exc_info = (!crash_context.exception_pointers.is_null()).then_some(
             // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_exception_information
-            md::MINIDUMP_EXCEPTION_INFORMATION {
+            MINIDUMP_EXCEPTION_INFORMATION {
                 ThreadId: crash_context.thread_id,
                 // This is a mut pointer for some reason...I don't _think_ it is
                 // actually mut in practice...?
@@ -212,7 +213,7 @@ impl MinidumpWriter {
         let mut breakpad_info = self.fill_breakpad_stream();
 
         if let Some(bp_info) = &mut breakpad_info {
-            user_streams.push(md::MINIDUMP_USER_STREAM {
+            user_streams.push(MINIDUMP_USER_STREAM {
                 Type: MINIDUMP_STREAM_TYPE::BreakpadInfoStream as u32,
                 BufferSize: bp_info.len() as u32,
                 // Again with the mut pointer
@@ -220,7 +221,7 @@ impl MinidumpWriter {
             });
         }
 
-        let user_stream_infos = md::MINIDUMP_USER_STREAM_INFORMATION {
+        let user_stream_infos = MINIDUMP_USER_STREAM_INFORMATION {
             UserStreamCount: user_streams.len() as u32,
             UserStreamArray: user_streams.as_mut_ptr(),
         };
@@ -229,11 +230,11 @@ impl MinidumpWriter {
         // https://docs.microsoft.com/en-us/windows/win32/api/minidumpapiset/nf-minidumpapiset-minidumpwritedump
         // SAFETY: syscall
         let ret = unsafe {
-            md::MiniDumpWriteDump(
+            MiniDumpWriteDump(
                 self.crashing_process, // HANDLE to the process with the crash we want to capture
                 self.pid,              // process id
                 destination.as_raw_handle() as HANDLE, // file to write the minidump to
-                md::MiniDumpNormal,    // MINIDUMP_TYPE - we _might_ want to make this configurable
+                MiniDumpNormal,        // MINIDUMP_TYPE - we _might_ want to make this configurable
                 exc_info
                     .as_ref()
                     .map_or(std::ptr::null(), |ei| ei as *const _), // exceptionparam - the actual exception information
@@ -269,7 +270,7 @@ impl MinidumpWriter {
                 | BreakpadInfoValid::RequestingThreadId.bits(),
             dump_thread_id: self.tid,
             // Safety: syscall
-            requesting_thread_id: unsafe { threading::GetCurrentThreadId() },
+            requesting_thread_id: unsafe { GetCurrentThreadId() },
         };
 
         // TODO: derive Pwrite for MINIDUMP_BREAKPAD_INFO
