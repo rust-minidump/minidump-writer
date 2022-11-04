@@ -1,3 +1,6 @@
+// `WriterError` is large and clippy doesn't like that, but not a huge deal atm
+#![allow(clippy::result_large_err)]
+
 #[cfg(target_os = "android")]
 mod android;
 pub mod app_memory;
