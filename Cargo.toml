@@ -12,7 +12,7 @@ license = "MIT"
 byteorder = "1.3.2"
 cfg-if = "1.0"
 crash-context = "0.4"
-memoffset = "0.6"
+memoffset = "0.7"
 minidump-common = "0.14"
 scroll = "0.11"
 tempfile = "3.1.0"
@@ -20,7 +20,7 @@ thiserror = "1.0.21"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.74"
-goblin = "0.5"
+goblin = "0.6"
 memmap2 = "0.5"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
