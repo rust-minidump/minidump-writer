@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#60](https://github.com/rust-minidump/minidump-writer/pull/60) removed the dependency on `windows-sys` due the massive version churn, resolving [#58](https://github.com/rust-minidump/minidump-writer/issues/58). This should allow projects to more easily integrate this crate into their project without introducing multiple versions of transitive dependencies.
+- [PR#62](https://github.com/rust-minidump/minidump-writer/pull/62) replaced `MDExceptionCodeLinux` with `minidump_common::ExceptionCodeLinux`.
+- [PR#64](https://github.com/rust-minidump/minidump-writer/pull/64) updated dependencies.
+
 ## [0.5.0] - 2022-10-21
 ### Changed
 - [PR#53](https://github.com/rust-minidump/minidump-writer/pull/53) made the `mem_writer` and `dir_section` modules public. Thanks [@sage-msft](https://github.com/sage-msft)!
