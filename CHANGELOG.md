@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.6.0] - 2022-11-15
 ### Changed
 - [PR#60](https://github.com/rust-minidump/minidump-writer/pull/60) removed the dependency on `windows-sys` due the massive version churn, resolving [#58](https://github.com/rust-minidump/minidump-writer/issues/58). This should allow projects to more easily integrate this crate into their project without introducing multiple versions of transitive dependencies.
 - [PR#62](https://github.com/rust-minidump/minidump-writer/pull/62) replaced `MDExceptionCodeLinux` with `minidump_common::ExceptionCodeLinux`.
@@ -54,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/rust-minidump/minidump-writer/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/rust-minidump/minidump-writer/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/rust-minidump/minidump-writer/compare/0.3.1...0.4.0
 [0.3.1]: https://github.com/rust-minidump/minidump-writer/compare/0.3.0...0.3.1
