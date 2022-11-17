@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Changed
 - [PR#65](https://github.com/rust-minidump/minidump-writer/pull/65) updated `crash-context` to 0.5, which has support for a custom `capture_context` to replace `RtlCaptureContext` on Windows, due to improper bindings and deficiencies, resolving [#63](https://github.com/rust-minidump/minidump-writer/issues/63).
+- [PR#65](https://github.com/rust-minidump/minidump-writer/pull/65) replaced _most_ of the custom bindings from [PR#60](https://github.com/rust-minidump/minidump-writer/pull/60) with bindings from either `crash-context` or `winapi`.
 
 ## [0.6.0] - 2022-11-15
 ### Changed
