@@ -1,5 +1,6 @@
-#![cfg(all(target_os = "windows", target_arch = "x86_64"))]
+#![cfg(all(target_os = "windows"))]
 
+use cfg_if;
 use minidump::{
     CrashReason, Minidump, MinidumpBreakpadInfo, MinidumpMemoryList, MinidumpSystemInfo,
     MinidumpThreadList,
@@ -17,6 +18,18 @@ extern "system" {
     pub(crate) fn GetCurrentThreadId() -> u32;
 }
 
+fn get_target_cpu() -> minidump::system_info::Cpu {
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch = "aarch64")] {
+            minidump::system_info::Cpu::Arm64
+        } else if #[cfg(target_arch = "x86")] {
+            minidump::system_info::Cpu::X86
+        } else if #[cfg(target_arch = "x86_64")] {
+            minidump::system_info::Cpu::X86_64
+        }
+    }
+}
+
 fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
     md: &Minidump<'a, T>,
 ) -> CrashReason {
@@ -25,7 +38,8 @@ fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
 
     exc.get_crash_reason(
         minidump::system_info::Os::Windows,
-        minidump::system_info::Cpu::X86_64,
+        // This is currently ignored, but it might be used in the future
+        get_target_cpu(),
     )
 }
 
