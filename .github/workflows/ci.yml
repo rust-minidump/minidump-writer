@@ -46,9 +46,9 @@ jobs:
       - name: Fetch
         run: cargo fetch --target ${{ matrix.job.target }}
       - name: Build
-        run: cargo test --target ${{ matrix.job.target }} --release --no-run
+        run: cargo test --target ${{ matrix.job.target }} --no-run
       - name: Test
-        run: cargo test --target ${{ matrix.job.target }} --release
+        run: cargo test --target ${{ matrix.job.target }}
 
   # This job builds non-tier1 targets that aren't already tested
   build_lower_tier:

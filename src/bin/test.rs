@@ -296,7 +296,7 @@ mod linux {
 #[cfg(target_os = "windows")]
 mod windows {
     use minidump_writer::ffi::{
-        GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetThreadContext, CONTEXT,
+        GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetThreadContext,
         EXCEPTION_POINTERS, EXCEPTION_RECORD,
     };
 
@@ -305,20 +305,20 @@ mod windows {
 
     #[inline(never)]
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
-        let exception_code = u32::from_str_radix(&args[0], 16).unwrap() as i32;
+        let exception_code = u32::from_str_radix(&args[0], 16).unwrap();
 
         // Generate the exception and communicate back where the exception pointers
         // are
         unsafe {
             let mut exception_record: EXCEPTION_RECORD = mem::zeroed();
-            let mut exception_context: CONTEXT = mem::zeroed();
-            exception_context.ContextFlags =
-                minidump_common::format::ContextFlagsAmd64::CONTEXT_AMD64_ALL.bits();
+            let mut exception_context = std::mem::MaybeUninit::uninit();
 
             let pid = GetCurrentProcessId();
             let tid = GetCurrentThreadId();
 
-            GetThreadContext(GetCurrentThread(), &mut exception_context);
+            GetThreadContext(GetCurrentThread(), exception_context.as_mut_ptr());
+
+            let mut exception_context = exception_context.assume_init();
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#65](https://github.com/rust-minidump/minidump-writer/pull/65) updated `crash-context` to 0.5, which has support for a custom `capture_context` to replace `RtlCaptureContext` on Windows, due to improper bindings and deficiencies, resolving [#63](https://github.com/rust-minidump/minidump-writer/issues/63).
+
 ## [0.6.0] - 2022-11-15
 ### Changed
 - [PR#60](https://github.com/rust-minidump/minidump-writer/pull/60) removed the dependency on `windows-sys` due the massive version churn, resolving [#58](https://github.com/rust-minidump/minidump-writer/issues/58). This should allow projects to more easily integrate this crate into their project without introducing multiple versions of transitive dependencies.
