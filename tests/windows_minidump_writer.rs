@@ -8,10 +8,7 @@ use minidump_writer::minidump_writer::MinidumpWriter;
 mod common;
 use common::start_child_and_return;
 
-type NTSTATUS = i32;
-
-const EXCEPTION_ILLEGAL_INSTRUCTION: NTSTATUS = -1073741795i32;
-const STATUS_INVALID_PARAMETER: NTSTATUS = -1073741811i32;
+use winapi::um::{minwinbase::EXCEPTION_ILLEGAL_INSTRUCTION, winnt::STATUS_INVALID_PARAMETER};
 
 extern "system" {
     pub(crate) fn GetCurrentThreadId() -> u32;
@@ -138,7 +135,7 @@ fn dump_external_process() {
         let process_id: u32 = biter.next().unwrap().parse().unwrap();
         let exception_pointers: usize = biter.next().unwrap().parse().unwrap();
         let thread_id: u32 = biter.next().unwrap().parse().unwrap();
-        let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap() as i32;
+        let exception_code = u32::from_str_radix(biter.next().unwrap(), 16).unwrap();
 
         (process_id, exception_pointers, thread_id, exception_code)
     };

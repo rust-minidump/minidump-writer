@@ -1,6 +1,7 @@
 use crate::windows::errors::Error;
 use crate::windows::ffi::{
-    capture_context, GetThreadContext, MiniDumpNormal, MiniDumpWriteDump, EXCEPTION_POINTERS,
+    capture_context, GetCurrentProcess, GetCurrentThreadId, GetThreadContext, MiniDumpNormal,
+    MiniDumpWriteDump, OpenProcess, OpenThread, ResumeThread, SuspendThread, EXCEPTION_POINTERS,
     HANDLE, MINIDUMP_EXCEPTION_INFORMATION, MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION,
 };
 use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
@@ -10,10 +11,6 @@ use winapi::{
     shared::minwindef::FALSE,
     um::{
         handleapi::CloseHandle,
-        processthreadsapi::{
-            GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenThread, ResumeThread,
-            SuspendThread,
-        },
         winnt::{
             EXCEPTION_RECORD, PROCESS_ALL_ACCESS, STATUS_NONCONTINUABLE_EXCEPTION,
             THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION, THREAD_SUSPEND_RESUME,
@@ -198,7 +195,7 @@ impl MinidumpWriter {
                 /// `MiniDumpWriteDump` that the pointers come from an external process so that
                 /// it can use eg `ReadProcessMemory` to get the contextual information from
                 /// the crash, rather than from the current process
-                ClientPointers: if is_external_process { 1 } else { 0 },
+                ClientPointers: i32::from(is_external_process),
             },
         );
 

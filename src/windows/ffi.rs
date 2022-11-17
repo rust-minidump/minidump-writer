@@ -9,8 +9,17 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-pub use crash_context::ffi::{capture_context, CONTEXT, EXCEPTION_POINTERS};
-pub use winapi::{shared::minwindef::BOOL, um::winnt::HANDLE};
+pub use crash_context::ffi::{capture_context, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD};
+pub use winapi::{
+    shared::minwindef::BOOL,
+    um::{
+        processthreadsapi::{
+            GetCurrentProcess, GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId,
+            OpenProcess, OpenThread, ResumeThread, SuspendThread,
+        },
+        winnt::HANDLE,
+    },
+};
 
 pub type MINIDUMP_TYPE = u32;
 
