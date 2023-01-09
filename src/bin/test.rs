@@ -88,7 +88,7 @@ mod linux {
     fn test_file_id() -> Result<()> {
         let ppid = getppid().as_raw();
         let exe_link = format!("/proc/{}/exe", ppid);
-        let exe_name = std::fs::read_link(&exe_link)?.into_os_string();
+        let exe_name = std::fs::read_link(exe_link)?.into_os_string();
         let mut dumper = PtraceDumper::new(getppid().as_raw())?;
         let mut found_exe = None;
         for (idx, mapping) in dumper.mappings.iter().enumerate() {
