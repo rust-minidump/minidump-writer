@@ -50,6 +50,22 @@ impl Drop for PtraceDumper {
     }
 }
 
+/// PTRACE_DETACH the given pid.
+///
+/// This handles special errno cases (ESRCH) which we won't consider errors.
+fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
+    let pid = nix::unistd::Pid::from_raw(child);
+    ptrace::detach(pid, None).or_else(|e| {
+        // errno is set to ESRCH if the pid no longer exists, but we don't want to error in that
+        // case.
+        if e == nix::Error::ESRCH {
+            Ok(())
+        } else {
+            Err(DumperError::PtraceDetachError(child, e))
+        }
+    })
+}
+
 impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
@@ -106,7 +122,6 @@ impl PtraceDumper {
     /// Suspends a thread by attaching to it.
     pub fn suspend_thread(child: Pid) -> Result<(), DumperError> {
         use DumperError::PtraceAttachError as AttachErr;
-        use DumperError::PtraceDetachError as DetachErr;
 
         let pid = nix::unistd::Pid::from_raw(child);
         // This may fail if the thread has just died or debugged.
@@ -116,7 +131,7 @@ impl PtraceDumper {
                 Ok(_) => break,
                 Err(_e @ Errno::EINTR) => continue,
                 Err(e) => {
-                    ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
+                    ptrace_detach(child)?;
                     return Err(DumperError::WaitPidError(child, e));
                 }
             }
@@ -145,7 +160,7 @@ impl PtraceDumper {
                 skip_thread = true;
             }
             if skip_thread {
-                ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
+                ptrace_detach(child)?;
                 return Err(DumperError::DetachSkippedThread(child));
             }
         }
@@ -154,10 +169,7 @@ impl PtraceDumper {
 
     /// Resumes a thread by detaching from it.
     pub fn resume_thread(child: Pid) -> Result<(), DumperError> {
-        use DumperError::PtraceDetachError as DetachErr;
-        let pid = nix::unistd::Pid::from_raw(child);
-        ptrace::detach(pid, None).map_err(|e| DetachErr(child, e))?;
-        Ok(())
+        ptrace_detach(child)
     }
 
     pub fn suspend_threads(&mut self) -> Result<(), DumperError> {
