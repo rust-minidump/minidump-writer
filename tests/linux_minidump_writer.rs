@@ -133,7 +133,7 @@ fn test_write_and_read_dump_from_parent_helper(context: Context) {
         size: memory_size,
         offset: 0,
         executable: false,
-        name: Some("a fake mapping".to_string()),
+        name: Some("a fake mapping".into()),
         system_mapping_info: SystemMappingInfo {
             start_address: mmap_addr,
             end_address: mmap_addr + memory_size,

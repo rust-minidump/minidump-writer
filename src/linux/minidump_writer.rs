@@ -187,8 +187,8 @@ impl MinidumpWriter {
         destination: &mut (impl Write + Seek),
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
-        // of stream which we write.
-        let num_writers = 14u32;
+        // of streams which we write.
+        let num_writers = 15u32;
 
         let mut header_section = MemoryWriter::<MDRawHeader>::alloc(buffer)?;
 
@@ -234,6 +234,10 @@ impl MinidumpWriter {
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = systeminfo_stream::write(buffer)?;
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
+
+        let dirent = memory_info_list_stream::write(self, buffer)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
