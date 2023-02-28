@@ -39,7 +39,7 @@ mach2 = "0.4"
 # due to massive version churn
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
 version = "0.3"
-features = ["minwindef", "processthreadsapi", "winnt"]
+features = ["handleapi", "minwindef", "processthreadsapi", "winnt"]
 
 [dev-dependencies]
 # Minidump-processor is async so we need an executor
