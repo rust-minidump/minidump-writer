@@ -481,14 +481,14 @@ impl PtraceDumper {
     ) -> Option<&'data [u8]> {
         if let Some(mut notes) = elf_obj.iter_note_headers(mem_slice) {
             while let Some(Ok(note)) = notes.next() {
-                if note.n_type == elf::note::NT_GNU_BUILD_ID {
+                if (note.name == "GNU") && (note.n_type == elf::note::NT_GNU_BUILD_ID) {
                     return Some(note.desc);
                 }
             }
         }
         if let Some(mut notes) = elf_obj.iter_note_sections(mem_slice, Some(".note.gnu.build-id")) {
             while let Some(Ok(note)) = notes.next() {
-                if note.n_type == elf::note::NT_GNU_BUILD_ID {
+                if (note.name == "GNU") && (note.n_type == elf::note::NT_GNU_BUILD_ID) {
                     return Some(note.desc);
                 }
             }
