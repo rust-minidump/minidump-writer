@@ -213,7 +213,6 @@ impl PtraceDumper {
         if task_path.is_dir() {
             std::fs::read_dir(task_path)
                 .map_err(|e| InitError::IOError(filename, e))?
-                .into_iter()
                 .filter_map(|entry| entry.ok()) // Filter out bad entries
                 .filter_map(|entry| {
                     entry
