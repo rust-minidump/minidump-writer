@@ -61,7 +61,7 @@ jobs:
          #- { os: ubuntu-latest,  target: i686-unknown-linux-musl,     use-cross: true }
           - { os: ubuntu-22.04,  target: aarch64-unknown-linux-gnu,   use-cross: true }
           - { os: ubuntu-22.04,  target: aarch64-unknown-linux-musl,  use-cross: true }
-          - { os: ubuntu-22.04,  target: aarch64-linux-android,       use-cross: true }
+          #- { os: ubuntu-22.04,  target: aarch64-linux-android,       use-cross: true }
           - { os: ubuntu-22.04,  target: arm-unknown-linux-gnueabi,   use-cross: true }
           - { os: ubuntu-22.04,  target: arm-unknown-linux-musleabi,  use-cross: true }
           - { os: ubuntu-22.04,  target: arm-linux-androideabi,       use-cross: true }
