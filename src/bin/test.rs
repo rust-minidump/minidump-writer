@@ -207,11 +207,11 @@ mod linux {
 
     fn spawn_mmap_wait() -> Result<()> {
         let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE).unwrap();
-        let memory_size = page_size.unwrap() as usize;
+        let memory_size = std::num::NonZeroUsize::new(page_size.unwrap() as usize).unwrap();
         // Get some memory to be mapped by the child-process
         let mapped_mem = unsafe {
             mmap(
-                std::ptr::null_mut(),
+                None,
                 memory_size,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON,
