@@ -31,15 +31,12 @@ nix = { version = "0.26", default-features = false, features = [
     "user",
 ] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+bitflags = "2.0"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Binds some additional mac specifics not in libc
 mach2 = "0.4"
-
-# Additional bindings to Windows specific APIs. Note we don't use windows-sys
-# due to massive version churn
-[target.'cfg(target_os = "windows")'.dependencies.winapi]
-version = "0.3"
-features = ["handleapi", "minwindef", "processthreadsapi", "winnt"]
 
 [dev-dependencies]
 # Minidump-processor is async so we need an executor
@@ -54,3 +51,6 @@ dump_syms = { version = "2.0.0", default-features = false }
 minidump-processor = { version = "0.15", default-features = false }
 similar-asserts = "1.2"
 uuid = "1.0"
+
+[patch.crates-io]
+crash-context = { path = "../crash-handling/crash-context" }

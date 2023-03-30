@@ -1,22 +1,17 @@
+#![allow(unsafe_code)]
+
 use crate::windows::errors::Error;
 use crate::windows::ffi::{
-    capture_context, GetCurrentProcess, GetCurrentThreadId, GetThreadContext, MiniDumpNormal,
-    MiniDumpWriteDump, OpenProcess, OpenThread, ResumeThread, SuspendThread, EXCEPTION_POINTERS,
-    HANDLE, MINIDUMP_EXCEPTION_INFORMATION, MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION,
+    capture_context, CloseHandle, GetCurrentProcess, GetCurrentThreadId, GetThreadContext,
+    MiniDumpWriteDump, MinidumpType, OpenProcess, OpenThread, ResumeThread, SuspendThread,
+    EXCEPTION_POINTERS, EXCEPTION_RECORD, FALSE, HANDLE, MINIDUMP_EXCEPTION_INFORMATION,
+    MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION, PROCESS_ALL_ACCESS,
+    STATUS_NONCONTINUABLE_EXCEPTION, THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION,
+    THREAD_SUSPEND_RESUME,
 };
 use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
 use scroll::Pwrite;
 use std::os::windows::io::AsRawHandle;
-use winapi::{
-    shared::minwindef::FALSE,
-    um::{
-        handleapi::CloseHandle,
-        winnt::{
-            EXCEPTION_RECORD, PROCESS_ALL_ACCESS, STATUS_NONCONTINUABLE_EXCEPTION,
-            THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION, THREAD_SUSPEND_RESUME,
-        },
-    },
-};
 
 pub struct MinidumpWriter {
     /// Optional exception information
@@ -29,7 +24,7 @@ pub struct MinidumpWriter {
     tid: u32,
     /// The exception code for the dump
     #[allow(dead_code)]
-    exception_code: u32,
+    exception_code: i32,
     /// Whether we are dumping the current process or not
     is_external_process: bool,
 }
@@ -49,7 +44,7 @@ impl MinidumpWriter {
     /// function can also fail if `thread_id` is specified and we are unable to
     /// acquire the thread's context
     pub fn dump_local_context(
-        exception_code: Option<u32>,
+        exception_code: Option<i32>,
         thread_id: Option<u32>,
         destination: &mut std::fs::File,
     ) -> Result<(), Error> {
@@ -76,7 +71,7 @@ impl MinidumpWriter {
                         tid,   // thread id
                     );
 
-                    if thread_handle.is_null() {
+                    if thread_handle == 0 {
                         return Err(Error::ThreadOpen(std::io::Error::last_os_error()));
                     }
 
@@ -276,7 +271,7 @@ impl MinidumpWriter {
             validity: BreakpadInfoValid::DumpThreadId.bits()
                 | BreakpadInfoValid::RequestingThreadId.bits(),
             dump_thread_id: self.tid,
-            // Safety: syscall
+            // SAFETY: syscall
             requesting_thread_id: unsafe { GetCurrentThreadId() },
         };
 
