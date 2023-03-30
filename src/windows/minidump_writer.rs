@@ -46,6 +46,7 @@ impl MinidumpWriter {
     pub fn dump_local_context(
         exception_code: Option<i32>,
         thread_id: Option<u32>,
+        minidump_type: Option<MinidumpType>,
         destination: &mut std::fs::File,
     ) -> Result<(), Error> {
         let exception_code = exception_code.unwrap_or(STATUS_NONCONTINUABLE_EXCEPTION);
@@ -129,7 +130,7 @@ impl MinidumpWriter {
                 exception_code,
             };
 
-            Self::dump_crash_context(cc, destination)
+            Self::dump_crash_context(cc, minidump_type, destination)
         }
     }
 
@@ -149,6 +150,7 @@ impl MinidumpWriter {
     /// for the duration of this function call.
     pub fn dump_crash_context(
         crash_context: crash_context::CrashContext,
+        minidump_type: Option<MinidumpType>,
         destination: &mut std::fs::File,
     ) -> Result<(), Error> {
         let pid = crash_context.process_id;
@@ -162,7 +164,7 @@ impl MinidumpWriter {
                     pid,                // pid
                 );
 
-                if proc.is_null() {
+                if proc == 0 {
                     return Err(std::io::Error::last_os_error().into());
                 }
 
@@ -203,11 +205,15 @@ impl MinidumpWriter {
             is_external_process,
         };
 
-        mdw.dump(destination)
+        mdw.dump(minidump_type, destination)
     }
 
     /// Writes a minidump to the specified file
-    fn dump(mut self, destination: &mut std::fs::File) -> Result<(), Error> {
+    fn dump(
+        mut self,
+        minidump_type: Option<MinidumpType>,
+        destination: &mut std::fs::File,
+    ) -> Result<(), Error> {
         let exc_info = self.exc_info.take();
 
         let mut user_streams = Vec::with_capacity(1);
@@ -236,7 +242,7 @@ impl MinidumpWriter {
                 self.crashing_process, // HANDLE to the process with the crash we want to capture
                 self.pid,              // process id
                 destination.as_raw_handle() as HANDLE, // file to write the minidump to
-                MiniDumpNormal,        // MINIDUMP_TYPE - we _might_ want to make this configurable
+                minidump_type.unwrap_or(MinidumpType::Normal),
                 exc_info
                     .as_ref()
                     .map_or(std::ptr::null(), |ei| ei as *const _), // exceptionparam - the actual exception information
