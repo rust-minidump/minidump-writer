@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.0] - 2023-04-03
 ### Removed
 - [PR#77](https://github.com/rust-minidump/minidump-writer/pull/77) removed the dependency on `winapi`, all bindings are either part of `minidump-writer` or `crash-context` now.
 
@@ -70,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.7.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/rust-minidump/minidump-writer/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/rust-minidump/minidump-writer/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/rust-minidump/minidump-writer/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/rust-minidump/minidump-writer/compare/0.4.0...0.5.0
