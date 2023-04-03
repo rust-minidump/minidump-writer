@@ -8,10 +8,11 @@ use minidump_writer::minidump_writer::MinidumpWriter;
 mod common;
 use common::start_child_and_return;
 
-use winapi::um::{minwinbase::EXCEPTION_ILLEGAL_INSTRUCTION, winnt::STATUS_INVALID_PARAMETER};
-
+const EXCEPTION_ILLEGAL_INSTRUCTION: i32 = -1073741795;
+const STATUS_INVALID_PARAMETER: i32 = -1073741811;
+#[link(name = "kernel32")]
 extern "system" {
-    pub(crate) fn GetCurrentThreadId() -> u32;
+    fn GetCurrentThreadId() -> u32;
 }
 
 fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(

@@ -447,6 +447,3 @@ extern "system" {
         callback_param: *const MINIDUMP_CALLBACK_INFORMATION,
     ) -> BOOL;
 }
-
-// #[minwin]
-// mod blah {}
