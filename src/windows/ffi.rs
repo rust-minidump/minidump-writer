@@ -239,18 +239,6 @@ pub struct MINIDUMP_VM_POST_READ_CALLBACK {
     pub Status: Hresult,
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86")] {
-        #[repr(C)]
-        struct CALLBACK_CONTEXT([u8; 716]);
-    } else if #[cfg(target_arch = "x86_64")] {
-
-    } else if #[cfg(target_arch = "aarch64")] {
-        #[repr(C)]
-        struct CALLBACK_CONTEXT([u8; 912]);
-    }
-}
-
 /// Oof, so we have a problem with these structs, they are all packed(4), but
 /// `CONTEXT` is aligned by either 4 (x86) or 16 (x86_64/aarch64)...which Rust
 /// doesn't currently allow https://github.com/rust-lang/rust/issues/59154, so
