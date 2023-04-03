@@ -36,8 +36,13 @@ fn dump_current_process() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriter::dump_local_context(Some(STATUS_INVALID_PARAMETER), None, tmpfile.as_file_mut())
-        .expect("failed to write minidump");
+    MinidumpWriter::dump_local_context(
+        Some(STATUS_INVALID_PARAMETER),
+        None,
+        None,
+        tmpfile.as_file_mut(),
+    )
+    .expect("failed to write minidump");
 
     let md = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
 
@@ -84,6 +89,7 @@ fn dump_specific_thread() {
     MinidumpWriter::dump_local_context(
         Some(STATUS_INVALID_PARAMETER),
         Some(crashing_thread_id),
+        None,
         tmpfile.as_file_mut(),
     )
     .expect("failed to write minidump");
@@ -141,6 +147,7 @@ fn dump_external_process() {
         (process_id, exception_pointers, thread_id, exception_code)
     };
 
+    let exception_code = exception_code as i32;
     assert_eq!(exception_code, EXCEPTION_ILLEGAL_INSTRUCTION);
 
     let crash_context = crash_context::CrashContext {
@@ -157,7 +164,7 @@ fn dump_external_process() {
 
     // SAFETY: We keep the process we are dumping alive until the minidump is written
     // and the test process keep the pointers it sent us alive until it is killed
-    MinidumpWriter::dump_crash_context(crash_context, tmpfile.as_file_mut())
+    MinidumpWriter::dump_crash_context(crash_context, None, tmpfile.as_file_mut())
         .expect("failed to write minidump");
 
     child.kill().expect("failed to kill child");
