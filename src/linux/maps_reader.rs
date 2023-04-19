@@ -65,6 +65,11 @@ fn is_mapping_a_path(pathname: Option<&OsStr>) -> bool {
 }
 
 impl MappingInfo {
+    /// Return whether the `name` field is a path (contains a `/`).
+    pub fn name_is_path(&self) -> bool {
+        is_mapping_a_path(self.name.as_deref())
+    }
+
     pub fn aggregate(memory_maps: MemoryMaps, linux_gate_loc: AuxvType) -> Result<Vec<Self>> {
         let mut infos = Vec::<Self>::new();
 
