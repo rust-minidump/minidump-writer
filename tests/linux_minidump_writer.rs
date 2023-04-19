@@ -26,7 +26,6 @@ use common::*;
 
 #[derive(Debug, PartialEq)]
 enum Context {
-    #[cfg(not(any(target_arch = "mips", target_arch = "arm")))]
     With,
     Without,
 }
