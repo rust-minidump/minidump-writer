@@ -326,8 +326,7 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        // If you add more directory entries, don't forget to update kNumWriters,
-        // above.
+        // If you add more directory entries, don't forget to update num_writers, above.
         Ok(())
     }
 

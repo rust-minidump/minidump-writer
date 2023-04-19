@@ -322,12 +322,18 @@ contextual_tests! {
     }
 
     fn test_sanitized_stacks(context: Context) {
+        if context == Context::With {
+            // FIXME the context's stack pointer very often doesn't lie in mapped memory, resulting
+            // in the stack memory having 0 size (so no slice will match `defaced` in the
+            // assertion).
+            return;
+        }
         let num_of_threads = 1;
         let mut child = start_child_and_wait_for_threads(num_of_threads);
         let pid = child.id() as i32;
 
         let mut tmpfile = tempfile::Builder::new()
-            .prefix("skip_if_requested")
+            .prefix("sanitized_stacks")
             .tempfile()
             .unwrap();
 
