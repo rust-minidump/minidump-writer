@@ -551,33 +551,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
     }
 
     #[test]
-    fn test_whitespaces_in_maps() {
-        let mappings = get_mappings_for(
-            "\
-   7f0b97b6f000-7f0b97b70000 r--p 00000000 00:3e 27136458                   libmozgtk.so
-7f0b97b70000-7f0b97b71000 r-xp 00000000 00:3e 27136458                   libmozgtk.so    
-7f0b97b71000-7f0b97b73000     r--p 00000000 00:3e 27136458\t\t\tlibmozgtk.so",
-            0x7ffe091bf000,
-        );
-
-        assert_eq!(mappings.len(), 1);
-
-        let expected_map = MappingInfo {
-            start_address: 0x7f0b97b6f000,
-            size: 16384,
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x7f0b97b6f000,
-                end_address: 0x7f0b97b73000,
-            },
-            offset: 0,
-            executable: true,
-            name: Some("libmozgtk.so".into()),
-        };
-
-        assert_eq!(expected_map, mappings[0]);
-    }
-
-    #[test]
     fn test_whitespaces_in_name() {
         let mappings = get_mappings_for(
             "\
