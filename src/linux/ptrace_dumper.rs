@@ -363,7 +363,7 @@ impl PtraceDumper {
         // the bitfield length is 2^test_bits long.
         let test_bits = 11;
         // byte length of the corresponding array.
-        let array_size: u64 = 1 << (test_bits - 3);
+        let array_size: usize = 1 << (test_bits - 3);
         let array_mask = array_size - 1;
         // The amount to right shift pointers by. This captures the top bits
         // on 32 bit architectures. On 64 bit architectures this would be
@@ -378,7 +378,7 @@ impl PtraceDumper {
         // avoid eliding useful register values.
         let small_int_magnitude: isize = 4096;
 
-        let mut could_hit_mapping = vec![0; array_size as usize];
+        let mut could_hit_mapping = vec![0; array_size];
         // Initialize the bitfield such that if the (pointer >> shift)'th
         // bit, modulo the bitfield size, is not set then there does not
         // exist a mapping in mappings that would contain that pointer.
@@ -394,7 +394,7 @@ impl PtraceDumper {
             end >>= shift;
             for bit in start..=end {
                 // Set each bit in the range, applying the modulus.
-                could_hit_mapping[((bit >> 3) as u64 & array_mask) as usize] |= 1 << (bit & 7);
+                could_hit_mapping[(bit >> 3) & array_mask] |= 1 << (bit & 7);
             }
         }
 
@@ -428,9 +428,7 @@ impl PtraceDumper {
             }
 
             let test = addr >> shift;
-            if could_hit_mapping[((test >> 3) as u64 & array_mask) as usize] & (1 << (test & 7))
-                != 0
-            {
+            if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
                 if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
                     if hit_mapping.executable {
                         last_hit_mapping = Some(hit_mapping);
