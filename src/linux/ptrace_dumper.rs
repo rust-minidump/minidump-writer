@@ -4,7 +4,7 @@ use crate::{
     linux::{
         auxv_reader::{AuxvType, ProcfsAuxvIter},
         errors::{DumperError, InitError, ThreadInfoError},
-        maps_reader::{MappingInfo, MappingInfoParsingResult, DELETED_SUFFIX},
+        maps_reader::MappingInfo,
         thread_info::{Pid, ThreadInfo},
         LINUX_GATE_LIBRARY_NAME,
     },
@@ -15,13 +15,7 @@ use nix::{
     errno::Errno,
     sys::{ptrace, wait},
 };
-use std::{
-    collections::HashMap,
-    ffi::c_void,
-    io::{BufRead, BufReader},
-    path,
-    result::Result,
-};
+use std::{collections::HashMap, ffi::c_void, io::BufReader, path, result::Result};
 
 #[derive(Debug, Clone)]
 pub struct Thread {
@@ -280,15 +274,10 @@ impl PtraceDumper {
         let maps_path = path::PathBuf::from(&filename);
         let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
 
-        for line in BufReader::new(maps_file).lines() {
-            // /proc/<pid>/maps looks like this
-            // 7fe34a863000-7fe34a864000 rw-p 00009000 00:31 4746408                    /usr/lib64/libogg.so.0.8.4
-            let line = line.map_err(errmap)?;
-            match MappingInfo::parse_from_line(&line, linux_gate_loc, self.mappings.last_mut()) {
-                Ok(MappingInfoParsingResult::Success(map)) => self.mappings.push(map),
-                Ok(MappingInfoParsingResult::SkipLine) | Err(_) => continue,
-            }
-        }
+        self.mappings = procfs::process::MemoryMaps::from_reader(maps_file)
+            .ok()
+            .and_then(|maps| MappingInfo::aggregate(maps, linux_gate_loc).ok())
+            .unwrap_or_default();
 
         if entry_point_loc != 0 {
             let mut swap_idx = None;
@@ -374,7 +363,7 @@ impl PtraceDumper {
         // the bitfield length is 2^test_bits long.
         let test_bits = 11;
         // byte length of the corresponding array.
-        let array_size = 1 << (test_bits - 3);
+        let array_size: usize = 1 << (test_bits - 3);
         let array_mask = array_size - 1;
         // The amount to right shift pointers by. This captures the top bits
         // on 32 bit architectures. On 64 bit architectures this would be
@@ -553,7 +542,7 @@ impl PtraceDumper {
         }
 
         // Special-case linux-gate because it's not a real file.
-        if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME) {
+        if mapping.name.as_deref() == Some(LINUX_GATE_LIBRARY_NAME.as_ref()) {
             if pid == std::process::id().try_into()? {
                 let mem_slice = unsafe {
                     std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
@@ -568,26 +557,16 @@ impl PtraceDumper {
                 return Self::elf_file_identifier_from_mapped_file(&mem_slice);
             }
         }
-        let new_name = MappingInfo::handle_deleted_file_in_mapping(
-            mapping.name.as_deref().unwrap_or_default(),
-            pid,
-        )?;
 
-        let mem_slice = MappingInfo::get_mmap(&Some(new_name.clone()), mapping.offset)?;
+        let (filename, old_name) = mapping.fixup_deleted_file(pid)?;
+
+        let mem_slice = MappingInfo::get_mmap(&Some(filename), mapping.offset)?;
         let build_id = Self::elf_file_identifier_from_mapped_file(&mem_slice)?;
 
-        // This means we switched from "/my/binary" to "/proc/1234/exe", because /my/binary
-        // was deleted and thus has a "/my/binary (deleted)" entry. We found the mapping anyway
-        // so we remove the "(deleted)".
-        if let Some(old_name) = &mapping.name {
-            if &new_name != old_name {
-                mapping.name = Some(
-                    old_name
-                        .trim_end_matches(DELETED_SUFFIX)
-                        .trim_end()
-                        .to_string(),
-                );
-            }
+        // This means we switched from "/my/binary" to "/proc/1234/exe", change the mapping to
+        // remove the " (deleted)" portion.
+        if let Some(old_name) = old_name {
+            mapping.name = Some(old_name.into());
         }
         Ok(build_id)
     }
