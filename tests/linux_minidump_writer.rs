@@ -13,6 +13,7 @@ use minidump_writer::{
     thread_info::Pid,
 };
 use nix::{errno::Errno, sys::signal::Signal};
+use procfs_core::process::MMPermissions;
 use std::collections::HashSet;
 
 use std::{
@@ -151,7 +152,7 @@ contextual_tests! {
             start_address: mmap_addr,
             size: memory_size,
             offset: 0,
-            executable: false,
+            permissions: MMPermissions::READ | MMPermissions::WRITE,
             name: Some("a fake mapping".into()),
             system_mapping_info: SystemMappingInfo {
                 start_address: mmap_addr,
@@ -532,14 +533,14 @@ fn test_minidump_size_limit() {
         // large enough value -- the limit-checking code in minidump_writer.rs
         // does just a rough estimate.
         // TODO: Fix this properly
-        // There are occasionally CI failures where the sizes are off by 1 due
-        // some minor difference in (probably) a string somewhere in the dump
-        // since the state capture is not going to be 100% the same
         //assert_eq!(meta.len(), normal_file_size);
         let min = std::cmp::min(meta.len(), normal_file_size);
         let max = std::cmp::max(meta.len(), normal_file_size);
 
-        assert!(max - min < 10);
+        // Setting a stack limit limits the size of non-main stacks even before
+        // the limit is reached. This will cause slight variations in size
+        // between a limited and an unlimited minidump.
+        assert!(max - min < 1024, "max = {max:} min = {min:}");
     }
 
     // Third, write a minidump with a size limit small enough to be triggered.

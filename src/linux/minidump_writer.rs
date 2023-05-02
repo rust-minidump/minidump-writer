@@ -156,15 +156,16 @@ impl MinidumpWriter {
             return true;
         }
 
-        let (stack_ptr, stack_len) = match dumper.get_stack_info(stack_pointer) {
+        let (valid_stack_pointer, stack_len) = match dumper.get_stack_info(stack_pointer) {
             Ok(x) => x,
             Err(_) => {
                 return false;
             }
         };
+
         let stack_copy = match PtraceDumper::copy_from_process(
             self.blamed_thread,
-            stack_ptr as *mut libc::c_void,
+            valid_stack_pointer as *mut libc::c_void,
             stack_len,
         ) {
             Ok(x) => x,
@@ -173,7 +174,7 @@ impl MinidumpWriter {
             }
         };
 
-        let sp_offset = stack_pointer - stack_ptr;
+        let sp_offset = stack_pointer.saturating_sub(valid_stack_pointer);
         self.principal_mapping
             .as_ref()
             .unwrap()
