@@ -15,6 +15,7 @@ use nix::{
     errno::Errno,
     sys::{ptrace, wait},
 };
+use procfs_core::process::MMPermissions;
 use std::{collections::HashMap, ffi::c_void, io::BufReader, path, result::Result};
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ pub struct PtraceDumper {
     pub threads: Vec<Thread>,
     pub auxv: HashMap<AuxvType, AuxvType>,
     pub mappings: Vec<MappingInfo>,
+    pub page_size: usize,
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -70,6 +72,7 @@ impl PtraceDumper {
             threads: Vec::new(),
             auxv: HashMap::new(),
             mappings: Vec::new(),
+            page_size: 0,
         };
         dumper.init()?;
         Ok(dumper)
@@ -80,6 +83,10 @@ impl PtraceDumper {
         self.read_auxv()?;
         self.enumerate_threads()?;
         self.enumerate_mappings()?;
+        self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
+            .expect("page size apparently unlimited: doesn't make sense.")
+            as usize;
+
         Ok(())
     }
 
@@ -314,28 +321,52 @@ impl PtraceDumper {
         ThreadInfo::create(self.pid, self.threads[index].tid)
     }
 
-    // Get information about the stack, given the stack pointer. We don't try to
-    // walk the stack since we might not have all the information needed to do
-    // unwind. So we just grab, up to, 32k of stack.
+    // Returns a valid stack pointer and the mapping that contains the stack.
+    // The stack pointer will usually point within this mapping, but it might
+    // not in case of stack overflows, hence the returned pointer might be
+    // different from the one that was passed in.
     pub fn get_stack_info(&self, int_stack_pointer: usize) -> Result<(usize, usize), DumperError> {
-        // Move the stack pointer to the bottom of the page that it's in.
-        // NOTE: original code uses getpagesize(), which a) isn't there in Rust and
-        //       b) shouldn't be used, as its not portable (see man getpagesize)
-        let page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
-            .expect("page size apparently unlimited: doesn't make sense.");
-        let stack_pointer = int_stack_pointer & !(page_size as usize - 1);
+        // Round the stack pointer to the nearest page, this will cause us to
+        // capture data below the stack pointer which might still be relevant.
+        let mut stack_pointer = int_stack_pointer & !(self.page_size - 1);
+        let mut mapping = self.find_mapping(stack_pointer);
 
-        // The number of bytes of stack which we try to capture.
-        let stack_to_capture = 32 * 1024;
+        // The guard page has been 1 MiB in size since kernel 4.12, older
+        // kernels used a 4 KiB one instead.
+        let guard_page_max_addr = stack_pointer + (1024 * 1024);
 
-        let mapping = self
-            .find_mapping(stack_pointer)
-            .ok_or(DumperError::NoStackPointerMapping)?;
-        let offset = stack_pointer - mapping.start_address;
-        let distance_to_end = mapping.size - offset;
-        let stack_len = std::cmp::min(distance_to_end, stack_to_capture);
+        // If we found no mapping, or the mapping we found has no permissions
+        // then we might have hit a guard page, try looking for a mapping in
+        // addresses past the stack pointer. Stack grows towards lower addresses
+        // on the platforms we care about so the stack should appear after the
+        // guard page.
+        while !Self::may_be_stack(mapping) && (stack_pointer <= guard_page_max_addr) {
+            stack_pointer += self.page_size;
+            mapping = self.find_mapping(stack_pointer);
+        }
 
-        Ok((stack_pointer, stack_len))
+        mapping
+            .map(|mapping| {
+                let valid_stack_pointer = if mapping.contains_address(stack_pointer) {
+                    stack_pointer
+                } else {
+                    mapping.start_address
+                };
+
+                let stack_len = mapping.size - (valid_stack_pointer - mapping.start_address);
+                (valid_stack_pointer, stack_len)
+            })
+            .ok_or(DumperError::NoStackPointerMapping)
+    }
+
+    fn may_be_stack(mapping: Option<&MappingInfo>) -> bool {
+        if let Some(mapping) = mapping {
+            return mapping
+                .permissions
+                .intersects(MMPermissions::READ | MMPermissions::WRITE);
+        }
+
+        false
     }
 
     pub fn sanitize_stack_copy(
@@ -384,7 +415,7 @@ impl PtraceDumper {
         // bit, modulo the bitfield size, is not set then there does not
         // exist a mapping in mappings that would contain that pointer.
         for mapping in &self.mappings {
-            if !mapping.executable {
+            if !mapping.is_executable() {
                 continue;
             }
             // For each mapping, work out the (unmodulo'ed) range of bits to
@@ -431,7 +462,7 @@ impl PtraceDumper {
             let test = addr >> shift;
             if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
                 if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
-                    if hit_mapping.executable {
+                    if hit_mapping.is_executable() {
                         last_hit_mapping = Some(hit_mapping);
                         continue;
                     }

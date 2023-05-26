@@ -3,6 +3,7 @@ use crate::maps_reader::MappingInfo;
 use crate::mem_writer::MemoryWriterError;
 use crate::thread_info::Pid;
 use goblin;
+use nix::errno::Errno;
 use std::ffi::OsString;
 use thiserror::Error;
 
@@ -16,6 +17,8 @@ pub enum InitError {
     PrincipalMappingNotReferenced,
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
+    #[error("Failed to read the page size")]
+    PageSizeError(#[from] Errno),
 }
 
 #[derive(Error, Debug)]

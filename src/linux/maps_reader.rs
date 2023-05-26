@@ -36,8 +36,8 @@ pub struct MappingInfo {
     // address range. The following structure holds the original mapping
     // address range as reported by the operating system.
     pub system_mapping_info: SystemMappingInfo,
-    pub offset: usize,    // offset into the backed file.
-    pub executable: bool, // true if the mapping has the execute bit set.
+    pub offset: usize,              // offset into the backed file.
+    pub permissions: MMPermissions, // read, write and execute permissions.
     pub name: Option<OsString>,
     // pub elf_obj: Option<elf::Elf>,
 }
@@ -78,8 +78,6 @@ impl MappingInfo {
             let end_address: usize = mm.address.1.try_into()?;
             let mut offset: usize = mm.offset.try_into()?;
 
-            let executable = mm.perms.contains(MMPermissions::EXECUTE);
-
             let mut pathname: Option<OsString> = match mm.pathname {
                 MMapPath::Path(p) => Some(p.into()),
                 MMapPath::Heap => Some("[heap]".into()),
@@ -110,7 +108,7 @@ impl MappingInfo {
                     {
                         module.system_mapping_info.end_address = end_address;
                         module.size = end_address - module.start_address;
-                        module.executable |= executable;
+                        module.permissions |= mm.perms & MMPermissions::EXECUTE;
                         continue;
                     }
                 } else {
@@ -120,7 +118,7 @@ impl MappingInfo {
                     // and which directly follow an executable mapping.
                     let module_end_address = module.start_address + module.size;
                     if (start_address == module_end_address)
-                        && module.executable
+                        && module.is_executable()
                         && is_mapping_a_path(module.name.as_deref())
                         && (offset == 0 || offset == module_end_address)
                         && mm.perms == MMPermissions::PRIVATE
@@ -139,7 +137,7 @@ impl MappingInfo {
                     end_address,
                 },
                 offset,
-                executable,
+                permissions: mm.perms,
                 name: pathname,
             });
         }
@@ -295,7 +293,7 @@ impl MappingInfo {
             return Ok((file_path, file_name));
         };
 
-        if self.executable && self.offset != 0 {
+        if self.is_executable() && self.offset != 0 {
             // If an executable is mapped from a non-zero offset, this is likely because
             // the executable was loaded directly from inside an archive file (e.g., an
             // apk on Android).
@@ -330,7 +328,7 @@ impl MappingInfo {
         self.name.is_some() &&
         // Only want to include one mapping per shared lib.
         // Avoid filtering executable mappings.
-        (self.offset == 0 || self.executable) &&
+        (self.offset == 0 || self.is_executable()) &&
         // big enough to get a signature for.
         self.size >= 4096
     }
@@ -338,6 +336,18 @@ impl MappingInfo {
     pub fn contains_address(&self, address: usize) -> bool {
         self.system_mapping_info.start_address <= address
             && address < self.system_mapping_info.end_address
+    }
+
+    pub fn is_executable(&self) -> bool {
+        self.permissions.contains(MMPermissions::EXECUTE)
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.permissions.contains(MMPermissions::READ)
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.permissions.contains(MMPermissions::WRITE)
     }
 }
 
@@ -423,7 +433,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x559748406000,
             },
             offset: 0,
-            executable: true,
+            permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
             name: Some("/usr/bin/cat".into()),
         };
 
@@ -437,7 +447,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x559749b2f000,
             },
             offset: 0,
-            executable: false,
+            permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: Some("[heap]".into()),
         };
 
@@ -451,7 +461,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x7efd968f5000,
             },
             offset: 0,
-            executable: false,
+            permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: None,
         };
 
@@ -470,7 +480,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x7ffc6e0f9000,
             },
             offset: 0,
-            executable: true,
+            permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
             name: Some("linux-gate.so".into()),
         };
 
@@ -530,7 +540,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x7efd96d8c000, // ..but this is not visible here
             },
             offset: 0,
-            executable: true,
+            permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
             name: Some("/lib64/libc-2.32.so".into()),
         };
 
