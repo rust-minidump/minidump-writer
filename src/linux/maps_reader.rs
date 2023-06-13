@@ -108,7 +108,7 @@ impl MappingInfo {
                     {
                         module.system_mapping_info.end_address = end_address;
                         module.size = end_address - module.start_address;
-                        module.permissions |= mm.perms & MMPermissions::EXECUTE;
+                        module.permissions |= mm.perms;
                         continue;
                     }
                 } else {
@@ -433,7 +433,10 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x559748406000,
             },
             offset: 0,
-            permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
+            permissions: MMPermissions::READ
+                | MMPermissions::WRITE
+                | MMPermissions::EXECUTE
+                | MMPermissions::PRIVATE,
             name: Some("/usr/bin/cat".into()),
         };
 
@@ -540,7 +543,10 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 end_address: 0x7efd96d8c000, // ..but this is not visible here
             },
             offset: 0,
-            permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
+            permissions: MMPermissions::READ
+                | MMPermissions::WRITE
+                | MMPermissions::EXECUTE
+                | MMPermissions::PRIVATE,
             name: Some("/lib64/libc-2.32.so".into()),
         };
 

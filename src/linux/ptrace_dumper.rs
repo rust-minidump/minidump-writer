@@ -1,5 +1,7 @@
 #[cfg(target_os = "android")]
 use crate::linux::android::late_process_mappings;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use crate::thread_info;
 use crate::{
     linux::{
         auxv_reader::{AuxvType, ProcfsAuxvIter},
@@ -147,7 +149,7 @@ impl PtraceDumper {
             // We thus test the stack pointer and exclude any threads that are part of
             // the seccomp sandbox's trusted code.
             let skip_thread;
-            let regs = ptrace::getregs(pid);
+            let regs = thread_info::ThreadInfo::getregs(pid.into());
             if let Ok(regs) = regs {
                 #[cfg(target_arch = "x86_64")]
                 {
