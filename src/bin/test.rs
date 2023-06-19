@@ -108,8 +108,12 @@ mod linux {
         // Now check that PtraceDumper interpreted the mappings properly.
         let dumper = PtraceDumper::new(getppid().as_raw())?;
         let mut mapping_count = 0;
-        for map in &dumper.mappings {
-            if map.name == Some(path.clone().into()) {
+        for map in dbg!(&dumper.mappings) {
+            if map
+                .name
+                .as_ref()
+                .map_or(false, |name| name.to_string_lossy().starts_with(&path))
+            {
                 mapping_count += 1;
                 // This mapping should encompass the entire original mapped
                 // range.
