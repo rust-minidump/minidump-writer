@@ -155,7 +155,7 @@ pub enum SectionMemInfoListError {
     #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
     #[error("Failed to read from procfs")]
-    ProcfsError(#[from] procfs_core::ProcError),
+    ProcfsError(#[from] procfs::ProcError),
 }
 
 #[derive(Debug, Error)]
