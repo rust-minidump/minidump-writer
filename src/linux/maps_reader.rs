@@ -355,7 +355,7 @@ impl MappingInfo {
 #[cfg(target_pointer_width = "64")] // All addresses are 64 bit and I'm currently too lazy to adjust it to work for both
 mod tests {
     use super::*;
-    use procfs_core::prelude::*;
+    use procfs_core::FromRead;
 
     fn get_mappings_for(map: &str, linux_gate_loc: u64) -> Vec<MappingInfo> {
         MappingInfo::aggregate(

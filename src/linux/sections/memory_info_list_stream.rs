@@ -1,16 +1,13 @@
 use super::*;
 use minidump_common::format::{MemoryProtection, MemoryState, MemoryType};
-use procfs_core::{
-    prelude::*,
-    process::{MMPermissions, MemoryMaps},
-};
+use procfs_core::{process::MMPermissions, FromRead};
 
 /// Write a MemoryInfoListStream using information from procfs.
 pub fn write(
     config: &mut MinidumpWriter,
     buffer: &mut DumpBuf,
 ) -> Result<MDRawDirectory, errors::SectionMemInfoListError> {
-    let maps = MemoryMaps::from_file(std::path::PathBuf::from(format!(
+    let maps = procfs_core::process::MemoryMaps::from_file(std::path::PathBuf::from(format!(
         "/proc/{}/maps",
         config.blamed_thread
     )))?;

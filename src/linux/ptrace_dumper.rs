@@ -283,7 +283,7 @@ impl PtraceDumper {
         let maps_path = path::PathBuf::from(&filename);
         let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
 
-        use procfs_core::prelude::*;
+        use procfs_core::FromRead;
         self.mappings = procfs_core::process::MemoryMaps::from_read(maps_file)
             .ok()
             .and_then(|maps| MappingInfo::aggregate(maps, linux_gate_loc).ok())
