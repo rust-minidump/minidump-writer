@@ -17,7 +17,7 @@ use nix::{
     errno::Errno,
     sys::{ptrace, wait},
 };
-use procfs::process::MMPermissions;
+use procfs_core::process::MMPermissions;
 use std::{collections::HashMap, ffi::c_void, io::BufReader, path, result::Result};
 
 #[derive(Debug, Clone)]
@@ -283,7 +283,8 @@ impl PtraceDumper {
         let maps_path = path::PathBuf::from(&filename);
         let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
 
-        self.mappings = procfs::process::MemoryMaps::from_reader(maps_file)
+        use procfs_core::FromRead;
+        self.mappings = procfs_core::process::MemoryMaps::from_read(maps_file)
             .ok()
             .and_then(|maps| MappingInfo::aggregate(maps, linux_gate_loc).ok())
             .unwrap_or_default();

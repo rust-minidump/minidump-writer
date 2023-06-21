@@ -4,7 +4,7 @@ use crate::thread_info::Pid;
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
 use memmap2::{Mmap, MmapOptions};
-use procfs::process::{MMPermissions, MMapPath, MemoryMaps};
+use procfs_core::process::{MMPermissions, MMapPath, MemoryMaps};
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::{fs::File, mem::size_of, path::PathBuf};
@@ -355,10 +355,11 @@ impl MappingInfo {
 #[cfg(target_pointer_width = "64")] // All addresses are 64 bit and I'm currently too lazy to adjust it to work for both
 mod tests {
     use super::*;
+    use procfs_core::FromRead;
 
     fn get_mappings_for(map: &str, linux_gate_loc: u64) -> Vec<MappingInfo> {
         MappingInfo::aggregate(
-            MemoryMaps::from_reader(map.as_bytes()).expect("failed to read mapping info"),
+            MemoryMaps::from_read(map.as_bytes()).expect("failed to read mapping info"),
             linux_gate_loc,
         )
         .unwrap_or_default()

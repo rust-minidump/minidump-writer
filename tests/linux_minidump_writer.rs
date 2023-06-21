@@ -13,7 +13,7 @@ use minidump_writer::{
     thread_info::Pid,
 };
 use nix::{errno::Errno, sys::signal::Signal};
-use procfs::process::MMPermissions;
+use procfs_core::process::MMPermissions;
 use std::collections::HashSet;
 
 use std::{
