@@ -268,11 +268,11 @@ impl PtraceDumper {
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
         let at_entry;
-        #[cfg(target_arch = "arm")]
+        #[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
         {
             at_entry = 9;
         }
-        #[cfg(not(target_arch = "arm"))]
+        #[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
         {
             at_entry = libc::AT_ENTRY;
         }

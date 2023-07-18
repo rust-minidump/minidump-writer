@@ -85,11 +85,11 @@ impl Iterator for ProcfsAuxvIter {
         };
 
         let at_null;
-        #[cfg(target_arch = "arm")]
+        #[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
         {
             at_null = 0;
         }
-        #[cfg(not(target_arch = "arm"))]
+        #[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
         {
             at_null = libc::AT_NULL;
         }
