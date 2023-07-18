@@ -116,7 +116,7 @@ fn parse_loaded_elf_program_headers(
 pub fn late_process_mappings(pid: Pid, mappings: &mut [MappingInfo]) -> Result<()> {
     // Only consider exec mappings that indicate a file path was mapped, and
     // where the ELF header indicates a mapped shared library.
-    for mut map in mappings
+    for map in mappings
         .iter_mut()
         .filter(|m| m.is_executable() && m.name_is_path())
     {
