@@ -15,6 +15,7 @@ mod linux {
         sys::mman::{mmap, MapFlags, ProtFlags},
         unistd::getppid,
     };
+    use std::os::fd::BorrowedFd;
 
     macro_rules! test {
         ($x:expr, $errmsg:expr) => {
@@ -214,12 +215,12 @@ mod linux {
         let memory_size = std::num::NonZeroUsize::new(page_size.unwrap() as usize).unwrap();
         // Get some memory to be mapped by the child-process
         let mapped_mem = unsafe {
-            mmap(
+            mmap::<BorrowedFd>(
                 None,
                 memory_size,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON,
-                -1,
+                None,
                 0,
             )
             .unwrap()
