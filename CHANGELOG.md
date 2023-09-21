@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.2] - 2023-09-21
 ### Added
 - [PR#86](https://github.com/rust-minidump/minidump-writer/pull/86) added support for `i686-android-linux`.
 
@@ -94,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.1...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.2...HEAD
+[0.8.2]: https://github.com/rust-minidump/minidump-writer/compare/0.8.1...0.8.2
 [0.8.1]: https://github.com/rust-minidump/minidump-writer/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/rust-minidump/minidump-writer/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/rust-minidump/minidump-writer/compare/0.6.0...0.7.0
