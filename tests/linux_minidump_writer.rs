@@ -224,6 +224,9 @@ contextual_tests! {
         let _ = dump
             .get_raw_stream(LinuxDsoDebug as u32)
             .expect("Couldn't find LinuxDsoDebug");
+        let _ = dump
+            .get_raw_stream(MozLinuxLimits as u32)
+            .expect("Couldn't find MozLinuxLimits");
     }
 
     fn test_write_with_additional_memory(context: Context) {

@@ -323,6 +323,17 @@ impl MinidumpWriter {
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/limits", self.blamed_thread))
+        {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::MozLinuxLimits as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
+
         let dirent = thread_names_stream::write(buffer, dumper)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
