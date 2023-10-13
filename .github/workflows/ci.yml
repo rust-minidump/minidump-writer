@@ -14,7 +14,7 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
@@ -32,11 +32,11 @@ jobs:
     strategy:
       matrix:
         job:
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-22.04,  target: x86_64-unknown-linux-musl }
-          - { os: windows-2022,  target: x86_64-pc-windows-msvc }
-          - { os: macos-12,      target: x86_64-apple-darwin }
-          # TODO: Add macos aarch64 here once it becomes available as a runner
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-musl }
+          - { os: windows-2022,     target: x86_64-pc-windows-msvc }
+          - { os: macos-13,         target: x86_64-apple-darwin }
+          - { os: macos-13-xlarge,  target: aarch64-apple-darwin }
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
@@ -66,8 +66,6 @@ jobs:
           - { os: ubuntu-22.04,  target: arm-unknown-linux-musleabi,  use-cross: true }
           - { os: ubuntu-22.04,  target: arm-linux-androideabi,       use-cross: true }
           - { os: ubuntu-22.04,  target: arm-unknown-linux-gnueabihf, use-cross: true }
-          # TODO: Remove this when aarch64 macs can be used as runners
-          - { os: macos-12,      target: aarch64-apple-darwin,        use-cross: false }
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
