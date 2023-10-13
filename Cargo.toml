@@ -25,7 +25,7 @@ goblin = "0.7.1"
 memmap2 = "0.8"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-nix = { version = "0.26", default-features = false, features = [
+nix = { version = "0.27", default-features = false, features = [
     "mman",
     "process",
     "ptrace",
@@ -56,3 +56,6 @@ minidump-processor = { version = "0.19", default-features = false }
 minidump-unwind = { version = "0.19", features = ["debuginfo"] }
 similar-asserts = "1.5"
 uuid = "1.4"
+
+[patch.crates-io]
+minidump-common = { git = "https://github.com/lissyx/rust-minidump.git", rev = "2f996932695d8355a8609f2a8744c01b8b034d39" }
