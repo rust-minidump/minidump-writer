@@ -189,7 +189,7 @@ impl MinidumpWriter {
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
         // of streams which we write.
-        let num_writers = 15u32;
+        let num_writers = 16u32;
 
         let mut header_section = MemoryWriter::<MDRawHeader>::alloc(buffer)?;
 
@@ -326,6 +326,11 @@ impl MinidumpWriter {
         let dirent = thread_names_stream::write(buffer, dumper)?;
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
+
+        // This section is optional, so we ignore errors when writing it
+        if let Ok(dirent) = handle_data_stream::write(self, buffer) {
+            let _ = dir_section.write_to_file(buffer, Some(dirent));
+        }
 
         // If you add more directory entries, don't forget to update num_writers, above.
         Ok(())
