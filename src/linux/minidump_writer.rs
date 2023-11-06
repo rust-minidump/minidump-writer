@@ -189,7 +189,7 @@ impl MinidumpWriter {
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
         // of streams which we write.
-        let num_writers = 16u32;
+        let num_writers = 17u32;
 
         let mut header_section = MemoryWriter::<MDRawHeader>::alloc(buffer)?;
 
@@ -320,6 +320,17 @@ impl MinidumpWriter {
 
         let dirent = dso_debug::write_dso_debug_stream(buffer, self.process_id, &dumper.auxv)
             .unwrap_or_default();
+        // Write section to file
+        dir_section.write_to_file(buffer, Some(dirent))?;
+
+        let dirent = match self.write_file(buffer, &format!("/proc/{}/limits", self.blamed_thread))
+        {
+            Ok(location) => MDRawDirectory {
+                stream_type: MDStreamType::MozLinuxLimits as u32,
+                location,
+            },
+            Err(_) => Default::default(),
+        };
         // Write section to file
         dir_section.write_to_file(buffer, Some(dirent))?;
 
