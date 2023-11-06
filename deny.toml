@@ -16,8 +16,6 @@ multiple-versions = "deny"
 skip = [
     # scroll still depends on 1.0
     { name = "syn", version = "=1.0.109" },
-    # many crates still depend on old version
-    { name = "bitflags", version = "=1.3.2" },
 ]
 
 [licenses]

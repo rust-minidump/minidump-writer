@@ -56,6 +56,3 @@ minidump-processor = { version = "0.19", default-features = false }
 minidump-unwind = { version = "0.19", features = ["debuginfo"] }
 similar-asserts = "1.5"
 uuid = "1.4"
-
-[patch.crates-io]
-minidump-common = { git = "https://github.com/lissyx/rust-minidump.git", rev = "2f996932695d8355a8609f2a8744c01b8b034d39" }
