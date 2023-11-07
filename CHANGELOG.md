@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.3] - 2023-11-07
 ### Added
 - [PR#94](https://github.com/rust-minidump/minidump-writer/pull/94) added support for writing [file information](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_descriptor) for every file open in the process the dump is being performed for into the [`MINIDUMP_HANDLE_DATA_STREAM`](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_data_stream) stream.
 - [PR#90](https://github.com/rust-minidump/minidump-writer/pull/90) added support for including the `/proc/<pid>/limits` file in the [`MozLinuxLimits`](https://docs.rs/minidump-common/latest/minidump_common/format/enum.MINIDUMP_STREAM_TYPE.html#variant.MozLinuxLimits) stream. This information can be used together with the file information described above to diagnose situations where the process was killed by the kernel due to file handle limits being hit. Thanks [@lissyx](https://github.com/lissyx)!
@@ -102,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.2...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.3...HEAD
+[0.8.3]: https://github.com/rust-minidump/minidump-writer/compare/0.8.2...0.8.3
 [0.8.2]: https://github.com/rust-minidump/minidump-writer/compare/0.8.1...0.8.2
 [0.8.1]: https://github.com/rust-minidump/minidump-writer/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/rust-minidump/minidump-writer/compare/0.7.0...0.8.0
