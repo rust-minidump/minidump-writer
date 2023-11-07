@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Added
+- [PR#94](https://github.com/rust-minidump/minidump-writer/pull/94) added support for writing [file information](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_descriptor) for every file open in the process the dump is being performed for into the [`MINIDUMP_HANDLE_DATA_STREAM`](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_data_stream) stream.
+- [PR#90](https://github.com/rust-minidump/minidump-writer/pull/90) added support for including the `/proc/<pid>/limits` file in the [`MozLinuxLimits`](https://docs.rs/minidump-common/latest/minidump_common/format/enum.MINIDUMP_STREAM_TYPE.html#variant.MozLinuxLimits) stream. This information can be used together with the file information described above to diagnose situations where the process was killed by the kernel due to file handle limits being hit. Thanks [@lissyx](https://github.com/lissyx)!
+
+### Changed
+- [PR#94](https://github.com/rust-minidump/minidump-writer/pull/94) updated several dependencies to align with `minidump-common`, which was also bumped.
+
 ## [0.8.2] - 2023-09-21
 ### Added
 - [PR#86](https://github.com/rust-minidump/minidump-writer/pull/86) added support for `i686-android-linux`.
