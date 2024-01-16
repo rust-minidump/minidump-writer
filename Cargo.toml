@@ -21,7 +21,7 @@ thiserror = "1.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-goblin = "0.7.1"
+goblin = "0.8"
 memmap2 = "0.8"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
