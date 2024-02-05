@@ -45,7 +45,7 @@ mach2 = "0.4"
 [dev-dependencies]
 # Minidump-processor is async so we need an executor
 futures = { version = "0.3", features = ["executor"] }
-minidump = "0.19"
+minidump = "0.20"
 memmap2 = "0.8"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
