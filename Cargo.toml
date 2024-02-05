@@ -52,7 +52,7 @@ memmap2 = "0.9"
 # We dump symbols for the `test` executable so that we can validate that minidumps
 # created by this crate can be processed by minidump-processor
 dump_syms = { version = "2.2", default-features = false }
-minidump-processor = { version = "0.19", default-features = false }
-minidump-unwind = { version = "0.19", features = ["debuginfo"] }
+minidump-processor = { version = "0.20", default-features = false }
+minidump-unwind = { version = "0.20", features = ["debuginfo"] }
 similar-asserts = "1.5"
 uuid = "1.4"
