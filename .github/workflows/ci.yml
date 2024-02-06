@@ -50,37 +50,47 @@ jobs:
       - name: Test
         run: cargo test --target ${{ matrix.job.target }}
 
-  # This job builds non-tier1 targets that aren't already tested
+  install-cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: XAMPPRocky/get-github-release@v1
+        id: cross
+        with:
+          owner: rust-embedded
+          repo: cross
+          matches: linux-musl
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-linux-musl
+          path: ${{ steps.cross.outputs.install_path }}
+
+  # This job builds and tests non-tier1 targets
   build_lower_tier:
     name: Build sources
-    runs-on: ${{ matrix.job.os }}
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         job:
-          - { os: ubuntu-22.04,  target: i686-unknown-linux-gnu,      use-cross: true }
-         #- { os: ubuntu-latest,  target: i686-unknown-linux-musl,     use-cross: true }
-          - { os: ubuntu-22.04,  target: aarch64-unknown-linux-gnu,   use-cross: true }
-          - { os: ubuntu-22.04,  target: aarch64-unknown-linux-musl,  use-cross: true }
-          #- { os: ubuntu-22.04,  target: aarch64-linux-android,       use-cross: true }
-          - { os: ubuntu-22.04,  target: arm-unknown-linux-gnueabi,   use-cross: true }
-          - { os: ubuntu-22.04,  target: arm-unknown-linux-musleabi,  use-cross: true }
-          - { os: ubuntu-22.04,  target: arm-linux-androideabi,       use-cross: true }
-          - { os: ubuntu-22.04,  target: arm-unknown-linux-gnueabihf, use-cross: true }
-          # TODO: Remove this when aarch64 macs can be used as runners
-          - { os: macos-12,      target: aarch64-apple-darwin,        use-cross: false }
+          - target: i686-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
+          - target: arm-unknown-linux-gnueabi
+          - target: arm-unknown-linux-musleabi
+          - target: arm-linux-androideabi
+          - target: arm-unknown-linux-gnueabihf
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - name: Download Cross
+        uses: actions/download-artifact@v4
+        with:
+          name: cross-linux-musl
+          path: /tmp/
+      - run: chmod +x /tmp/cross
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.job.target }}
-      #- name: Unit tests
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          #command: test
-          command: build
-          use-cross: ${{ matrix.job.use-cross }}
-          args: --target ${{ matrix.job.target }} --verbose --all-targets
-          #args: --target ${{ matrix.job.target }} --verbose -- --nocapture
-          
+      - name: Build and Test
+        run: |
+          /tmp/cross test --target ${{ matrix.job.target }}
