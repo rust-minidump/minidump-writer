@@ -95,3 +95,14 @@ jobs:
       - name: Build and Test
         run: |
           /tmp/cross test --target ${{ matrix.job.target }}
+          /tmp/cross test --target ${{ matrix.job.target }} -- ignored
+
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deny check
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          # Note that advisories are checked separately on a schedule in audit.yml
+          command: check bans licenses sources
