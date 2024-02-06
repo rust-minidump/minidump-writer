@@ -334,8 +334,9 @@ impl PtraceDumper {
         let mut mapping = self.find_mapping(stack_pointer);
 
         // The guard page has been 1 MiB in size since kernel 4.12, older
-        // kernels used a 4 KiB one instead.
-        let guard_page_max_addr = stack_pointer + (1024 * 1024);
+        // kernels used a 4 KiB one instead. Note the saturating add, as 32-bit
+        // processes can have a stack pointer within 1MiB of usize::MAX
+        let guard_page_max_addr = stack_pointer.saturating_add(1024 * 1024);
 
         // If we found no mapping, or the mapping we found has no permissions
         // then we might have hit a guard page, try looking for a mapping in
