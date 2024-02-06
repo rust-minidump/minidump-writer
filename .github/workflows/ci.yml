@@ -97,7 +97,7 @@ jobs:
           /tmp/cross test --target ${{ matrix.job.target }}
           /tmp/cross test --target ${{ matrix.job.target }} -- ignored
 
-  audit:
+  deny-check:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
