@@ -69,6 +69,7 @@ jobs:
   build_lower_tier:
     name: Build sources
     runs-on: ubuntu-22.04
+    needs: install-cross
     strategy:
       matrix:
         job:
