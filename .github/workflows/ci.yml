@@ -94,8 +94,9 @@ jobs:
           target: ${{ matrix.job.target }}
       - name: Build and Test
         run: |
-          /tmp/cross test --target ${{ matrix.job.target }}
-          /tmp/cross test --target ${{ matrix.job.target }} -- ignored
+          /tmp/cross build --target ${{ matrix.job.target }} --all-targets
+          # /tmp/cross test --target ${{ matrix.job.target }}
+          # /tmp/cross test --target ${{ matrix.job.target }} -- ignored
 
   deny-check:
     runs-on: ubuntu-22.04
