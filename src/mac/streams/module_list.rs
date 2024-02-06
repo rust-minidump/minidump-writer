@@ -345,6 +345,7 @@ mod test {
     #[test]
     fn images_match() {
         if std::env::var_os("CI").is_some() && cfg!(target_arch = "aarch64") {
+            // https://github.com/rust-minidump/minidump-writer/issues/101
             println!(
                 "this fails on github actions but works on a local aarch64-apple-darwin machine..."
             );
