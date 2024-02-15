@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#97](https://github.com/rust-minidump/minidump-writer/pull/97) bumped `goblin` -> 0.8.
+- [PR#99](https://github.com/rust-minidump/minidump-writer/pull/99) bumped `minidump-common` -> 0.20, `scroll` -> 0.12, `memmap2` -> 0.9.
+
 ## [0.8.3] - 2023-11-07
 ### Added
 - [PR#94](https://github.com/rust-minidump/minidump-writer/pull/94) added support for writing [file information](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_descriptor) for every file open in the process the dump is being performed for into the [`MINIDUMP_HANDLE_DATA_STREAM`](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_handle_data_stream) stream.
