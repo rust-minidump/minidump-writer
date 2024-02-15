@@ -43,6 +43,9 @@ bitflags = "2.4"
 mach2 = "0.4"
 
 [dev-dependencies]
+# We auto-detect what the test binary that is spawned for most tests should be
+# compiled for
+current_platform = "0.2"
 # Minidump-processor is async so we need an executor
 futures = { version = "0.3", features = ["executor"] }
 minidump = "0.20"

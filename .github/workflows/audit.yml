@@ -12,10 +12,10 @@ on:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: deny audit
         uses: EmbarkStudios/cargo-deny-action@v1
         with:

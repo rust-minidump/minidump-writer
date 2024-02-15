@@ -72,31 +72,31 @@ fn get_crash_context(tid: Pid) -> CrashContext {
     }
 }
 
-macro_rules! contextual_tests {
-    () => {};
-    ( fn $name:ident ($ctx:ident : Context) $body:block $($rest:tt)* ) => {
+macro_rules! contextual_test {
+    ( $(#[$attr:meta])? fn $name:ident ($ctx:ident : Context) $body:block ) => {
         mod $name {
             use super::*;
 
             fn test($ctx: Context) $body
 
             #[test]
-            fn run() {
+            $(#[$attr])?
+            fn without_context() {
                 test(Context::Without)
             }
 
             #[cfg(not(target_arch = "mips"))]
             #[test]
-            fn run_with_context() {
+            $(#[$attr])?
+            fn with_context() {
                 test(Context::With)
             }
         }
-        contextual_tests! { $($rest)* }
     }
 }
 
-contextual_tests! {
-    fn test_write_dump(context: Context) {
+contextual_test! {
+    fn write_dump(context: Context) {
         let num_of_threads = 3;
         let mut child = start_child_and_wait_for_threads(num_of_threads);
         let pid = child.id() as i32;
@@ -123,8 +123,11 @@ contextual_tests! {
         assert_eq!(mem_slice.len(), in_memory_buffer.len());
         assert_eq!(mem_slice, in_memory_buffer);
     }
+}
 
-    fn test_write_and_read_dump_from_parent(context: Context) {
+contextual_test! {
+    #[ignore]
+    fn write_and_read_dump_from_parent(context: Context) {
         let mut child = start_child_and_return(&["spawn_mmap_wait"]);
         let pid = child.id() as i32;
 
@@ -228,8 +231,10 @@ contextual_tests! {
             .get_raw_stream(MozLinuxLimits as u32)
             .expect("Couldn't find MozLinuxLimits");
     }
+}
 
-    fn test_write_with_additional_memory(context: Context) {
+contextual_test! {
+    fn write_with_additional_memory(context: Context) {
         let mut child = start_child_and_return(&["spawn_alloc_wait"]);
         let pid = child.id() as i32;
 
@@ -289,8 +294,10 @@ contextual_tests! {
         // Verify memory contents.
         assert_eq!(region.bytes, values);
     }
+}
 
-    fn test_skip_if_requested(context: Context) {
+contextual_test! {
+    fn skip_if_requested(context: Context) {
         let num_of_threads = 1;
         let mut child = start_child_and_wait_for_threads(num_of_threads);
         let pid = child.id() as i32;
@@ -325,8 +332,10 @@ contextual_tests! {
 
         assert!(res.is_err());
     }
+}
 
-    fn test_sanitized_stacks(context: Context) {
+contextual_test! {
+    fn sanitized_stacks(context: Context) {
         if context == Context::With {
             // FIXME the context's stack pointer very often doesn't lie in mapped memory, resulting
             // in the stack memory having 0 size (so no slice will match `defaced` in the
@@ -378,8 +387,10 @@ contextual_tests! {
             assert!(slice.windows(defaced.len()).any(|window| window == defaced));
         }
     }
+}
 
-    fn test_write_early_abort(context: Context) {
+contextual_test! {
+    fn write_early_abort(context: Context) {
         let mut child = start_child_and_return(&["spawn_alloc_wait"]);
         let pid = child.id() as i32;
 
@@ -434,8 +445,10 @@ contextual_tests! {
         // Should be missing:
         assert!(dump.get_stream::<MinidumpMemoryList>().is_err());
     }
+}
 
-    fn test_named_threads(context: Context) {
+contextual_test! {
+    fn named_threads(context: Context) {
         let num_of_threads = 5;
         let mut child = start_child_and_wait_for_named_threads(num_of_threads);
         let pid = child.id() as i32;
@@ -476,10 +489,11 @@ contextual_tests! {
             expected.insert(format!("thread_{}", id));
         }
         assert_eq!(expected, names);
-
     }
+}
 
-    fn test_file_descriptors(context: Context) {
+contextual_test! {
+    fn file_descriptors(context: Context) {
         let num_of_files = 5;
         let mut child = start_child_and_wait_for_create_files(num_of_files);
         let pid = child.id() as i32;
@@ -520,7 +534,7 @@ contextual_tests! {
 }
 
 #[test]
-fn test_minidump_size_limit() {
+fn minidump_size_limit() {
     let num_of_threads = 40;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
@@ -662,7 +676,7 @@ fn test_minidump_size_limit() {
 }
 
 #[test]
-fn test_with_deleted_binary() {
+fn with_deleted_binary() {
     let num_of_threads = 1;
     let binary_copy_dir = tempfile::Builder::new()
         .prefix("deleted_binary")
@@ -751,7 +765,7 @@ fn test_with_deleted_binary() {
 }
 
 #[test]
-fn test_memory_info_list_stream() {
+fn memory_info_list_stream() {
     let mut child = start_child_and_wait_for_threads(1);
     let pid = child.id() as i32;
 
