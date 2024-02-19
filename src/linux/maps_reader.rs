@@ -303,7 +303,62 @@ impl MappingInfo {
         Ok(soname.to_string())
     }
 
-    pub fn get_mapping_effective_path_and_name(&self) -> Result<(PathBuf, String)> {
+    fn elf_file_so_version(&self) -> (u32, u32, u32) {
+        // Report the so version from the filename as two u32 that will fit into
+        // version_info.file_version_{hi,lo}
+        let name = String::from(
+            self.name
+                .clone()
+                .expect("Failure to clone")
+                .to_str()
+                .unwrap(),
+        );
+
+        if !(name.contains(".so.")) {
+            return (0, 0, 0);
+        }
+
+        let filename = match name.split('/').last() {
+            Some(f) => f,
+            None => return (0, 0, 0),
+        };
+
+        match filename.split(".so.").last() {
+            Some(s) => {
+                let mut got_non_digit = false;
+                let vers: Vec<u32> = s
+                    .split('.')
+                    .collect::<Vec<&str>>()
+                    .into_iter()
+                    .map(|n| {
+                        n.parse().unwrap_or_else(|_| {
+                            got_non_digit = true;
+                            0
+                        })
+                    })
+                    .collect::<Vec<u32>>();
+
+                if got_non_digit {
+                    return (0, 0, 0);
+                }
+
+                let (major, minor, release) = match vers.len() {
+                    0 => (0, 0, 0),
+                    1 => (vers[0], 0, 0),
+                    2 => (vers[0], vers[1], 0),
+                    3 => (vers[0], vers[1], vers[2]),
+                    _ => (vers[0], vers[1], vers[2]),
+                };
+
+                (major, minor, release)
+            }
+            None => (0, 0, 0),
+        }
+    }
+
+    pub fn get_mapping_effective_path_name_and_version(
+        &self,
+    ) -> Result<(PathBuf, String, (u32, u32, u32))> {
         let mut file_path = PathBuf::from(self.name.clone().unwrap_or_default());
 
         // Tools such as minidump_stackwalk use the name of the module to look up
@@ -321,7 +376,7 @@ impl MappingInfo {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            return Ok((file_path, file_name));
+            return Ok((file_path, file_name, self.elf_file_so_version()));
         };
 
         if self.is_executable() && self.offset != 0 {
@@ -337,7 +392,7 @@ impl MappingInfo {
             file_path.set_file_name(&file_name);
         }
 
-        Ok((file_path, file_name))
+        Ok((file_path, file_name, self.elf_file_so_version()))
     }
 
     pub fn is_contained_in(&self, user_mapping_list: &MappingList) -> bool {
@@ -628,11 +683,56 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         );
         assert_eq!(mappings.len(), 1);
 
-        let (file_path, file_name) = mappings[0]
-            .get_mapping_effective_path_and_name()
+        let (file_path, file_name, _version) = mappings[0]
+            .get_mapping_effective_path_name_and_version()
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
         assert_eq!(file_path, PathBuf::from("/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"));
+    }
+
+    #[test]
+    fn test_elf_file_so_version() {
+        let mappings = get_mappings_for(
+            "\
+7f877ab9f000-7f877aba0000 rw-p 0001f000 00:1b 100457459                  /home/alex/bin/firefox/libmozsandbox.so
+7f877ae65000-7f877ae68000 rw-p 00265000 00:1b 90432393                   /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32
+7f877ae76000-7f877ae77000 rw-p 0000a000 00:1b 90443112                   /usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0
+7f877ae7c000-7f877ae8c000 r--p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libm.so.6
+7f877af70000-7f877af71000 rw-p 00003000 00:1b 93439980                   /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7f877af78000-7f877af79000 rw-p 00005000 00:1b 90423049                   /usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0
+7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0
+7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5
+7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libtoto.so.AAA",
+            0x7ffe091bf000,
+        );
+        assert_eq!(mappings.len(), 9);
+
+        let version = mappings[0].elf_file_so_version();
+        assert_eq!(version, (0, 0, 0));
+
+        let version = mappings[1].elf_file_so_version();
+        assert_eq!(version, (6, 0, 32));
+
+        let version = mappings[2].elf_file_so_version();
+        assert_eq!(version, (2, 11800, 0));
+
+        let version = mappings[3].elf_file_so_version();
+        assert_eq!(version, (6, 0, 0));
+
+        let version = mappings[4].elf_file_so_version();
+        assert_eq!(version, (0, 0, 0));
+
+        let version = mappings[5].elf_file_so_version();
+        assert_eq!(version, (0, 7800, 0));
+
+        let version = mappings[6].elf_file_so_version();
+        assert_eq!(version, (20220623, 0, 0));
+
+        let version = mappings[7].elf_file_so_version();
+        assert_eq!(version, (0, 0, 0));
+
+        let version = mappings[8].elf_file_so_version();
+        assert_eq!(version, (0, 0, 0));
     }
 
     #[test]
