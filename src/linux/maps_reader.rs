@@ -303,57 +303,39 @@ impl MappingInfo {
         Ok(soname.to_string())
     }
 
+    /// Attempts to retrieve the .so version of the elf via its filename as a
+    /// `(major, minor, release)` triplet
     fn elf_file_so_version(&self) -> (u32, u32, u32) {
-        // Report the so version from the filename as two u32 that will fit into
-        // version_info.file_version_{hi,lo}
-        let name = String::from(
-            self.name
-                .clone()
-                .expect("Failure to clone")
-                .to_str()
-                .unwrap(),
-        );
-
-        if !(name.contains(".so.")) {
-            return (0, 0, 0);
-        }
-
-        let filename = match name.split('/').last() {
-            Some(f) => f,
-            None => return (0, 0, 0),
+        const DEF: (u32, u32, u32) = (0, 0, 0);
+        let Some(so_name) = self.name.as_deref() else {
+            return DEF;
+        };
+        let Some(filename) = std::path::Path::new(so_name).file_name() else {
+            return DEF;
         };
 
-        match filename.split(".so.").last() {
-            Some(s) => {
-                let mut got_non_digit = false;
-                let vers: Vec<u32> = s
-                    .split('.')
-                    .collect::<Vec<&str>>()
-                    .into_iter()
-                    .map(|n| {
-                        n.parse().unwrap_or_else(|_| {
-                            got_non_digit = true;
-                            0
-                        })
-                    })
-                    .collect::<Vec<u32>>();
+        // Avoid an allocation unless the string contains non-utf8
+        let filename = filename.to_string_lossy();
 
-                if got_non_digit {
-                    return (0, 0, 0);
-                }
+        let Some((_, version)) = filename.split_once(".so.") else {
+            return DEF;
+        };
 
-                let (major, minor, release) = match vers.len() {
-                    0 => (0, 0, 0),
-                    1 => (vers[0], 0, 0),
-                    2 => (vers[0], vers[1], 0),
-                    3 => (vers[0], vers[1], vers[2]),
-                    _ => (vers[0], vers[1], vers[2]),
-                };
+        let mut triplet = [0, 0, 0];
 
-                (major, minor, release)
+        for (so, trip) in version.split('.').zip(triplet.iter_mut()) {
+            // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
+            // so try to parse as much as we can rather than completely ignoring
+            for digit in so
+                .chars()
+                .filter_map(|c: char| c.is_ascii_digit().then_some(c as u8 - b'0'))
+            {
+                *trip *= 10;
+                *trip += digit as u32;
             }
-            None => (0, 0, 0),
         }
+
+        (triplet[0], triplet[1], triplet[2])
     }
 
     pub fn get_mapping_effective_path_name_and_version(
@@ -707,32 +689,22 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         );
         assert_eq!(mappings.len(), 9);
 
-        let version = mappings[0].elf_file_so_version();
-        assert_eq!(version, (0, 0, 0));
+        let expected = [
+            (0, 0, 0),
+            (6, 0, 32),
+            (2, 11800, 0),
+            (6, 0, 0),
+            (0, 0, 0),
+            (0, 7800, 0),
+            (20220623, 0, 0),
+            (3, 34, 25),
+            (0, 0, 0),
+        ];
 
-        let version = mappings[1].elf_file_so_version();
-        assert_eq!(version, (6, 0, 32));
-
-        let version = mappings[2].elf_file_so_version();
-        assert_eq!(version, (2, 11800, 0));
-
-        let version = mappings[3].elf_file_so_version();
-        assert_eq!(version, (6, 0, 0));
-
-        let version = mappings[4].elf_file_so_version();
-        assert_eq!(version, (0, 0, 0));
-
-        let version = mappings[5].elf_file_so_version();
-        assert_eq!(version, (0, 7800, 0));
-
-        let version = mappings[6].elf_file_so_version();
-        assert_eq!(version, (20220623, 0, 0));
-
-        let version = mappings[7].elf_file_so_version();
-        assert_eq!(version, (0, 0, 0));
-
-        let version = mappings[8].elf_file_so_version();
-        assert_eq!(version, (0, 0, 0));
+        for (i, (map, exp)) in mappings.into_iter().zip(expected).enumerate() {
+            let version = map.elf_file_so_version();
+            assert_eq!(version, exp, "{i}");
+        }
     }
 
     #[test]
