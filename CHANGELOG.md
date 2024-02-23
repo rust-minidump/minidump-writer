@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Added
+- [PR#103](https://github.com/rust-minidump/minidump-writer/pull/103) added `.so` file versions as additional metadata to minidumps, resolving [this Mozilla bug](https://bugzilla.mozilla.org/show_bug.cgi?id=1847098). There is no true standard for .so file versions, so this is a best effort to pull what version information we can from the .so filename. The version components are `major.minor.release` similarly to semver, where `major` -> [VS_FIXEDFILEINFO::file_version_hi](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.file_version_hi), `major` -> [VS_FIXEDFILEINFO::file_version_lo](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.file_version_lo),  and `release` -> [VS_FIXEDFILEINFO::product_version_hi](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.product_version_hi)
+  - `libmozsandbox.so` -> `0.0.0`
+  - `libstdc++.so.6.0.32` -> `6.0.32`
+  - `libcairo-gobject.so.2.11800.0` -> `2.11800.0`
+  - `libm.so.6` -> `6.0.0`
+  - `libabsl_time_zone.so.20220623.0.0` -> `20220623.0.0`
+  - `libdbus-1.so.3.34.2rc5` -> `3.34.25`
+
 ## [0.8.4] - 2024-02-15
 ### Changed
 - [PR#97](https://github.com/rust-minidump/minidump-writer/pull/97) bumped `goblin` -> 0.8.
