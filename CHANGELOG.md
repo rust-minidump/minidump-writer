@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.5] - 2024-02-23
 ### Added
 - [PR#103](https://github.com/rust-minidump/minidump-writer/pull/103) added `.so` file versions as additional metadata to minidumps, resolving [this Mozilla bug](https://bugzilla.mozilla.org/show_bug.cgi?id=1847098). There is no true standard for .so file versions, so this is a best effort to pull what version information we can from the .so filename. The version components are `major.minor.release` similarly to semver, where `major` -> [VS_FIXEDFILEINFO::file_version_hi](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.file_version_hi), `major` -> [VS_FIXEDFILEINFO::file_version_lo](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.file_version_lo),  and `release` -> [VS_FIXEDFILEINFO::product_version_hi](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.product_version_hi)
   - `libmozsandbox.so` -> `0.0.0`
@@ -117,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.4...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...HEAD
+[0.8.5]: https://github.com/rust-minidump/minidump-writer/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/rust-minidump/minidump-writer/compare/0.8.3...0.8.4
 [0.8.3]: https://github.com/rust-minidump/minidump-writer/compare/0.8.2...0.8.3
 [0.8.2]: https://github.com/rust-minidump/minidump-writer/compare/0.8.1...0.8.2
