@@ -399,7 +399,7 @@ impl MappingInfo {
 ///
 /// That being said, the [libtool](https://www.gnu.org/software/libtool/manual/html_node/Libtool-versioning.html)
 /// versioning scheme is fairly common
-#[cfg_attr(test, derive(PartialEq, Debug, Default))]
+#[cfg_attr(test, derive(Debug))]
 pub struct SoVersion {
     /// Might be non-zero if there is at least one non-zero numeric component after .so.
     ///
@@ -453,7 +453,7 @@ impl SoVersion {
             } else {
                 // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
                 // so try to parse either a single or two numbers
-                if let Some(pend) = dbg!(comp).find(|c: char| !c.is_ascii_digit()) {
+                if let Some(pend) = comp.find(|c: char| !c.is_ascii_digit()) {
                     if let Ok(patch) = comp[..pend].parse() {
                         *comps[i] = patch;
                     }
@@ -474,6 +474,13 @@ impl SoVersion {
         }
 
         Some(sov)
+    }
+}
+
+#[cfg(test)]
+impl PartialEq<(u32, u32, u32, u32)> for SoVersion {
+    fn eq(&self, o: &(u32, u32, u32, u32)) -> bool {
+        self.major == o.0 && self.minor == o.1 && self.patch == o.2 && self.prerelease == o.3
     }
 }
 
@@ -732,93 +739,25 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
 
     #[test]
     fn test_elf_file_so_version() {
+        #[rustfmt::skip]
         let test_cases = [
-            ("/home/alex/bin/firefox/libmozsandbox.so", None),
-            (
-                "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32",
-                Some(SoVersion {
-                    major: 6,
-                    patch: 32,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0",
-                Some(SoVersion {
-                    major: 2,
-                    minor: 11800,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libm.so.6",
-                Some(SoVersion {
-                    major: 6,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
-                Some(SoVersion::default()),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0",
-                Some(SoVersion {
-                    minor: 7800,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0",
-                Some(SoVersion {
-                    major: 20220623,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5",
-                Some(SoVersion {
-                    major: 3,
-                    minor: 34,
-                    patch: 2,
-                    prerelease: 5,
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc",
-                Some(SoVersion {
-                    major: 3,
-                    minor: 34,
-                    patch: 2,
-                    prerelease: 0,
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.rc5",
-                Some(SoVersion {
-                    major: 3,
-                    minor: 34,
-                    patch: 0,
-                    prerelease: 5,
-                }),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libtoto.so.AAA",
-                Some(SoVersion::default()),
-            ),
-            (
-                "/usr/lib/x86_64-linux-gnu/libsemver-1.so.1.2.alpha.1",
-                Some(SoVersion {
-                    major: 1,
-                    minor: 2,
-                    patch: 0,
-                    prerelease: 1,
-                }),
-            ),
+            ("/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32", (6, 0, 32, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0", (2, 11800, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libm.so.6", (6, 0, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libpthread.so.0", (0, 0, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0", (0, 7800, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0", (20220623, 0, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5", (3, 34, 2, 5)),
+            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc", (3, 34, 2, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.rc5", (3, 34, 0, 5)),
+            ("/usr/lib/x86_64-linux-gnu/libtoto.so.AAA", (0, 0, 0, 0)),
+            ("/usr/lib/x86_64-linux-gnu/libsemver-1.so.1.2.alpha.1", (1, 2, 0, 1)),
         ];
 
+        assert!(SoVersion::parse(OsStr::new("/home/alex/bin/firefox/libmozsandbox.so")).is_none());
+
         for (path, expected) in test_cases {
-            let actual = SoVersion::parse(OsStr::new(path));
+            let actual = SoVersion::parse(OsStr::new(path)).unwrap();
             assert_eq!(actual, expected);
         }
     }
