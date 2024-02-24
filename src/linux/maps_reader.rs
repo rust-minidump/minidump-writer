@@ -289,10 +289,9 @@ impl MappingInfo {
         true
     }
 
-    fn elf_file_so_name(&self) -> Result<String> {
-        // Find the shared object name (SONAME) by examining the ELF information
-        // for |mapping|. If the SONAME is found copy it into the passed buffer
-        // |soname| and return true. The size of the buffer is |soname_size|.
+    /// Find the shared object name (SONAME) by examining the ELF information
+    /// for the mapping.
+    fn so_name(&self) -> Result<String> {
         let mapped_file = MappingInfo::get_mmap(&self.name, self.offset)?;
 
         let elf_obj = elf::Elf::parse(&mapped_file)?;
@@ -303,44 +302,18 @@ impl MappingInfo {
         Ok(soname.to_string())
     }
 
-    /// Attempts to retrieve the .so version of the elf via its filename as a
-    /// `(major, minor, release)` triplet
-    fn elf_file_so_version(&self) -> (u32, u32, u32) {
-        const DEF: (u32, u32, u32) = (0, 0, 0);
-        let Some(so_name) = self.name.as_deref() else {
-            return DEF;
-        };
-        let Some(filename) = std::path::Path::new(so_name).file_name() else {
-            return DEF;
+    #[inline]
+    fn so_version(&self) -> Option<SoVersion> {
+        let Some(name) = self.name.as_deref() else {
+            return None;
         };
 
-        // Avoid an allocation unless the string contains non-utf8
-        let filename = filename.to_string_lossy();
-
-        let Some((_, version)) = filename.split_once(".so.") else {
-            return DEF;
-        };
-
-        let mut triplet = [0, 0, 0];
-
-        for (so, trip) in version.split('.').zip(triplet.iter_mut()) {
-            // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
-            // so try to parse as much as we can rather than completely ignoring
-            for digit in so
-                .chars()
-                .filter_map(|c: char| c.is_ascii_digit().then_some(c as u8 - b'0'))
-            {
-                *trip *= 10;
-                *trip += digit as u32;
-            }
-        }
-
-        (triplet[0], triplet[1], triplet[2])
+        SoVersion::parse(name)
     }
 
     pub fn get_mapping_effective_path_name_and_version(
         &self,
-    ) -> Result<(PathBuf, String, (u32, u32, u32))> {
+    ) -> Result<(PathBuf, String, Option<SoVersion>)> {
         let mut file_path = PathBuf::from(self.name.clone().unwrap_or_default());
 
         // Tools such as minidump_stackwalk use the name of the module to look up
@@ -349,16 +322,15 @@ impl MappingInfo {
         // filesystem name of the module.
 
         // Just use the filesystem name if no SONAME is present.
-        let file_name = if let Ok(name) = self.elf_file_so_name() {
-            name
-        } else {
+        let Ok(file_name) = self.so_name() else {
             //   file_path := /path/to/libname.so
             //   file_name := libname.so
             let file_name = file_path
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            return Ok((file_path, file_name, self.elf_file_so_version()));
+
+            return Ok((file_path, file_name, self.so_version()));
         };
 
         if self.is_executable() && self.offset != 0 {
@@ -374,7 +346,7 @@ impl MappingInfo {
             file_path.set_file_name(&file_name);
         }
 
-        Ok((file_path, file_name, self.elf_file_so_version()))
+        Ok((file_path, file_name, self.so_version()))
     }
 
     pub fn is_contained_in(&self, user_mapping_list: &MappingList) -> bool {
@@ -416,6 +388,92 @@ impl MappingInfo {
 
     pub fn is_writable(&self) -> bool {
         self.permissions.contains(MMPermissions::WRITE)
+    }
+}
+
+/// Version metadata retrieved from an .so filename
+///
+/// There is no standard for .so version numbers so this implementation just
+/// does a best effort to pull as much data as it can based on real .so schemes
+/// seen
+///
+/// That being said, the [libtool](https://www.gnu.org/software/libtool/manual/html_node/Libtool-versioning.html)
+/// versioning scheme is fairly common
+#[cfg_attr(test, derive(PartialEq, Debug, Default))]
+pub struct SoVersion {
+    /// Might be non-zero if there is at least one non-zero numeric component after .so.
+    ///
+    /// Equivalent to `current` in libtool versions
+    pub major: u32,
+    /// The numeric component after the major version, if any
+    ///
+    /// Equivalent to `revision` in libtool versions
+    pub minor: u32,
+    /// The numeric component after the minor version, if any
+    ///
+    /// Equivalent to `age` in libtool versions
+    pub patch: u32,
+    /// The patch component may contain additional non-numeric metadata similar
+    /// to a semver prelease, this is any numeric data that suffixes that prerelease
+    /// string
+    pub prerelease: u32,
+}
+
+impl SoVersion {
+    /// Attempts to retrieve the .so version of the elf path via its filename
+    fn parse(so_path: &OsStr) -> Option<Self> {
+        let Some(filename) = std::path::Path::new(so_path).file_name() else {
+            return None;
+        };
+
+        // Avoid an allocation unless the string contains non-utf8
+        let filename = filename.to_string_lossy();
+
+        let Some((_, version)) = filename.split_once(".so.") else {
+            return None;
+        };
+
+        let mut sov = Self {
+            major: 0,
+            minor: 0,
+            patch: 0,
+            prerelease: 0,
+        };
+
+        let comps = [
+            &mut sov.major,
+            &mut sov.minor,
+            &mut sov.patch,
+            &mut sov.prerelease,
+        ];
+
+        for (i, comp) in version.split('.').enumerate() {
+            if i <= 1 {
+                *comps[i] = comp.parse().unwrap_or_default();
+            } else {
+                // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
+                // so try to parse either a single or two numbers
+                if let Some(pend) = dbg!(comp).find(|c: char| !c.is_ascii_digit()) {
+                    if let Ok(patch) = comp[..pend].parse() {
+                        *comps[i] = patch;
+                    }
+
+                    if i >= comps.len() - 1 {
+                        break;
+                    }
+                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit()) {
+                        if let Ok(pre) = comp[pre + 1..].parse() {
+                            *comps[i + 1] = pre;
+                            break;
+                        }
+                    }
+                } else {
+                    *comps[i] = comp.parse().unwrap_or_default();
+                }
+            }
+        }
+
+        Some(sov)
     }
 }
 
@@ -674,36 +732,94 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
 
     #[test]
     fn test_elf_file_so_version() {
-        let mappings = get_mappings_for(
-            "\
-7f877ab9f000-7f877aba0000 rw-p 0001f000 00:1b 100457459                  /home/alex/bin/firefox/libmozsandbox.so
-7f877ae65000-7f877ae68000 rw-p 00265000 00:1b 90432393                   /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32
-7f877ae76000-7f877ae77000 rw-p 0000a000 00:1b 90443112                   /usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0
-7f877ae7c000-7f877ae8c000 r--p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libm.so.6
-7f877af70000-7f877af71000 rw-p 00003000 00:1b 93439980                   /usr/lib/x86_64-linux-gnu/libpthread.so.0
-7f877af78000-7f877af79000 rw-p 00005000 00:1b 90423049                   /usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0
-7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0
-7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5
-7f877ae7c000-7f877ae8c000 rw-p 00000000 00:1b 93439971                   /usr/lib/x86_64-linux-gnu/libtoto.so.AAA",
-            0x7ffe091bf000,
-        );
-        assert_eq!(mappings.len(), 9);
-
-        let expected = [
-            (0, 0, 0),
-            (6, 0, 32),
-            (2, 11800, 0),
-            (6, 0, 0),
-            (0, 0, 0),
-            (0, 7800, 0),
-            (20220623, 0, 0),
-            (3, 34, 25),
-            (0, 0, 0),
+        let test_cases = [
+            ("/home/alex/bin/firefox/libmozsandbox.so", None),
+            (
+                "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32",
+                Some(SoVersion {
+                    major: 6,
+                    patch: 32,
+                    ..Default::default()
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0",
+                Some(SoVersion {
+                    major: 2,
+                    minor: 11800,
+                    ..Default::default()
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libm.so.6",
+                Some(SoVersion {
+                    major: 6,
+                    ..Default::default()
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+                Some(SoVersion::default()),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0",
+                Some(SoVersion {
+                    minor: 7800,
+                    ..Default::default()
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0",
+                Some(SoVersion {
+                    major: 20220623,
+                    ..Default::default()
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5",
+                Some(SoVersion {
+                    major: 3,
+                    minor: 34,
+                    patch: 2,
+                    prerelease: 5,
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc",
+                Some(SoVersion {
+                    major: 3,
+                    minor: 34,
+                    patch: 2,
+                    prerelease: 0,
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.rc5",
+                Some(SoVersion {
+                    major: 3,
+                    minor: 34,
+                    patch: 0,
+                    prerelease: 5,
+                }),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libtoto.so.AAA",
+                Some(SoVersion::default()),
+            ),
+            (
+                "/usr/lib/x86_64-linux-gnu/libsemver-1.so.1.2.alpha.1",
+                Some(SoVersion {
+                    major: 1,
+                    minor: 2,
+                    patch: 0,
+                    prerelease: 1,
+                }),
+            ),
         ];
 
-        for (i, (map, exp)) in mappings.into_iter().zip(expected).enumerate() {
-            let version = map.elf_file_so_version();
-            assert_eq!(version, exp, "{i}");
+        for (path, expected) in test_cases {
+            let actual = SoVersion::parse(OsStr::new(path));
+            assert_eq!(actual, expected);
         }
     }
 
