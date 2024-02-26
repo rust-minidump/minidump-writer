@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.6] - 2024-02-26
 ### Changed
 - [PR#104](https://github.com/rust-minidump/minidump-writer/pull/104) slightly tweaked .so version parsing in the case of more "exotic" versions such as `libdbus-1.so.3.34.2rc5`. Previously this was parsed as `3.34.25` but would cause ambiguity if there was ever an _actual_ .25 patch/age in the future. Now, the last version is parsed as 1-2 numbers, ignoring non-digit characters if the last component has them. If 2 numbers are parsed, the last number is now placed in [VS_FIXEDFILEINFO::product_version_lo](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.product_version_lo) so that it is distinct from the patch/age component placed in [VS_FIXEDFILEINFO::product_version_hi](https://docs.rs/minidump-common/latest/minidump_common/format/struct.VS_FIXEDFILEINFO.html#structfield.product_version_hi).
 
@@ -121,7 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.6...HEAD
+[0.8.6]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/rust-minidump/minidump-writer/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/rust-minidump/minidump-writer/compare/0.8.3...0.8.4
 [0.8.3]: https://github.com/rust-minidump/minidump-writer/compare/0.8.2...0.8.3
