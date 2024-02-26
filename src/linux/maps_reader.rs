@@ -450,6 +450,8 @@ impl SoVersion {
         for (i, comp) in version.split('.').enumerate() {
             if i <= 1 {
                 *comps[i] = comp.parse().unwrap_or_default();
+            } else if i >= 4 {
+                break;
             } else {
                 // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
                 // so try to parse either a single or two numbers
@@ -752,6 +754,8 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
             ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.rc5", (3, 34, 0, 5)),
             ("/usr/lib/x86_64-linux-gnu/libtoto.so.AAA", (0, 0, 0, 0)),
             ("/usr/lib/x86_64-linux-gnu/libsemver-1.so.1.2.alpha.1", (1, 2, 0, 1)),
+            ("/usr/lib/x86_64-linux-gnu/libboop.so.1.2.3.4.5", (1, 2, 3, 4)),
+            ("/usr/lib/x86_64-linux-gnu/libboop.so.1.2.3pre4.5", (1, 2, 3, 4)),
         ];
 
         assert!(SoVersion::parse(OsStr::new("/home/alex/bin/firefox/libmozsandbox.so")).is_none());
