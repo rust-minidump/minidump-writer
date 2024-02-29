@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
 ### Changed
-- bumped `minidump-common` -> 0.21, `minidump` -> 0.21, `minidump-processor` -> 0.21,
-  `minidump-unwind` -> 0.21
+- [PR#106](https://github.com/rust-minidump/minidump-writer/pull/106) bumped `minidump-common`, `minidump`, `minidump-processor`, and `minidump-unwind` -> 0.21.
 
 ## [0.8.6] - 2024-02-26
 ### Changed
