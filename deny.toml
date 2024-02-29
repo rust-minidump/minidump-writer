@@ -14,7 +14,7 @@ ignore = []
 [bans]
 multiple-versions = "deny"
 deny = [
-    { crate = "chrono", use-instead = "time", reason = "unneccessary dependency" },
+    #{ crate = "chrono", use-instead = "time", reason = "unneccessary dependency" },
 ]
 skip-tree = []
 
