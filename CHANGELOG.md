@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.7] - 2024-03-04
 ### Changed
 - [PR#106](https://github.com/rust-minidump/minidump-writer/pull/106) bumped `minidump-common`, `minidump`, `minidump-processor`, and `minidump-unwind` -> 0.21.
 
@@ -125,7 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.6...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.7...HEAD
+[0.8.7]: https://github.com/rust-minidump/minidump-writer/compare/0.8.6...0.8.7
 [0.8.6]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/rust-minidump/minidump-writer/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/rust-minidump/minidump-writer/compare/0.8.3...0.8.4
