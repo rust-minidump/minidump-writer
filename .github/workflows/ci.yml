@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: deny check
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@1a9e5b58
         with:
           # Note that advisories are checked separately on a schedule in audit.yml
-          command: check bans licenses sources
+          command: check #bans licenses sources
