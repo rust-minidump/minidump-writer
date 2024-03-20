@@ -1226,6 +1226,7 @@ dependencies = [
  "futures",
  "goblin 0.8.0",
  "libc",
+ "log",
  "mach2",
  "memmap2",
  "memoffset",
