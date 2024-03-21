@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.8] - 2024-03-21
 ### Fixed
 - [PR#108](https://github.com/rust-minidump/minidump-writer/pull/108) resolved [#28](https://github.com/rust-minidump/minidump-writer/issues/28) by sending a `SIGSTOP` to the process that is about to be dumped to (hopefully) increase the robustness of the dumping process by reducing the chance of errors, particularly with regard to threads. This is done as a best effort, and will perform the old behavior if the process has not stopped within a timeout (by default 100ms), which can be overriden by the user.
 
@@ -129,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.7...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.8...HEAD
+[0.8.8]: https://github.com/rust-minidump/minidump-writer/compare/0.8.7...0.8.8
 [0.8.7]: https://github.com/rust-minidump/minidump-writer/compare/0.8.6...0.8.7
 [0.8.6]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/rust-minidump/minidump-writer/compare/0.8.4...0.8.5
