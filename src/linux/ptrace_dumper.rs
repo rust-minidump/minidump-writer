@@ -47,8 +47,6 @@ pub struct PtraceDumper {
     pub page_size: usize,
 }
 
-const STOP_PROCESS_TIMEOUT: Duration = Duration::from_millis(100);
-
 #[cfg(target_pointer_width = "32")]
 pub const AT_SYSINFO_EHDR: u32 = 33;
 #[cfg(target_pointer_width = "64")]
@@ -98,7 +96,7 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
-    pub fn new(pid: Pid) -> Result<Self, InitError> {
+    pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
         let mut dumper = PtraceDumper {
             pid,
             process_stopped: false,
@@ -108,14 +106,14 @@ impl PtraceDumper {
             mappings: Vec::new(),
             page_size: 0,
         };
-        dumper.init()?;
+        dumper.init(stop_timeout)?;
         Ok(dumper)
     }
 
     // TODO: late_init for chromeos and android
-    pub fn init(&mut self) -> Result<(), InitError> {
+    pub fn init(&mut self, stop_timeout: Duration) -> Result<(), InitError> {
         // Stopping the process is best-effort.
-        if let Err(e) = self.stop_process(STOP_PROCESS_TIMEOUT) {
+        if let Err(e) = self.stop_process(stop_timeout) {
             log::warn!("failed to stop process {}: {e}", self.pid);
         }
         self.read_auxv()?;
@@ -251,22 +249,21 @@ impl PtraceDumper {
 
         // Something like waitpid for non-child processes would be better, but we have no such
         // tool, so we poll the status.
-        const POLL_TIME: Duration = Duration::from_millis(1);
+        const POLL_INTERVAL: Duration = Duration::from_millis(1);
+        let proc_file = format!("/proc/{}/stat", self.pid);
         let end = Instant::now() + timeout;
+
         loop {
-            if let Ok(ProcState::Stopped) =
-                Stat::from_file(format!("/proc/{}/stat", self.pid))?.state()
-            {
+            if let Ok(ProcState::Stopped) = Stat::from_file(&proc_file)?.state() {
                 self.process_stopped = true;
                 return Ok(());
             }
 
-            std::thread::sleep(POLL_TIME);
-            if Instant::now() >= end {
-                break;
+            std::thread::sleep(POLL_INTERVAL);
+            if Instant::now() > end {
+                return Err(StopProcessError::Timeout);
             }
         }
-        Err(StopProcessError::Timeout)
     }
 
     /// Send SIGCONT to the process to continue.

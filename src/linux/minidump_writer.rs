@@ -13,13 +13,20 @@ use crate::{
     mem_writer::{Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError},
     minidump_format::*,
 };
-use std::io::{Seek, Write};
+use std::{
+    io::{Seek, Write},
+    time::Duration,
+};
 
 pub enum CrashingThreadContext {
     None,
     CrashContext(MDLocationDescriptor),
     CrashContextPlusAddress((MDLocationDescriptor, usize)),
 }
+
+/// The default timeout after a `SIGSTOP` after which minidump writing proceeds
+/// regardless of the process state
+pub const STOP_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct MinidumpWriter {
     pub process_id: Pid,
@@ -34,6 +41,7 @@ pub struct MinidumpWriter {
     pub sanitize_stack: bool,
     pub crash_context: Option<CrashContext>,
     pub crashing_thread_context: CrashingThreadContext,
+    pub stop_timeout: Duration,
 }
 
 // This doesn't work yet:
@@ -62,6 +70,7 @@ impl MinidumpWriter {
             sanitize_stack: false,
             crash_context: None,
             crashing_thread_context: CrashingThreadContext::None,
+            stop_timeout: STOP_TIMEOUT,
         }
     }
 
@@ -100,10 +109,18 @@ impl MinidumpWriter {
         self
     }
 
+    /// Sets the timeout after `SIGSTOP` is sent to the process, if the process
+    /// has not stopped by the time the timeout has reached, we proceed with
+    /// minidump generation
+    pub fn stop_timeout(&mut self, duration: Duration) -> &mut Self {
+        self.stop_timeout = duration;
+        self
+    }
+
     /// Generates a minidump and writes to the destination provided. Returns the in-memory
     /// version of the minidump as well.
     pub fn dump(&mut self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>> {
-        let mut dumper = PtraceDumper::new(self.process_id)?;
+        let mut dumper = PtraceDumper::new(self.process_id, self.stop_timeout)?;
         dumper.suspend_threads()?;
         dumper.late_init()?;
 

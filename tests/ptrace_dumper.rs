@@ -29,7 +29,8 @@ fn test_thread_list_from_parent() {
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
-    let mut dumper = PtraceDumper::new(pid).expect("Couldn't init dumper");
+    let mut dumper = PtraceDumper::new(pid, minidump_writer::minidump_writer::STOP_TIMEOUT)
+        .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
     dumper.suspend_threads().expect("Could not suspend threads");
 
@@ -209,7 +210,8 @@ fn test_sanitize_stack_copy() {
     let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
 
-    let mut dumper = PtraceDumper::new(pid).expect("Couldn't init dumper");
+    let mut dumper = PtraceDumper::new(pid, minidump_writer::minidump_writer::STOP_TIMEOUT)
+        .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
     dumper.suspend_threads().expect("Could not suspend threads");
     let thread_info = dumper
