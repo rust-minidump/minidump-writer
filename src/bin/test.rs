@@ -13,10 +13,9 @@ mod linux {
         LINUX_GATE_LIBRARY_NAME,
     };
     use nix::{
-        sys::mman::{mmap, MapFlags, ProtFlags},
+        sys::mman::{mmap_anonymous, MapFlags, ProtFlags},
         unistd::getppid,
     };
-    use std::os::fd::BorrowedFd;
 
     macro_rules! test {
         ($x:expr, $errmsg:expr) => {
@@ -216,18 +215,16 @@ mod linux {
         let memory_size = std::num::NonZeroUsize::new(page_size.unwrap() as usize).unwrap();
         // Get some memory to be mapped by the child-process
         let mapped_mem = unsafe {
-            mmap::<BorrowedFd>(
+            mmap_anonymous(
                 None,
                 memory_size,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON,
-                None,
-                0,
             )
             .unwrap()
         };
 
-        println!("{} {}", mapped_mem as usize, memory_size);
+        println!("{} {}", mapped_mem.as_ptr() as usize, memory_size);
         loop {
             std::thread::park();
         }

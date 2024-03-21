@@ -7,7 +7,6 @@ use nix::sys::signal::Signal;
 use std::convert::TryInto;
 use std::io::{BufRead, BufReader};
 use std::mem::size_of;
-use std::os::unix::io::AsFd;
 use std::os::unix::process::ExitStatusExt;
 
 mod common;
@@ -130,20 +129,22 @@ fn test_merged_mappings() {
             map_size,
             ProtFlags::PROT_READ,
             MapFlags::MAP_SHARED,
-            Some(file.as_fd()),
+            &file,
             0,
         )
         .unwrap()
     };
 
+    let mapped = mapped_mem.as_ptr() as usize;
+
     // Carve a page out of the first mapping with different permissions.
     let _inside_mapping = unsafe {
         mmap(
-            std::num::NonZeroUsize::new(mapped_mem as usize + 2 * page_size.get()),
+            std::num::NonZeroUsize::new(mapped + 2 * page_size.get()),
             page_size,
             ProtFlags::PROT_NONE,
             MapFlags::MAP_SHARED | MapFlags::MAP_FIXED,
-            Some(file.as_fd()),
+            &file,
             // Map a different offset just to
             // better test real-world conditions.
             page_size.get().try_into().unwrap(), // try_into() in order to work for 32 and 64 bit
@@ -152,11 +153,7 @@ fn test_merged_mappings() {
 
     spawn_child(
         "merged_mappings",
-        &[
-            path,
-            &format!("{}", mapped_mem as usize),
-            &format!("{map_size}"),
-        ],
+        &[path, &format!("{mapped}"), &format!("{map_size}")],
     );
 }
 
