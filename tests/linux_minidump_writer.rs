@@ -700,35 +700,8 @@ fn with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let build_id = PtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
+    let mut build_id = PtraceDumper::elf_file_identifier_from_mapped_file(&mem_slice)
         .expect("Failed to get build_id");
-
-    let guid = GUID {
-        data1: u32::from_ne_bytes(build_id[0..4].try_into().unwrap()),
-        data2: u16::from_ne_bytes(build_id[4..6].try_into().unwrap()),
-        data3: u16::from_ne_bytes(build_id[6..8].try_into().unwrap()),
-        data4: build_id[8..16].try_into().unwrap(),
-    };
-
-    // guid_to_string() is not public in minidump, so copied it here
-    // And append a zero, because module IDs include an "age" field
-    // which is always zero on Linux.
-    let filtered = format!(
-        "{:08X}{:04X}{:04X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}0",
-        guid.data1,
-        guid.data2,
-        guid.data3,
-        guid.data4[0],
-        guid.data4[1],
-        guid.data4[2],
-        guid.data4[3],
-        guid.data4[4],
-        guid.data4[5],
-        guid.data4[6],
-        guid.data4[7],
-    );
-    // Strip out dashes
-    //let mut filtered: String = identifier.chars().filter(|x| *x != '-').collect();
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 
@@ -761,7 +734,30 @@ fn with_deleted_binary() {
         .main_module()
         .expect("Could not get main module");
     assert_eq!(main_module.code_file(), binary_copy.to_string_lossy());
-    assert_eq!(main_module.debug_identifier(), filtered.parse().ok());
+
+    let did = main_module
+        .debug_identifier()
+        .expect("expected value debug id");
+    {
+        let uuid = did.uuid();
+        let uuid = uuid.as_bytes();
+
+        // Swap bytes in the original to match the expected uuid
+        if cfg!(target_endian = "little") {
+            build_id[..4].reverse();
+            build_id[4..6].reverse();
+            build_id[6..8].reverse();
+        }
+
+        // The build_id from the binary can be as little as 8 bytes, eg LLD uses
+        // xxhash to calculate the build_id by default from 10+
+        build_id.resize(16, 0);
+
+        assert_eq!(uuid.as_slice(), &build_id);
+    }
+
+    // The 'age'/appendix, always 0 on non-windows targets
+    assert_eq!(did.appendix(), 0);
 }
 
 #[test]
