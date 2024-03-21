@@ -13,6 +13,7 @@ bitflags = "2.4"
 byteorder = "1.4"
 cfg-if = "1.0"
 crash-context = "0.6"
+log = "0.4"
 memoffset = "0.9"
 minidump-common = "0.21"
 scroll = "0.12"
@@ -25,10 +26,11 @@ goblin = "0.8"
 memmap2 = "0.9"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-nix = { version = "0.27", default-features = false, features = [
+nix = { version = "0.28", default-features = false, features = [
     "mman",
     "process",
     "ptrace",
+    "signal",
     "user",
 ] }
 # Used for parsing procfs info.
