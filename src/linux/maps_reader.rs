@@ -304,11 +304,7 @@ impl MappingInfo {
 
     #[inline]
     fn so_version(&self) -> Option<SoVersion> {
-        let Some(name) = self.name.as_deref() else {
-            return None;
-        };
-
-        SoVersion::parse(name)
+        SoVersion::parse(self.name.as_deref()?)
     }
 
     pub fn get_mapping_effective_path_name_and_version(
@@ -422,16 +418,12 @@ pub struct SoVersion {
 impl SoVersion {
     /// Attempts to retrieve the .so version of the elf path via its filename
     fn parse(so_path: &OsStr) -> Option<Self> {
-        let Some(filename) = std::path::Path::new(so_path).file_name() else {
-            return None;
-        };
+        let filename = std::path::Path::new(so_path).file_name()?;
 
         // Avoid an allocation unless the string contains non-utf8
         let filename = filename.to_string_lossy();
 
-        let Some((_, version)) = filename.split_once(".so.") else {
-            return None;
-        };
+        let (_, version) = filename.split_once(".so.")?;
 
         let mut sov = Self {
             major: 0,

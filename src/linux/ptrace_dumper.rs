@@ -39,7 +39,6 @@ pub struct Thread {
 #[derive(Debug)]
 pub struct PtraceDumper {
     pub pid: Pid,
-    process_stopped: bool,
     threads_suspended: bool,
     pub threads: Vec<Thread>,
     pub auxv: HashMap<AuxvType, AuxvType>,
@@ -99,7 +98,6 @@ impl PtraceDumper {
     pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
         let mut dumper = PtraceDumper {
             pid,
-            process_stopped: false,
             threads_suspended: false,
             threads: Vec::new(),
             auxv: HashMap::new(),
@@ -255,7 +253,6 @@ impl PtraceDumper {
 
         loop {
             if let Ok(ProcState::Stopped) = Stat::from_file(&proc_file)?.state() {
-                self.process_stopped = true;
                 return Ok(());
             }
 
@@ -270,10 +267,7 @@ impl PtraceDumper {
     ///
     /// Unlike `stop_process`, this function does not wait for the process to continue.
     fn continue_process(&mut self) -> Result<(), ContinueProcessError> {
-        if self.process_stopped {
-            signal::kill(nix::unistd::Pid::from_raw(self.pid), Some(signal::SIGCONT))?;
-        }
-        self.process_stopped = false;
+        signal::kill(nix::unistd::Pid::from_raw(self.pid), Some(signal::SIGCONT))?;
         Ok(())
     }
 
