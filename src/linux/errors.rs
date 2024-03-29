@@ -119,7 +119,7 @@ pub enum DumperError {
     #[error("Couldn't parse as ELF file")]
     ELFParsingFailed(#[from] goblin::error::Error),
     #[error("No build-id found")]
-    NoBuildIDFound,
+    NoBuildIDFound(#[from] BuildIdReaderError),
     #[error("Not safe to open mapping: {}", .0.to_string_lossy())]
     NotSafeToOpenMapping(OsString),
     #[error("Failed integer conversion")]
@@ -250,4 +250,34 @@ pub enum WriterError {
     FileWriterError(#[from] FileWriterError),
     #[error("Failed to get current timestamp when writing header of minidump")]
     SystemTimeError(#[from] std::time::SystemTimeError),
+}
+
+#[derive(Debug, Error)]
+pub enum BuildIdReaderError {
+    #[error("failed to read module memory: {length} bytes at {offset}: {error}")]
+    ReadModuleMemory {
+        offset: u64,
+        length: u64,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("failed to parse ELF memory: {0}")]
+    Parsing(#[from] goblin::error::Error),
+    #[error("no build id notes in program headers")]
+    NoProgramHeaderNote,
+    #[error("no build id note sections")]
+    NoSectionNote,
+    #[error("the ELF file does not have a .text section from which to generate a build id")]
+    NoTextSection,
+    #[error(
+        "failed to calculate build id\n\
+    ... from program headers: {program_headers}\n\
+    ... from sections: {section}\n\
+    ... from the text section: {section}"
+    )]
+    Aggregate {
+        program_headers: Box<Self>,
+        section: Box<Self>,
+        generated: Box<Self>,
+    },
 }

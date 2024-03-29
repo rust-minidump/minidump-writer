@@ -91,6 +91,7 @@ mod linux {
         let exe_link = format!("/proc/{}/exe", ppid);
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
         let mut dumper = PtraceDumper::new(getppid().as_raw(), STOP_TIMEOUT)?;
+        let _ = dumper.suspend_threads();
         let mut found_exe = None;
         for (idx, mapping) in dumper.mappings.iter().enumerate() {
             if mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name) {
@@ -100,6 +101,7 @@ mod linux {
         }
         let idx = found_exe.unwrap();
         let id = dumper.elf_identifier_for_mapping_index(idx)?;
+        let _ = dumper.resume_threads();
         assert!(!id.is_empty());
         assert!(id.iter().any(|&x| x > 0));
         Ok(())
