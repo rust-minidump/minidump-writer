@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.9] - 2024-04-01
 ### Fixed
 - [PR#110](https://github.com/rust-minidump/minidump-writer/pull/110) changed it so that `SIGCONT` is sent regardless if the process was not able to be `SIGSTOP`ed quickly enough.
 - [PR#113](https://github.com/rust-minidump/minidump-writer/pull/113) fixed a segfault(!) on linux if it was compiled with rustc 1.77.0 in release mode.
@@ -134,7 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.8...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.8.9...HEAD
+[0.8.9]: https://github.com/rust-minidump/minidump-writer/compare/0.8.8...0.8.9
 [0.8.8]: https://github.com/rust-minidump/minidump-writer/compare/0.8.7...0.8.8
 [0.8.7]: https://github.com/rust-minidump/minidump-writer/compare/0.8.6...0.8.7
 [0.8.6]: https://github.com/rust-minidump/minidump-writer/compare/0.8.5...0.8.6
