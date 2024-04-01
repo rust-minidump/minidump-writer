@@ -32,7 +32,7 @@ jobs:
     strategy:
       matrix:
         job:
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, release: true }
           - { os: ubuntu-22.04,  target: x86_64-unknown-linux-musl }
           - { os: windows-2022,  target: x86_64-pc-windows-msvc }
           - { os: macos-13,      target: x86_64-apple-darwin }
@@ -49,6 +49,11 @@ jobs:
         run: cargo test --target ${{ matrix.job.target }} --no-run
       - name: Test
         run: cargo test --target ${{ matrix.job.target }}
+      - name: Release test
+        if: ${{ matrix.job.release }}
+        run:
+          cargo test --target ${{ matrix.job.target }} --release --no-run
+          cargo test --target ${{ matrix.job.target }} --release
 
   install-cross:
     runs-on: ubuntu-latest
