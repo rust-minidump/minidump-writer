@@ -51,7 +51,7 @@ jobs:
         run: cargo test --target ${{ matrix.job.target }}
       - name: Release test
         if: ${{ matrix.job.release }}
-        run:
+        run: |
           cargo test --target ${{ matrix.job.target }} --release --no-run
           cargo test --target ${{ matrix.job.target }} --release
 
