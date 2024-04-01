@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Fixed
+- [PR#110](https://github.com/rust-minidump/minidump-writer/pull/110) changed it so that `SIGCONT` is sent regardless if the process was not able to be `SIGSTOP`ed quickly enough.
+- [PR#113](https://github.com/rust-minidump/minidump-writer/pull/113) fixed a segfault(!) on linux if it was compiled with rustc 1.77.0 in release mode.
+
 ## [0.8.8] - 2024-03-21
 ### Fixed
 - [PR#108](https://github.com/rust-minidump/minidump-writer/pull/108) resolved [#28](https://github.com/rust-minidump/minidump-writer/issues/28) by sending a `SIGSTOP` to the process that is about to be dumped to (hopefully) increase the robustness of the dumping process by reducing the chance of errors, particularly with regard to threads. This is done as a best effort, and will perform the old behavior if the process has not stopped within a timeout (by default 100ms), which can be overriden by the user.
