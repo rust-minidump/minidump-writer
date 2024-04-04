@@ -32,6 +32,31 @@ fn read<T: ModuleMemory>(mem: &T, offset: u64, length: u64) -> Result<T::Memory,
         })
 }
 
+fn is_executable_section(header: &elf::SectionHeader) -> bool {
+    header.sh_type == elf::section_header::SHT_PROGBITS
+        && header.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0
+        && header.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0
+}
+
+/// Return bytes to use as a build id, computed by hashing the given data.
+///
+/// This provides `size_of::<GUID>` bytes to keep identifiers produced by this function compatible
+/// with other build ids.
+fn build_id_from_bytes(data: &[u8]) -> Vec<u8> {
+    // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
+    // function backwards-compatible.
+    data.chunks(std::mem::size_of::<GUID>()).fold(
+        vec![0u8; std::mem::size_of::<GUID>()],
+        |mut bytes, chunk| {
+            bytes
+                .iter_mut()
+                .zip(chunk.iter())
+                .for_each(|(b, c)| *b ^= *c);
+            bytes
+        },
+    )
+}
+
 pub fn read_build_id(module_memory: impl ModuleMemory) -> Result<Vec<u8>, Error> {
     let reader = ElfBuildIdReader::new(module_memory)?;
     let program_headers = match reader.read_from_program_headers() {
@@ -106,21 +131,7 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
 
     /// Read the build id from a notes section.
     pub fn read_from_section(&self) -> Result<Vec<u8>, Error> {
-        if self.header.e_shoff == 0 {
-            return Err(Error::NoSectionNote);
-        }
-
-        let section_headers_data = read(
-            &self.module_memory,
-            self.header.e_shoff,
-            self.header.e_shentsize as u64 * self.header.e_shnum as u64,
-        )?;
-        let section_headers = elf::SectionHeader::parse(
-            &section_headers_data,
-            0,
-            self.header.e_shnum as usize,
-            self.context,
-        )?;
+        let section_headers = self.read_section_headers()?;
         let strtab_section_header = &section_headers[self.header.e_shstrndx as usize];
 
         for header in &section_headers {
@@ -156,8 +167,23 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
 
     /// Generate a build id by hashing the first page of the text section.
     pub fn generate_from_text(&self) -> Result<Vec<u8>, Error> {
-        if self.header.e_shoff == 0 {
+        let Some(text_header) = self
+            .read_section_headers()?
+            .into_iter()
+            .find(is_executable_section)
+        else {
             return Err(Error::NoTextSection);
+        };
+
+        // Take at most one page of the text section (we assume page size is 4096 bytes).
+        let len = std::cmp::min(4096, text_header.sh_size);
+        let text_data = read(&self.module_memory, text_header.sh_offset, len)?;
+        Ok(build_id_from_bytes(&text_data))
+    }
+
+    fn read_section_headers(&self) -> Result<elf::SectionHeaders, Error> {
+        if self.header.e_shoff == 0 {
+            return Err(Error::NoSections);
         }
 
         let section_headers_data = read(
@@ -171,33 +197,7 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
             self.header.e_shnum as usize,
             self.context,
         )?;
-
-        for header in section_headers {
-            if header.sh_type != elf::section_header::SHT_PROGBITS {
-                continue;
-            }
-            if header.sh_flags & u64::from(elf::section_header::SHF_ALLOC) != 0
-                && header.sh_flags & u64::from(elf::section_header::SHF_EXECINSTR) != 0
-            {
-                let len = std::cmp::min(4096, header.sh_size);
-                let text_data = read(&self.module_memory, header.sh_offset, len)?;
-                // Only provide mem::size_of(MDGUID) bytes to keep identifiers produced by this
-                // function backwards-compatible.
-                let result = text_data.chunks(std::mem::size_of::<GUID>()).fold(
-                    vec![0u8; std::mem::size_of::<GUID>()],
-                    |mut bytes, chunk| {
-                        bytes
-                            .iter_mut()
-                            .zip(chunk.iter())
-                            .for_each(|(b, c)| *b ^= *c);
-                        bytes
-                    },
-                );
-                return Ok(result);
-            }
-        }
-
-        Err(Error::NoTextSection)
+        Ok(section_headers)
     }
 
     fn find_build_id_note(

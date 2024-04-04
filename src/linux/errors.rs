@@ -267,6 +267,8 @@ pub enum BuildIdReaderError {
     NoProgramHeaderNote,
     #[error("no build id note sections")]
     NoSectionNote,
+    #[error("the ELF file contains no sections")]
+    NoSections,
     #[error("the ELF file does not have a .text section from which to generate a build id")]
     NoTextSection,
     #[error(

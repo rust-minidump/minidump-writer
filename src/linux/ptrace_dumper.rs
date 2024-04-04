@@ -567,9 +567,6 @@ impl PtraceDumper {
         mapping: &mut MappingInfo,
         pid: Pid,
     ) -> Result<Vec<u8>, DumperError> {
-        // FIXME `fixup_deleted_file` mutations of `mapping` were removed. Will this have a
-        // meaningful effect elsewhere?
-
         let result = if pid == std::process::id().try_into()? {
             let mem_slice = unsafe {
                 std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
