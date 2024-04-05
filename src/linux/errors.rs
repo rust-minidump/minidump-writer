@@ -23,6 +23,11 @@ pub enum InitError {
 
 #[derive(Error, Debug)]
 pub enum MapsReaderError {
+    #[error("Couldn't parse as ELF file")]
+    ELFParsingFailed(#[from] goblin::error::Error),
+    #[error("No soname found (filename: {})", .0.to_string_lossy())]
+    NoSoName(OsString),
+
     // parse_from_line()
     #[error("Map entry malformed: No {0} found")]
     MapEntryMalformed(&'static str),
@@ -40,14 +45,6 @@ pub enum MapsReaderError {
     MmapSanityCheckFailed,
     #[error("Symlink does not match ({0} vs. {1})")]
     SymlinkError(std::path::PathBuf, std::path::PathBuf),
-
-    // fixup_deleted_file()
-    #[error("Couldn't parse as ELF file")]
-    ELFParsingFailed(#[from] goblin::error::Error),
-    #[error("An anonymous mapping has no associated file")]
-    AnonymousMapping,
-    #[error("No soname found (filename: {})", .0.to_string_lossy())]
-    NoSoName(OsString),
 }
 
 #[derive(Debug, Error)]
