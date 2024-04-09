@@ -262,6 +262,8 @@ pub enum BuildIdReaderError {
     Parsing(#[from] goblin::error::Error),
     #[error("no build id notes in program headers")]
     NoProgramHeaderNote,
+    #[error("no string table available to locate note sections")]
+    NoStrTab,
     #[error("no build id note sections")]
     NoSectionNote,
     #[error("the ELF file contains no sections")]

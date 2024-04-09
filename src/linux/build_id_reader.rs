@@ -17,9 +17,13 @@ impl<'a> ModuleMemory for &'a [u8] {
     type Memory = Self;
 
     fn read_module_memory(&self, offset: u64, length: u64) -> std::io::Result<Self::Memory> {
-        Ok(self
-            .get(offset as usize..(offset + length) as usize)
-            .unwrap())
+        self.get(offset as usize..(offset + length) as usize)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!("{} out of bounds", offset + length),
+                )
+            })
     }
 }
 
@@ -132,7 +136,10 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
     /// Read the build id from a notes section.
     pub fn read_from_section(&self) -> Result<Vec<u8>, Error> {
         let section_headers = self.read_section_headers()?;
-        let strtab_section_header = &section_headers[self.header.e_shstrndx as usize];
+
+        let strtab_section_header = section_headers
+            .get(self.header.e_shstrndx as usize)
+            .ok_or(Error::NoStrTab)?;
 
         for header in &section_headers {
             let sh_name = header.sh_name as u64;
