@@ -684,7 +684,11 @@ fn with_deleted_binary() {
         .unwrap();
     let binary_copy = binary_copy_dir.as_ref().join("binary_copy");
 
-    let path: &'static str = std::env!("CARGO_BIN_EXE_test");
+    let path: String = if let Ok(p) = std::env::var("TEST_HELPER") {
+        p
+    } else {
+        std::env!("CARGO_BIN_EXE_test").into()
+    };
 
     std::fs::copy(path, &binary_copy).expect("Failed to copy binary");
     let mem_slice = std::fs::read(&binary_copy).expect("Failed to read binary");

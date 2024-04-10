@@ -118,8 +118,12 @@ fn test_merged_mappings() {
     let page_size = std::num::NonZeroUsize::new(page_size.unwrap() as usize).unwrap();
     let map_size = std::num::NonZeroUsize::new(3 * page_size.get()).unwrap();
 
-    let path: &'static str = std::env!("CARGO_BIN_EXE_test");
-    let file = std::fs::File::open(path).unwrap();
+    let path: String = if let Ok(p) = std::env::var("TEST_HELPER") {
+        p
+    } else {
+        std::env!("CARGO_BIN_EXE_test").into()
+    };
+    let file = std::fs::File::open(&path).unwrap();
 
     // mmap two segments out of the helper binary, one
     // enclosed in the other, but with different protections.
@@ -153,7 +157,7 @@ fn test_merged_mappings() {
 
     spawn_child(
         "merged_mappings",
-        &[path, &format!("{mapped}"), &format!("{map_size}")],
+        &[&path, &format!("{mapped}"), &format!("{map_size}")],
     );
 }
 
