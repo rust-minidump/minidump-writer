@@ -107,16 +107,23 @@ jobs:
   # interacts with this job.
   test-android:
     name: Test android
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.job.on }}
+    strategy:
+      matrix:
+        job:
+          - { target: x86_64-linux-android, arch: x86_64, on: ubuntu-latest }
+          - { target: aarch64-linux-android, arch: arm64-v8a, on: macos-14 }
     env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_HOME: ${{ matrix.job.on == 'ubuntu-latest' && '/usr/local/lib/android/sdk' || '/Users/runner/Library/Android/sdk' }}
+      CARGO_BUILD_TARGET: ${{ matrix.job.target }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: x86_64-linux-android
+          target: ${{ matrix.job.target }}
       - name: Enable KVM
+        if: ${{ matrix.job.on == 'ubuntu-latest' }}
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -124,19 +131,22 @@ jobs:
       # Add the (eventual) NDK toolchain bin directory to PATH so the linker is
       # available to cargo
       - run: echo "$ANDROID_HOME/ndk/26.2.11394342/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+        if: ${{ matrix.job.on == 'ubuntu-latest' }}
+      - run: echo "$ANDROID_HOME/ndk/26.2.11394342/toolchains/llvm/prebuilt/macos-aarch64/bin" >> $GITHUB_PATH
+        if: ${{ matrix.job.on == 'macos-14' }}
       - name: Build/run tests in android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          arch: x86_64
+          arch: ${{ matrix.job.arch }}
           api-level: 30
           ndk: 26.2.11394342
           script: |
             # run adb as root so we can create remote directories
             adb root
             # Copy test helper binary over as a side-effect of running it.
-            cargo run --target x86_64-linux-android --bin test -- nop
+            cargo run --bin test -- nop
             # Build and run tests
-            cargo test --target x86_64-linux-android
+            cargo test
 
   deny-check:
     runs-on: ubuntu-22.04
