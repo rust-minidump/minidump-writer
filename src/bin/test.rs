@@ -268,6 +268,7 @@ mod linux {
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
         match args.len() {
             1 => match args[0].as_ref() {
+                "nop" => Ok(()),
                 "file_id" => test_file_id(),
                 "setup" => test_setup(),
                 "thread_list" => test_thread_list(),

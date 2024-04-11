@@ -9,3 +9,6 @@
 #     "-C",
 #     "link-arg=-Wl,--build-id=sha1",
 # ]
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android30-clang"
+runner = [".cargo/android-runner.sh"]
