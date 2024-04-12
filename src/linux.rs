@@ -5,6 +5,7 @@
 mod android;
 pub mod app_memory;
 pub(crate) mod auxv_reader;
+pub mod build_id_reader;
 pub mod crash_context;
 mod dso_debug;
 mod dumper_cpu_info;

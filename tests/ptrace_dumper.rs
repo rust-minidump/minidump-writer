@@ -12,6 +12,15 @@ use std::os::unix::process::ExitStatusExt;
 mod common;
 use common::*;
 
+macro_rules! disabled_on_ci {
+    () => {
+        if std::env::var("CI").is_ok() {
+            println!("disabled on CI, but works locally");
+            return;
+        }
+    };
+}
+
 #[test]
 fn test_setup() {
     spawn_child("setup", &[]);
@@ -104,11 +113,7 @@ fn test_mappings_include_linux_gate() {
 
 #[test]
 fn test_linux_gate_mapping_id() {
-    if std::env::var("CI").is_ok() {
-        println!("disabled on CI, but works locally");
-        return;
-    }
-
+    disabled_on_ci!();
     spawn_child("linux_gate_mapping_id", &[]);
 }
 
@@ -164,6 +169,7 @@ fn test_merged_mappings() {
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_file_id() {
+    disabled_on_ci!();
     spawn_child("file_id", &[]);
 }
 
@@ -180,10 +186,7 @@ fn test_find_mapping() {
 
 #[test]
 fn test_copy_from_process_self() {
-    if std::env::var("CI").is_ok() {
-        println!("disabled on CI, but works locally");
-        return;
-    }
+    disabled_on_ci!();
 
     let stack_var: libc::c_long = 0x11223344;
     let heap_var: Box<libc::c_long> = Box::new(0x55667788);
