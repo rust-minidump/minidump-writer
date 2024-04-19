@@ -2,9 +2,9 @@
 use crate::linux::android::late_process_mappings;
 use crate::linux::{
     auxv_reader::{AuxvType, ProcfsAuxvIter},
-    build_id_reader,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
+    module_reader,
     thread_info::{Pid, ThreadInfo},
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -557,28 +557,35 @@ impl PtraceDumper {
         })
     }
 
-    pub fn elf_identifier_for_mapping_index(&mut self, idx: usize) -> Result<Vec<u8>, DumperError> {
+    pub fn from_process_memory_for_index<T: module_reader::ReadFromModule>(
+        &self,
+        idx: usize,
+    ) -> Result<T, DumperError> {
         assert!(idx < self.mappings.len());
 
-        Self::elf_identifier_for_mapping(&mut self.mappings[idx], self.pid)
+        self.from_process_memory_for_mapping(&self.mappings[idx])
     }
 
-    pub fn elf_identifier_for_mapping(
-        mapping: &mut MappingInfo,
-        pid: Pid,
-    ) -> Result<Vec<u8>, DumperError> {
-        let result = if pid == std::process::id().try_into()? {
+    pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
+        &self,
+        mapping: &MappingInfo,
+    ) -> Result<T, DumperError> {
+        if std::process::id()
+            .try_into()
+            .map(|v: Pid| v == self.pid)
+            .unwrap_or(false)
+        {
             let mem_slice = unsafe {
                 std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
             };
-            build_id_reader::read_build_id(mem_slice)
+            T::read_from_module(mem_slice)
         } else {
-            struct ProcessReader {
+            struct ProcessModuleMemory {
                 pid: Pid,
                 start_address: u64,
             }
 
-            impl build_id_reader::ModuleMemory for ProcessReader {
+            impl module_reader::ModuleMemory for ProcessModuleMemory {
                 type Memory = Vec<u8>;
 
                 fn read_module_memory(
@@ -596,12 +603,11 @@ impl PtraceDumper {
                 }
             }
 
-            build_id_reader::read_build_id(ProcessReader {
-                pid,
+            T::read_from_module(ProcessModuleMemory {
+                pid: self.pid,
                 start_address: mapping.start_address as u64,
             })
-        };
-
-        result.map_err(|e| e.into())
+        }
+        .map_err(|e| e.into())
     }
 }

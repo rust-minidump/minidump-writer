@@ -1,9 +1,10 @@
-use crate::errors::BuildIdReaderError as Error;
+use crate::errors::ModuleReaderError as Error;
 use crate::minidump_format::GUID;
 use goblin::{
     container::{Container, Ctx, Endian},
     elf,
 };
+use std::ffi::CStr;
 
 const NOTE_SECTION_NAME: &[u8] = b".note.gnu.build-id\0";
 
@@ -61,34 +62,57 @@ fn build_id_from_bytes(data: &[u8]) -> Vec<u8> {
     )
 }
 
-pub fn read_build_id(module_memory: impl ModuleMemory) -> Result<Vec<u8>, Error> {
-    let reader = ElfBuildIdReader::new(module_memory)?;
-    let program_headers = match reader.read_from_program_headers() {
-        Ok(v) => return Ok(v),
-        Err(e) => Box::new(e),
-    };
-    let section = match reader.read_from_section() {
-        Ok(v) => return Ok(v),
-        Err(e) => Box::new(e),
-    };
-    let generated = match reader.generate_from_text() {
-        Ok(v) => return Ok(v),
-        Err(e) => Box::new(e),
-    };
-    Err(Error::Aggregate {
-        program_headers,
-        section,
-        generated,
-    })
+/// Types which can be read from an `impl ModuleMemory`.
+pub trait ReadFromModule: Sized {
+    fn read_from_module(module_memory: impl ModuleMemory) -> Result<Self, Error>;
 }
 
-pub struct ElfBuildIdReader<T> {
+/// The module build id.
+#[derive(Default, Clone, Debug)]
+pub struct BuildId(pub Vec<u8>);
+
+impl ReadFromModule for BuildId {
+    fn read_from_module(module_memory: impl ModuleMemory) -> Result<Self, Error> {
+        let reader = ModuleReader::new(module_memory)?;
+        let program_headers = match reader.build_id_from_program_headers() {
+            Ok(v) => return Ok(BuildId(v)),
+            Err(e) => Box::new(e),
+        };
+        let section = match reader.build_id_from_section() {
+            Ok(v) => return Ok(BuildId(v)),
+            Err(e) => Box::new(e),
+        };
+        let generated = match reader.build_id_generate_from_text() {
+            Ok(v) => return Ok(BuildId(v)),
+            Err(e) => Box::new(e),
+        };
+        Err(Error::NoBuildId {
+            program_headers,
+            section,
+            generated,
+        })
+    }
+}
+
+/// The module SONAME.
+#[derive(Default, Clone, Debug)]
+pub struct SoName(pub String);
+
+impl ReadFromModule for SoName {
+    fn read_from_module(module_memory: impl ModuleMemory) -> Result<Self, Error> {
+        ModuleReader::new(module_memory)
+            .and_then(|r| r.soname())
+            .map(SoName)
+    }
+}
+
+pub struct ModuleReader<T> {
     module_memory: T,
     header: elf::Header,
     context: Ctx,
 }
 
-impl<T: ModuleMemory> ElfBuildIdReader<T> {
+impl<T: ModuleMemory> ModuleReader<T> {
     pub fn new(module_memory: T) -> Result<Self, Error> {
         // We could use `Ctx::default()` (which defaults to the native system), however to be extra
         // permissive we'll just use a 64-bit ("Big") context which would result in the largest
@@ -97,15 +121,57 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
         let header_data = read(&module_memory, 0, header_size as u64)?;
         let header = elf::Elf::parse_header(&header_data)?;
         let context = Ctx::new(header.container()?, header.endianness()?);
-        Ok(ElfBuildIdReader {
+        Ok(ModuleReader {
             module_memory,
             header,
             context,
         })
     }
 
+    pub fn soname(&self) -> Result<String, Error> {
+        let section_headers = self.read_section_headers()?;
+
+        let strtab_section_header = section_headers
+            .get(self.header.e_shstrndx as usize)
+            .ok_or(Error::NoStrTab)?;
+
+        let dynamic_section_header = section_headers
+            .iter()
+            .find(|h| h.sh_type == elf::section_header::SHT_DYNAMIC)
+            .ok_or(Error::NoDynamicSection)?;
+
+        let dynamic_section: &[u8] = &read(
+            &self.module_memory,
+            dynamic_section_header.sh_offset,
+            dynamic_section_header.sh_size,
+        )?;
+
+        let mut offset = 0;
+        loop {
+            use scroll::Pread;
+            let dyn_: elf::dynamic::Dyn = dynamic_section.gread_with(&mut offset, self.context)?;
+            if dyn_.d_tag == elf::dynamic::DT_SONAME {
+                let strtab_offset = dyn_.d_val;
+                if strtab_offset < strtab_section_header.sh_size {
+                    let name = read(
+                        &self.module_memory,
+                        strtab_section_header.sh_offset + strtab_offset,
+                        strtab_section_header.sh_size - strtab_offset,
+                    )?;
+                    return CStr::from_bytes_until_nul(&name)
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .map_err(|_| Error::StrTabNoNulByte);
+                }
+            }
+            if dyn_.d_tag == elf::dynamic::DT_NULL {
+                break;
+            }
+        }
+        Err(Error::NoSoNameEntry)
+    }
+
     /// Read the build id from a program header note.
-    pub fn read_from_program_headers(&self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_from_program_headers(&self) -> Result<Vec<u8>, Error> {
         if self.header.e_phoff == 0 {
             return Err(Error::NoProgramHeaderNote);
         }
@@ -134,7 +200,7 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
     }
 
     /// Read the build id from a notes section.
-    pub fn read_from_section(&self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_from_section(&self) -> Result<Vec<u8>, Error> {
         let section_headers = self.read_section_headers()?;
 
         let strtab_section_header = section_headers
@@ -173,7 +239,7 @@ impl<T: ModuleMemory> ElfBuildIdReader<T> {
     }
 
     /// Generate a build id by hashing the first page of the text section.
-    pub fn generate_from_text(&self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_generate_from_text(&self) -> Result<Vec<u8>, Error> {
         let Some(text_header) = self
             .read_section_headers()?
             .into_iter()
@@ -288,9 +354,9 @@ mod test {
     ];
 
     #[test]
-    fn program_headers() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
-        let id = reader.read_from_program_headers().unwrap();
+    fn build_id_program_headers() {
+        let reader = ModuleReader::new(TINY_ELF).unwrap();
+        let id = reader.build_id_from_program_headers().unwrap();
         assert_eq!(
             id,
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
@@ -298,9 +364,9 @@ mod test {
     }
 
     #[test]
-    fn section() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
-        let id = reader.read_from_section().unwrap();
+    fn build_id_section() {
+        let reader = ModuleReader::new(TINY_ELF).unwrap();
+        let id = reader.build_id_from_section().unwrap();
         assert_eq!(
             id,
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
@@ -308,9 +374,9 @@ mod test {
     }
 
     #[test]
-    fn text_hash() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
-        let id = reader.generate_from_text().unwrap();
+    fn build_id_text_hash() {
+        let reader = ModuleReader::new(TINY_ELF).unwrap();
+        let id = reader.build_id_generate_from_text().unwrap();
         assert_eq!(
             id,
             vec![0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0]

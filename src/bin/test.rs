@@ -9,6 +9,7 @@ mod linux {
     use super::*;
     use minidump_writer::{
         minidump_writer::STOP_TIMEOUT,
+        module_reader,
         ptrace_dumper::{PtraceDumper, AT_SYSINFO_EHDR},
         LINUX_GATE_LIBRARY_NAME,
     };
@@ -100,7 +101,7 @@ mod linux {
             }
         }
         let idx = found_exe.unwrap();
-        let id = dumper.elf_identifier_for_mapping_index(idx)?;
+        let module_reader::BuildId(id) = dumper.from_process_memory_for_index(idx)?;
         dumper.resume_threads()?;
         assert!(!id.is_empty());
         assert!(id.iter().any(|&x| x > 0));
@@ -133,11 +134,12 @@ mod linux {
         let ppid = getppid().as_raw();
         let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
         let mut found_linux_gate = false;
-        for mut mapping in dumper.mappings.clone() {
+        for mapping in dumper.mappings.clone() {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
                 found_linux_gate = true;
                 dumper.suspend_threads()?;
-                let id = PtraceDumper::elf_identifier_for_mapping(&mut mapping, ppid)?;
+                let module_reader::BuildId(id) =
+                    dumper.from_process_memory_for_mapping(&mapping)?;
                 test!(!id.is_empty(), "id-vec is empty")?;
                 test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
                 dumper.resume_threads()?;
