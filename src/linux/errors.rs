@@ -281,6 +281,8 @@ pub enum ModuleReaderError {
         section: Box<Self>,
         generated: Box<Self>,
     },
+    #[error("no dynamic string table section")]
+    NoDynStrSection,
     #[error("a string in the strtab did not have a terminating nul byte")]
     StrTabNoNulByte,
     #[error("no SONAME found in dynamic linking information")]
