@@ -1,8 +1,6 @@
-use crate::auxv::AuxvError;
-use crate::dir_section::FileWriterError;
-use crate::maps_reader::MappingInfo;
-use crate::mem_writer::MemoryWriterError;
-use crate::thread_info::Pid;
+use crate::{
+    dir_section::FileWriterError, maps_reader::MappingInfo, mem_writer::MemoryWriterError, Pid,
+};
 use goblin;
 use nix::errno::Errno;
 use std::ffi::OsString;
@@ -87,6 +85,16 @@ pub enum AndroidError {
 }
 
 #[derive(Debug, Error)]
+#[error("Copy from process {child} failed (source {src}, offset: {offset}, length: {length})")]
+pub struct CopyFromProcessError {
+    pub child: Pid,
+    pub src: usize,
+    pub offset: usize,
+    pub length: usize,
+    pub source: nix::Error,
+}
+
+#[derive(Debug, Error)]
 pub enum DumperError {
     #[error("Failed to get PAGE_SIZE from system")]
     SysConfError(#[from] nix::Error),
@@ -96,8 +104,8 @@ pub enum DumperError {
     PtraceAttachError(Pid, #[source] nix::Error),
     #[error("nix::ptrace::detach(Pid={0}) failed")]
     PtraceDetachError(Pid, #[source] nix::Error),
-    #[error("Copy from process {0} failed (source {1}, offset: {2}, length: {3})")]
-    CopyFromProcessError(Pid, usize, usize, usize, #[source] nix::Error),
+    #[error(transparent)]
+    CopyFromProcessError(#[from] CopyFromProcessError),
     #[error("Skipped thread {0} due to it being part of the seccomp sandbox's trusted code")]
     DetachSkippedThread(Pid),
     #[error("No threads left to suspend out of {0}")]
@@ -249,7 +257,7 @@ pub enum ModuleReaderError {
         offset: u64,
         length: u64,
         #[source]
-        error: std::io::Error,
+        error: nix::Error,
     },
     #[error("failed to parse ELF memory: {0}")]
     Parsing(#[from] goblin::error::Error),

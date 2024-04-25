@@ -11,7 +11,7 @@ use minidump_writer::{
     minidump_writer::MinidumpWriter,
     module_reader::{BuildId, ReadFromModule},
     ptrace_dumper::PtraceDumper,
-    thread_info::Pid,
+    Pid,
 };
 use nix::{errno::Errno, sys::signal::Signal};
 use procfs_core::process::MMPermissions;
@@ -697,7 +697,7 @@ fn with_deleted_binary() {
     let mut child = Command::new(&binary_copy)
         .env("RUST_BACKTRACE", "1")
         .arg("spawn_and_wait")
-        .arg(format!("{}", num_of_threads))
+        .arg(num_of_threads.to_string())
         .stdout(Stdio::piped())
         .spawn()
         .expect("failed to execute child");

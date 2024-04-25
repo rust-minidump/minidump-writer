@@ -31,6 +31,7 @@ nix = { version = "0.28", default-features = false, features = [
     "process",
     "ptrace",
     "signal",
+    "uio",
     "user",
 ] }
 # Used for parsing procfs info.

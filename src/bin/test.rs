@@ -52,7 +52,8 @@ mod linux {
         let ppid = getppid().as_raw();
         let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         dumper.suspend_threads()?;
-        let stack_res = PtraceDumper::copy_from_process(ppid, stack_var as *mut libc::c_void, 1)?;
+        let stack_res =
+            PtraceDumper::copy_from_process(ppid, stack_var, std::mem::size_of::<usize>())?;
 
         let expected_stack: libc::c_long = 0x11223344;
         test!(
@@ -60,7 +61,8 @@ mod linux {
             "stack var not correct"
         )?;
 
-        let heap_res = PtraceDumper::copy_from_process(ppid, heap_var as *mut libc::c_void, 1)?;
+        let heap_res =
+            PtraceDumper::copy_from_process(ppid, heap_var, std::mem::size_of::<usize>())?;
         let expected_heap: libc::c_long = 0x55667788;
         test!(
             heap_res == expected_heap.to_ne_bytes(),
