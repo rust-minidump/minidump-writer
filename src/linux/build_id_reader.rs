@@ -96,7 +96,7 @@ pub fn read_build_id<'buf>(proc_reader: impl Into<ProcessMemory<'buf>>) -> Resul
         Ok(v) => return Ok(v),
         Err(e) => Box::new(e),
     };
-    let section = match reader.read_from_section() {
+    let section = match reader.read_build_id_note() {
         Ok(v) => return Ok(v),
         Err(e) => Box::new(e),
     };
@@ -162,9 +162,16 @@ impl<'buf> ElfBuildIdReader<'buf> {
     }
 
     /// Read the build id from a notes section.
-    pub fn read_from_section(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn read_build_id_note(&mut self) -> Result<Vec<u8>, Error> {
+        let notes_index = self.header.e_shstrndx as usize;
+        if notes_index == 0 {
+            return Err(Error::NoSectionNote);
+        }
+
         let section_headers = self.read_section_headers()?;
-        let strtab_section_header = &section_headers[self.header.e_shstrndx as usize];
+        let Some(strtab_section_header) = section_headers.get(notes_index) else {
+            return Err(Error::NoSectionNote);
+        };
 
         for header in &section_headers {
             let sh_name = header.sh_name as u64;
@@ -217,16 +224,48 @@ impl<'buf> ElfBuildIdReader<'buf> {
             return Err(Error::NoSections);
         }
 
-        let section_headers_data = self.memory.read(
+        let shd = self.memory.read(
             self.header.e_shoff,
             self.header.e_shentsize as u64 * self.header.e_shnum as u64,
         )?;
-        let section_headers = elf::SectionHeader::parse(
-            &section_headers_data,
-            0,
-            self.header.e_shnum as usize,
-            self.context,
-        )?;
+
+        use scroll::Pread as _;
+
+        let mut offset = 0;
+        let empty_sh = shd.gread_with::<elf::SectionHeader>(&mut offset, self.context)?;
+
+        // If the number of entries in the section header table is
+        // larger than or equal to SHN_LORESERVE (0xff00), e_shnum
+        // holds the value zero and the real number of entries in the
+        // section header table is held in the sh_size member of the
+        // initial entry in section header table.  Otherwise, the
+        // sh_size member of the initial entry in the section header
+        // table holds the value zero.
+        let count = if self.header.e_shnum == 0 {
+            empty_sh.sh_size as usize
+        } else {
+            self.header.e_shnum as usize
+        };
+
+        // Sanity check to avoid OOM
+        if count > shd.len() / elf::SectionHeader::size(self.context) {
+            return Err(goblin::error::Error::BufferTooShort(count, "section headers").into());
+        }
+        let mut section_headers = Vec::with_capacity(count);
+        section_headers.push(empty_sh);
+        for _ in 1..count {
+            let shdr = shd.gread_with(&mut offset, self.context)?;
+            section_headers.push(shdr);
+        }
+
+        // Waiting on a release of goblin >0.8.0
+        // See: https://github.com/m4b/goblin/pull/391
+        // let section_headers = elf::SectionHeader::parse(
+        //     &section_headers_data,
+        //     0,
+        //     self.header.e_shnum as usize,
+        //     self.context,
+        // )?;
         Ok(section_headers)
     }
 
@@ -308,31 +347,25 @@ mod test {
 
     #[test]
     fn program_headers() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
+        let mut reader = ElfBuildIdReader::new(TINY_ELF.into()).unwrap();
         let id = reader.read_from_program_headers().unwrap();
-        assert_eq!(
-            id,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        );
+        assert_eq!(id, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     }
 
     #[test]
     fn section() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
-        let id = reader.read_from_section().unwrap();
-        assert_eq!(
-            id,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        );
+        let mut reader = ElfBuildIdReader::new(TINY_ELF.into()).unwrap();
+        let id = reader.read_build_id_note().unwrap();
+        assert_eq!(id, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     }
 
     #[test]
     fn text_hash() {
-        let reader = ElfBuildIdReader::new(TINY_ELF).unwrap();
+        let mut reader = ElfBuildIdReader::new(TINY_ELF.into()).unwrap();
         let id = reader.generate_from_text().unwrap();
         assert_eq!(
             id,
-            vec![0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            &[0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         );
     }
 }
