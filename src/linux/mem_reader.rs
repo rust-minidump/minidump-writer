@@ -165,7 +165,7 @@ impl MemReader {
         let mut offset = 0;
         let mut chunks = dst.chunks_exact_mut(std::mem::size_of::<usize>());
 
-        while let Some(chunk) = chunks.next() {
+        for chunk in chunks.by_ref() {
             let word = nix::sys::ptrace::read(pid, (src + offset) as *mut std::ffi::c_void)
                 .map_err(|err| (err, offset))?;
             chunk.copy_from_slice(&word.to_ne_bytes());
@@ -174,7 +174,7 @@ impl MemReader {
 
         // I don't think there would ever be a case where we would not read on word boundaries, but just in case...
         let last = chunks.into_remainder();
-        if last.len() > 0 {
+        if !last.is_empty() {
             let word = nix::sys::ptrace::read(pid, (src + offset) as *mut std::ffi::c_void)
                 .map_err(|err| (err, offset))?;
             last.copy_from_slice(&word.to_ne_bytes()[..last.len()]);
