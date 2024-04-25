@@ -138,24 +138,20 @@ impl MemReader {
             base: src,
             len: dst.len(),
         }];
-        dbg!(nix::sys::uio::process_vm_readv(
-            pid,
-            &mut [std::io::IoSliceMut::new(dst)],
-            remote
-        ))
+        nix::sys::uio::process_vm_readv(pid, &mut [std::io::IoSliceMut::new(dst)], remote)
     }
 
     #[inline]
     fn file(file: &mut std::fs::File, src: usize, dst: &mut [u8]) -> Result<usize, nix::Error> {
         use std::os::unix::fs::FileExt;
 
-        dbg!(file.read_exact_at(dst, src as u64).map_err(|err| {
+        file.read_exact_at(dst, src as u64).map_err(|err| {
             if let Some(os) = err.raw_os_error() {
                 nix::Error::from_raw(os)
             } else {
                 nix::Error::E2BIG /* EOF */
             }
-        }))?;
+        })?;
 
         Ok(dst.len())
     }
