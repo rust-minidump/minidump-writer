@@ -191,8 +191,7 @@ impl PtraceDumper {
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads
-            .retain(|x| dbg!(Self::suspend_thread(x.tid)).is_ok());
+        self.threads.retain(|x| Self::suspend_thread(x.tid).is_ok());
 
         if self.threads.is_empty() {
             Err(DumperError::SuspendNoThreadsLeft(threads_count))
