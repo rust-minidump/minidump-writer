@@ -5,7 +5,8 @@ use crate::linux::{
     build_id_reader,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
-    thread_info::{Pid, ThreadInfo},
+    thread_info::ThreadInfo,
+    Pid,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::thread_info;
@@ -19,7 +20,6 @@ use procfs_core::{
 };
 use std::{
     collections::HashMap,
-    ffi::c_void,
     io::BufReader,
     path,
     result::Result,
@@ -92,7 +92,7 @@ impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
     pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
-        let mut dumper = PtraceDumper {
+        let mut dumper = Self {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
@@ -127,26 +127,6 @@ impl PtraceDumper {
             late_process_mappings(self.pid, &mut self.mappings)?;
         }
         Ok(())
-    }
-
-    /// Copies content of |num_of_bytes| bytes from a given process |child|, starting from |src|.
-    /// This method uses ptrace to extract the content from the target process.
-    pub fn copy_from_process(
-        child: Pid,
-        src: *mut c_void,
-        num_of_bytes: usize,
-    ) -> Result<Vec<u8>, DumperError> {
-        use DumperError::CopyFromProcessError as CFPE;
-        let pid = nix::unistd::Pid::from_raw(child);
-        let mut res = Vec::new();
-        let mut idx = 0usize;
-        while idx < num_of_bytes {
-            let word = ptrace::read(pid, (src as usize + idx) as *mut c_void)
-                .map_err(|e| CFPE(child, src as usize, idx, num_of_bytes, e))?;
-            res.append(&mut word.to_ne_bytes().to_vec());
-            idx += std::mem::size_of::<libc::c_long>();
-        }
-        Ok(res)
     }
 
     /// Suspends a thread by attaching to it.
@@ -208,7 +188,8 @@ impl PtraceDumper {
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(|x| Self::suspend_thread(x.tid).is_ok());
+        self.threads
+            .retain(|x| dbg!(Self::suspend_thread(x.tid)).is_ok());
 
         if self.threads.is_empty() {
             Err(DumperError::SuspendNoThreadsLeft(threads_count))
@@ -567,41 +548,8 @@ impl PtraceDumper {
         mapping: &mut MappingInfo,
         pid: Pid,
     ) -> Result<Vec<u8>, DumperError> {
-        let result = if pid == std::process::id().try_into()? {
-            let mem_slice = unsafe {
-                std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
-            };
-            build_id_reader::read_build_id(mem_slice)
-        } else {
-            struct ProcessReader {
-                pid: Pid,
-                start_address: u64,
-            }
-
-            impl build_id_reader::ModuleMemory for ProcessReader {
-                type Memory = Vec<u8>;
-
-                fn read_module_memory(
-                    &self,
-                    offset: u64,
-                    length: u64,
-                ) -> std::io::Result<Self::Memory> {
-                    // Leave bounds checks to `copy_from_process`
-                    PtraceDumper::copy_from_process(
-                        self.pid,
-                        (self.start_address + offset) as _,
-                        length as usize,
-                    )
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
-            }
-
-            build_id_reader::read_build_id(ProcessReader {
-                pid,
-                start_address: mapping.start_address as u64,
-            })
-        };
-
-        result.map_err(|e| e.into())
+        Ok(build_id_reader::read_build_id(
+            build_id_reader::ProcessReader::new(pid, mapping.start_address),
+        )?)
     }
 }
