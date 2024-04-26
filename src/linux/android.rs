@@ -3,34 +3,28 @@ use crate::maps_reader::MappingInfo;
 use crate::ptrace_dumper::PtraceDumper;
 use crate::Pid;
 use goblin::elf;
-#[cfg(target_pointer_width = "32")]
-use goblin::elf::dynamic::dyn32::{Dyn, SIZEOF_DYN};
-#[cfg(target_pointer_width = "64")]
-use goblin::elf::dynamic::dyn64::{Dyn, SIZEOF_DYN};
-#[cfg(target_pointer_width = "32")]
-use goblin::elf::header::header32 as elf_header;
-#[cfg(target_pointer_width = "64")]
-use goblin::elf::header::header64 as elf_header;
-#[cfg(target_pointer_width = "32")]
-use goblin::elf::program_header::program_header32::ProgramHeader;
-#[cfg(target_pointer_width = "64")]
-use goblin::elf::program_header::program_header64::ProgramHeader;
+
+cfg_if::cfg_if! {
+    if #[cfg(target_pointer_width = "32")] {
+        use elf::dynamic::dyn32::{Dyn, SIZEOF_DYN};
+        use elf::header::header32 as elf_header;
+        use elf::program_header::program_header32::ProgramHeader;
+
+        const DT_ANDROID_REL: u32 = (elf::dynamic::DT_LOOS + 2) as u32;
+        const DT_ANDROID_RELA: u32 = (elf::dynamic::DT_LOOS + 4) as u32;
+    } else if #[cfg(target_pointer_width = "64")] {
+        use elf::dynamic::dyn64::{Dyn, SIZEOF_DYN};
+        use elf::header::header64 as elf_header;
+        use elf::program_header::program_header64::ProgramHeader;
+
+        const DT_ANDROID_REL: u64 = elf::dynamic::DT_LOOS + 2;
+        const DT_ANDROID_RELA: u64 = elf::dynamic::DT_LOOS + 4;
+    } else {
+        compile_error!("invalid pointer width");
+    }
+}
 
 type Result<T> = std::result::Result<T, AndroidError>;
-
-// From /usr/include/elf.h of the android SDK
-// #define DT_ANDROID_REL (DT_LOOS + 2)
-// #define DT_ANDROID_RELSZ (DT_LOOS + 3)
-// #define DT_ANDROID_RELA (DT_LOOS + 4)
-// #define DT_ANDROID_RELASZ (DT_LOOS + 5)
-#[cfg(target_pointer_width = "64")]
-const DT_ANDROID_REL: u64 = elf::dynamic::DT_LOOS + 2;
-#[cfg(target_pointer_width = "64")]
-const DT_ANDROID_RELA: u64 = elf::dynamic::DT_LOOS + 4;
-#[cfg(target_pointer_width = "32")]
-const DT_ANDROID_REL: u32 = (elf::dynamic::DT_LOOS + 2) as u32;
-#[cfg(target_pointer_width = "32")]
-const DT_ANDROID_RELA: u32 = (elf::dynamic::DT_LOOS + 4) as u32;
 
 struct DynVaddresses {
     min_vaddr: usize,
