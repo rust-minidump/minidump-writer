@@ -578,7 +578,10 @@ impl PtraceDumper {
             let mem_slice = unsafe {
                 std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
             };
-            T::read_from_module(mem_slice)
+            T::read_from_module(module_reader::ModuleMemoryAtAddress(
+                mem_slice,
+                mapping.start_address as u64,
+            ))
         } else {
             struct ProcessModuleMemory {
                 pid: Pid,
@@ -600,6 +603,10 @@ impl PtraceDumper {
                         length as usize,
                     )
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                }
+
+                fn base_address(&self) -> Option<u64> {
+                    Some(self.start_address)
                 }
             }
 

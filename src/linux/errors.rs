@@ -266,9 +266,11 @@ pub enum ModuleReaderError {
     NoStrTab,
     #[error("no build id note sections")]
     NoSectionNote,
-    #[error("the ELF file contains no sections")]
+    #[error("the ELF data contains no program headers")]
+    NoProgramHeaders,
+    #[error("the ELF data contains no sections")]
     NoSections,
-    #[error("the ELF file does not have a .text section from which to generate a build id")]
+    #[error("the ELF data does not have a .text section from which to generate a build id")]
     NoTextSection,
     #[error(
         "failed to calculate build id\n\
@@ -289,4 +291,13 @@ pub enum ModuleReaderError {
     NoSoNameEntry,
     #[error("no dynamic linking information section")]
     NoDynamicSection,
+    #[error(
+        "failed to retrieve soname\n\
+    ... from program headers: {program_headers}\n\
+    ... from sections: {section}"
+    )]
+    NoSoName {
+        program_headers: Box<Self>,
+        section: Box<Self>,
+    },
 }
