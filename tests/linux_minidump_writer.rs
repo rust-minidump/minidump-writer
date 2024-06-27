@@ -5,11 +5,11 @@ use minidump::*;
 use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
 use minidump_writer::{
     app_memory::AppMemory,
-    build_id_reader::read_build_id,
     crash_context::CrashContext,
     errors::*,
     maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
     minidump_writer::MinidumpWriter,
+    module_reader::{BuildId, ReadFromModule},
     ptrace_dumper::PtraceDumper,
     thread_info::Pid,
 };
@@ -705,7 +705,8 @@ fn with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let mut build_id = read_build_id(mem_slice.as_slice()).expect("Failed to get build_id");
+    let BuildId(mut build_id) =
+        BuildId::read_from_module(mem_slice.as_slice()).expect("Failed to get build_id");
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 

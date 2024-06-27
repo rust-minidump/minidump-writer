@@ -256,14 +256,13 @@ impl MappingInfo {
     /// Find the shared object name (SONAME) by examining the ELF information
     /// for the mapping.
     fn so_name(&self) -> Result<String> {
+        use super::module_reader::{ReadFromModule, SoName};
+
         let mapped_file = MappingInfo::get_mmap(&self.name, self.offset)?;
-
-        let elf_obj = elf::Elf::parse(&mapped_file)?;
-
-        let soname = elf_obj.soname.ok_or_else(|| {
-            MapsReaderError::NoSoName(self.name.clone().unwrap_or_else(|| "None".into()))
-        })?;
-        Ok(soname.to_string())
+        Ok(SoName::read_from_module(&*mapped_file)
+            .map_err(|e| MapsReaderError::NoSoName(self.name.clone().unwrap_or_default(), e))?
+            .0
+            .to_string())
     }
 
     #[inline]
@@ -273,6 +272,7 @@ impl MappingInfo {
 
     pub fn get_mapping_effective_path_name_and_version(
         &self,
+        soname: Option<String>,
     ) -> Result<(PathBuf, String, Option<SoVersion>)> {
         let mut file_path = PathBuf::from(self.name.clone().unwrap_or_default());
 
@@ -282,7 +282,7 @@ impl MappingInfo {
         // filesystem name of the module.
 
         // Just use the filesystem name if no SONAME is present.
-        let Ok(file_name) = self.so_name() else {
+        let Some(file_name) = soname.or_else(|| self.so_name().ok()) else {
             //   file_path := /path/to/libname.so
             //   file_name := libname.so
             let file_name = file_path
@@ -689,7 +689,7 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         assert_eq!(mappings.len(), 1);
 
         let (file_path, file_name, _version) = mappings[0]
-            .get_mapping_effective_path_name_and_version()
+            .get_mapping_effective_path_name_and_version(None)
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
         assert_eq!(file_path, PathBuf::from("/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"));

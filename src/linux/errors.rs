@@ -26,7 +26,7 @@ pub enum MapsReaderError {
     #[error("Couldn't parse as ELF file")]
     ELFParsingFailed(#[from] goblin::error::Error),
     #[error("No soname found (filename: {})", .0.to_string_lossy())]
-    NoSoName(OsString),
+    NoSoName(OsString, #[source] ModuleReaderError),
 
     // parse_from_line()
     #[error("Map entry malformed: No {0} found")]
@@ -115,8 +115,8 @@ pub enum DumperError {
     TryFromSliceError(#[from] std::array::TryFromSliceError),
     #[error("Couldn't parse as ELF file")]
     ELFParsingFailed(#[from] goblin::error::Error),
-    #[error("No build-id found")]
-    NoBuildIDFound(#[from] BuildIdReaderError),
+    #[error("Could not read value from module")]
+    ModuleReaderError(#[from] ModuleReaderError),
     #[error("Not safe to open mapping: {}", .0.to_string_lossy())]
     NotSafeToOpenMapping(OsString),
     #[error("Failed integer conversion")]
@@ -250,7 +250,7 @@ pub enum WriterError {
 }
 
 #[derive(Debug, Error)]
-pub enum BuildIdReaderError {
+pub enum ModuleReaderError {
     #[error("failed to read module memory: {length} bytes at {offset}: {error}")]
     ReadModuleMemory {
         offset: u64,
@@ -266,9 +266,11 @@ pub enum BuildIdReaderError {
     NoStrTab,
     #[error("no build id note sections")]
     NoSectionNote,
-    #[error("the ELF file contains no sections")]
+    #[error("the ELF data contains no program headers")]
+    NoProgramHeaders,
+    #[error("the ELF data contains no sections")]
     NoSections,
-    #[error("the ELF file does not have a .text section from which to generate a build id")]
+    #[error("the ELF data does not have a .text section from which to generate a build id")]
     NoTextSection,
     #[error(
         "failed to calculate build id\n\
@@ -276,9 +278,26 @@ pub enum BuildIdReaderError {
     ... from sections: {section}\n\
     ... from the text section: {section}"
     )]
-    Aggregate {
+    NoBuildId {
         program_headers: Box<Self>,
         section: Box<Self>,
         generated: Box<Self>,
+    },
+    #[error("no dynamic string table section")]
+    NoDynStrSection,
+    #[error("a string in the strtab did not have a terminating nul byte")]
+    StrTabNoNulByte,
+    #[error("no SONAME found in dynamic linking information")]
+    NoSoNameEntry,
+    #[error("no dynamic linking information section")]
+    NoDynamicSection,
+    #[error(
+        "failed to retrieve soname\n\
+    ... from program headers: {program_headers}\n\
+    ... from sections: {section}"
+    )]
+    NoSoName {
+        program_headers: Box<Self>,
+        section: Box<Self>,
     },
 }
