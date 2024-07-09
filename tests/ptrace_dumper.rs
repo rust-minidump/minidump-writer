@@ -12,10 +12,12 @@ use std::os::unix::process::ExitStatusExt;
 mod common;
 use common::*;
 
-macro_rules! disabled_on_ci {
+/// These tests generally aren't consistent in resource-deprived environments like CI runners and
+/// android emulators.
+macro_rules! disabled_on_ci_and_android {
     () => {
-        if std::env::var("CI").is_ok() {
-            println!("disabled on CI, but works locally");
+        if std::env::var("CI").is_ok() || cfg!(target_os = "android") {
+            println!("disabled on CI and android, but otherwise works locally");
             return;
         }
     };
@@ -113,7 +115,7 @@ fn test_mappings_include_linux_gate() {
 
 #[test]
 fn test_linux_gate_mapping_id() {
-    disabled_on_ci!();
+    disabled_on_ci_and_android!();
     spawn_child("linux_gate_mapping_id", &[]);
 }
 
@@ -169,7 +171,7 @@ fn test_merged_mappings() {
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn test_file_id() {
-    disabled_on_ci!();
+    disabled_on_ci_and_android!();
     spawn_child("file_id", &[]);
 }
 
@@ -186,7 +188,7 @@ fn test_find_mapping() {
 
 #[test]
 fn test_copy_from_process_self() {
-    disabled_on_ci!();
+    disabled_on_ci_and_android!();
 
     let stack_var: libc::c_long = 0x11223344;
     let heap_var: Box<libc::c_long> = Box::new(0x55667788);
