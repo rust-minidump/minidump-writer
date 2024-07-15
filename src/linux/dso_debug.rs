@@ -1,5 +1,5 @@
 use crate::{
-    linux::{auxv_reader::AuxvType, errors::SectionDsoDebugError, ptrace_dumper::PtraceDumper},
+    linux::{auxv::AuxvType, errors::SectionDsoDebugError, ptrace_dumper::PtraceDumper},
     mem_writer::{write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter},
     minidump_format::*,
 };

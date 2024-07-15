@@ -4,7 +4,7 @@
 #[cfg(target_os = "android")]
 mod android;
 pub mod app_memory;
-pub(crate) mod auxv_reader;
+pub(crate) mod auxv;
 pub mod crash_context;
 mod dso_debug;
 mod dumper_cpu_info;

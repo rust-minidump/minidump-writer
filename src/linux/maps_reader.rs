@@ -1,4 +1,4 @@
-use crate::auxv_reader::AuxvType;
+use crate::auxv::AuxvType;
 use crate::errors::MapsReaderError;
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;

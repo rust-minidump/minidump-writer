@@ -1,7 +1,7 @@
 #[cfg(target_os = "android")]
 use crate::linux::android::late_process_mappings;
 use crate::linux::{
-    auxv_reader::{AuxvType, ProcfsAuxvIter},
+    auxv::AuxvType,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
     module_reader,
@@ -20,7 +20,6 @@ use procfs_core::{
 use std::{
     collections::HashMap,
     ffi::c_void,
-    io::BufReader,
     path,
     result::Result,
     time::{Duration, Instant},
@@ -110,7 +109,7 @@ impl PtraceDumper {
         if let Err(e) = self.stop_process(stop_timeout) {
             log::warn!("failed to stop process {}: {e}", self.pid);
         }
-        self.read_auxv()?;
+        self.auxv = super::auxv::read_auxv(self.pid).map_err(InitError::ReadAuxvFailed)?;
         self.enumerate_threads()?;
         self.enumerate_mappings()?;
         self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
@@ -293,25 +292,6 @@ impl PtraceDumper {
                 .for_each(|(tid, name)| self.threads.push(Thread { tid, name }));
         }
         Ok(())
-    }
-
-    fn read_auxv(&mut self) -> Result<(), InitError> {
-        let filename = format!("/proc/{}/auxv", self.pid);
-        let auxv_path = path::PathBuf::from(&filename);
-        let auxv_file =
-            std::fs::File::open(auxv_path).map_err(|e| InitError::IOError(filename, e))?;
-        let input = BufReader::new(auxv_file);
-        let reader = ProcfsAuxvIter::new(input);
-        self.auxv = reader
-            .filter_map(Result::ok)
-            .map(|x| (x.key, x.value))
-            .collect();
-
-        if self.auxv.is_empty() {
-            Err(InitError::NoAuxvEntryFound(self.pid))
-        } else {
-            Ok(())
-        }
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
