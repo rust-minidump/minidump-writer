@@ -8,9 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 mod linux {
     use super::*;
     use minidump_writer::{
-        minidump_writer::STOP_TIMEOUT,
-        module_reader,
-        ptrace_dumper::{PtraceDumper, AT_SYSINFO_EHDR},
+        minidump_writer::STOP_TIMEOUT, module_reader, ptrace_dumper::PtraceDumper,
         LINUX_GATE_LIBRARY_NAME,
     };
     use nix::{
@@ -153,7 +151,7 @@ mod linux {
     fn test_mappings_include_linux_gate() -> Result<()> {
         let ppid = getppid().as_raw();
         let dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
-        let linux_gate_loc = dumper.auxv[&AT_SYSINFO_EHDR];
+        let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
         test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
         let mut found_linux_gate = false;
         for mapping in &dumper.mappings {

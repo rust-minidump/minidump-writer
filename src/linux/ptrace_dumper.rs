@@ -1,7 +1,7 @@
 #[cfg(target_os = "android")]
 use crate::linux::android::late_process_mappings;
 use crate::linux::{
-    auxv::AuxvType,
+    auxv::AuxvDumpInfo,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
     module_reader,
@@ -18,7 +18,6 @@ use procfs_core::{
     FromRead, ProcError,
 };
 use std::{
-    collections::HashMap,
     ffi::c_void,
     path,
     result::Result,
@@ -36,7 +35,7 @@ pub struct PtraceDumper {
     pub pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Thread>,
-    pub auxv: HashMap<AuxvType, AuxvType>,
+    pub auxv: AuxvDumpInfo,
     pub mappings: Vec<MappingInfo>,
     pub page_size: usize,
 }
@@ -95,7 +94,7 @@ impl PtraceDumper {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
-            auxv: HashMap::new(),
+            auxv: AuxvDumpInfo::default(),
             mappings: Vec::new(),
             page_size: 0,
         };
@@ -302,21 +301,11 @@ impl PtraceDumper {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        let linux_gate_loc = *self.auxv.get(&AT_SYSINFO_EHDR).unwrap_or(&0);
+        let linux_gate_loc = self.auxv.get_linux_gate_address().unwrap_or_default();
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
-        let at_entry;
-        #[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
-        {
-            at_entry = 9;
-        }
-        #[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
-        {
-            at_entry = libc::AT_ENTRY;
-        }
-
-        let entry_point_loc = *self.auxv.get(&at_entry).unwrap_or(&0);
+        let entry_point_loc = self.auxv.get_entry_address().unwrap_or_default();
         let filename = format!("/proc/{}/maps", self.pid);
         let errmap = |e| InitError::IOError(filename.clone(), e);
         let maps_path = path::PathBuf::from(&filename);

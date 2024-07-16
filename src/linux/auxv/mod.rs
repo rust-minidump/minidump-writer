@@ -14,6 +14,23 @@ pub type AuxvType = u32;
 #[cfg(target_pointer_width = "64")]
 pub type AuxvType = u64;
 
+#[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
+mod consts {
+    use super::AuxvType;
+    pub const AT_PHDR: AuxvType = 3;
+    pub const AT_PHNUM: AuxvType = 5;
+    pub const AT_ENTRY: AuxvType = 9;
+    pub const AT_SYSINFO_EHDR: AuxvType = 33;
+}
+#[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
+mod consts {
+    use super::AuxvType;
+    pub const AT_PHDR: AuxvType = libc::AT_PHDR;
+    pub const AT_PHNUM: AuxvType = libc::AT_PHNUM;
+    pub const AT_ENTRY: AuxvType = libc::AT_ENTRY;
+    pub const AT_SYSINFO_EHDR: AuxvType = libc::AT_SYSINFO_EHDR;
+}
+
 /// An auxv key-value pair.
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuxvPair {
@@ -21,7 +38,27 @@ pub struct AuxvPair {
     pub value: AuxvType,
 }
 
-pub fn read_auxv(pid: Pid) -> Result<HashMap<AuxvType, AuxvType>, AuxvError> {
+#[derive(Debug, Default)]
+pub struct AuxvDumpInfo {
+    map: HashMap<AuxvType, AuxvType>,
+}
+
+impl AuxvDumpInfo {
+    pub fn get_program_header_count(&self) -> Option<AuxvType> {
+        self.map.get(&consts::AT_PHNUM).copied()
+    }
+    pub fn get_program_header_address(&self) -> Option<AuxvType> {
+        self.map.get(&consts::AT_PHDR).copied()
+    }
+    pub fn get_linux_gate_address(&self) -> Option<AuxvType> {
+        self.map.get(&consts::AT_SYSINFO_EHDR).copied()
+    }
+    pub fn get_entry_address(&self) -> Option<AuxvType> {
+        self.map.get(&consts::AT_ENTRY).copied()
+    }
+}
+
+pub fn read_auxv(pid: Pid) -> Result<AuxvDumpInfo, AuxvError> {
     let auxv_path = format!("/proc/{pid}/auxv");
     let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
     let auxv: HashMap<AuxvType, AuxvType> = ProcfsAuxvIter::new(BufReader::new(auxv_file))
@@ -31,7 +68,7 @@ pub fn read_auxv(pid: Pid) -> Result<HashMap<AuxvType, AuxvType>, AuxvError> {
     if auxv.is_empty() {
         Err(AuxvError::NoAuxvEntryFound(pid))
     } else {
-        Ok(auxv)
+        Ok(AuxvDumpInfo { map: auxv })
     }
 }
 
