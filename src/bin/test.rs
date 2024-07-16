@@ -28,13 +28,13 @@ mod linux {
 
     fn test_setup() -> Result<()> {
         let ppid = getppid();
-        PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT)?;
+        PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
         Ok(())
     }
 
     fn test_thread_list() -> Result<()> {
         let ppid = getppid();
-        let dumper = PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT)?;
+        let dumper = PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
         test!(!dumper.threads.is_empty(), "No threads")?;
         test!(
             dumper
@@ -50,7 +50,7 @@ mod linux {
 
     fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
         let ppid = getppid().as_raw();
-        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
+        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         dumper.suspend_threads()?;
         let stack_res = PtraceDumper::copy_from_process(ppid, stack_var as *mut libc::c_void, 1)?;
 
@@ -72,7 +72,7 @@ mod linux {
 
     fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
         let ppid = getppid();
-        let dumper = PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT)?;
+        let dumper = PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
         dumper
             .find_mapping(addr1)
             .ok_or("No mapping for addr1 found")?;
@@ -89,7 +89,7 @@ mod linux {
         let ppid = getppid().as_raw();
         let exe_link = format!("/proc/{}/exe", ppid);
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
-        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
+        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         dumper.suspend_threads()?;
         let mut found_exe = None;
         for (idx, mapping) in dumper.mappings.iter().enumerate() {
@@ -108,7 +108,7 @@ mod linux {
 
     fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
         // Now check that PtraceDumper interpreted the mappings properly.
-        let dumper = PtraceDumper::new(getppid().as_raw(), STOP_TIMEOUT)?;
+        let dumper = PtraceDumper::new(getppid().as_raw(), STOP_TIMEOUT, Default::default())?;
         let mut mapping_count = 0;
         for map in &dumper.mappings {
             if map
@@ -130,7 +130,7 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid().as_raw();
-        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
+        let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         let mut found_linux_gate = false;
         for mapping in dumper.mappings.clone() {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
@@ -150,7 +150,7 @@ mod linux {
 
     fn test_mappings_include_linux_gate() -> Result<()> {
         let ppid = getppid().as_raw();
-        let dumper = PtraceDumper::new(ppid, STOP_TIMEOUT)?;
+        let dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
         test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
         let mut found_linux_gate = false;

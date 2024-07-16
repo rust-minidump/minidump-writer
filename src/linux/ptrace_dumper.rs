@@ -89,12 +89,12 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
-    pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
+    pub fn new(pid: Pid, stop_timeout: Duration, auxv: AuxvDumpInfo) -> Result<Self, InitError> {
         let mut dumper = PtraceDumper {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
-            auxv: AuxvDumpInfo::default(),
+            auxv,
             mappings: Vec::new(),
             page_size: 0,
         };
@@ -108,7 +108,11 @@ impl PtraceDumper {
         if let Err(e) = self.stop_process(stop_timeout) {
             log::warn!("failed to stop process {}: {e}", self.pid);
         }
-        self.auxv = super::auxv::read_auxv(self.pid).map_err(InitError::ReadAuxvFailed)?;
+
+        if let Err(e) = self.auxv.try_filling_missing_info(self.pid) {
+            log::warn!("failed trying to fill in missing auxv info: {e}");
+        }
+
         self.enumerate_threads()?;
         self.enumerate_mappings()?;
         self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?

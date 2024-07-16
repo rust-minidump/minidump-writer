@@ -78,10 +78,9 @@ pub fn write_dso_debug_stream(
     blamed_thread: i32,
     auxv: &AuxvDumpInfo,
 ) -> Result<MDRawDirectory> {
-    let phnum_max = auxv
-        .get_program_header_count()
-        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM in auxv"))?
-        as usize;
+    let phnum_max =
+        auxv.get_program_header_count()
+            .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM in auxv"))? as usize;
     let phdr = auxv
         .get_program_header_address()
         .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;

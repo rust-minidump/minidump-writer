@@ -38,37 +38,87 @@ pub struct AuxvPair {
     pub value: AuxvType,
 }
 
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct DirectAuxvDumpInfo {
+    program_header_count: AuxvType,
+    program_header_address: AuxvType,
+    linux_gate_address: AuxvType,
+    entry_address: AuxvType,
+}
+
+impl From<DirectAuxvDumpInfo> for AuxvDumpInfo {
+    fn from(f: DirectAuxvDumpInfo) -> AuxvDumpInfo {
+        AuxvDumpInfo {
+            program_header_count: (f.program_header_count > 0).then_some(f.program_header_count),
+            program_header_address: (f.program_header_address > 0)
+                .then_some(f.program_header_address),
+            linux_gate_address: (f.linux_gate_address > 0).then_some(f.linux_gate_address),
+            entry_address: (f.entry_address > 0).then_some(f.entry_address),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AuxvDumpInfo {
-    map: HashMap<AuxvType, AuxvType>,
+    program_header_count: Option<AuxvType>,
+    program_header_address: Option<AuxvType>,
+    linux_gate_address: Option<AuxvType>,
+    entry_address: Option<AuxvType>,
 }
 
 impl AuxvDumpInfo {
+    pub fn try_filling_missing_info(&mut self, pid: Pid) -> Result<(), AuxvError> {
+        if self.is_complete() {
+            return Ok(());
+        }
+
+        let auxv_path = format!("/proc/{pid}/auxv");
+        let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
+        let auxv: HashMap<AuxvType, AuxvType> = ProcfsAuxvIter::new(BufReader::new(auxv_file))
+            .filter_map(Result::ok)
+            .map(|x| (x.key, x.value))
+            .collect();
+
+        if auxv.is_empty() {
+            return Err(AuxvError::NoAuxvEntryFound(pid));
+        }
+
+        if self.program_header_count.is_none() {
+            self.program_header_count = auxv.get(&consts::AT_PHNUM).copied();
+        }
+
+        if self.program_header_address.is_none() {
+            self.program_header_address = auxv.get(&consts::AT_PHDR).copied();
+        }
+
+        if self.linux_gate_address.is_none() {
+            self.linux_gate_address = auxv.get(&consts::AT_SYSINFO_EHDR).copied();
+        }
+
+        if self.entry_address.is_none() {
+            self.entry_address = auxv.get(&consts::AT_ENTRY).copied();
+        }
+
+        Ok(())
+    }
     pub fn get_program_header_count(&self) -> Option<AuxvType> {
-        self.map.get(&consts::AT_PHNUM).copied()
+        self.program_header_count
     }
     pub fn get_program_header_address(&self) -> Option<AuxvType> {
-        self.map.get(&consts::AT_PHDR).copied()
+        self.program_header_address
     }
     pub fn get_linux_gate_address(&self) -> Option<AuxvType> {
-        self.map.get(&consts::AT_SYSINFO_EHDR).copied()
+        self.linux_gate_address
     }
     pub fn get_entry_address(&self) -> Option<AuxvType> {
-        self.map.get(&consts::AT_ENTRY).copied()
+        self.entry_address
     }
-}
-
-pub fn read_auxv(pid: Pid) -> Result<AuxvDumpInfo, AuxvError> {
-    let auxv_path = format!("/proc/{pid}/auxv");
-    let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
-    let auxv: HashMap<AuxvType, AuxvType> = ProcfsAuxvIter::new(BufReader::new(auxv_file))
-        .filter_map(Result::ok)
-        .map(|x| (x.key, x.value))
-        .collect();
-    if auxv.is_empty() {
-        Err(AuxvError::NoAuxvEntryFound(pid))
-    } else {
-        Ok(AuxvDumpInfo { map: auxv })
+    pub fn is_complete(&self) -> bool {
+        self.program_header_count.is_some()
+            && self.program_header_address.is_some()
+            && self.linux_gate_address.is_some()
+            && self.entry_address.is_some()
     }
 }
 
