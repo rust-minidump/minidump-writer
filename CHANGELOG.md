@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Fixed
+- [PR#117](https://github.com/rust-minidump/minidump-writer/pull/117) resolved [#79](https://github.com/rust-minidump/minidump-writer/issues/79) by enabling reading of a module's build id and soname directly from the mapped process rather than relying on file reading, though that is still used as a fallback.
+
+### Changed
+- [PR#126](https://github.com/rust-minidump/minidump-writer/pull/126) updated `minidump-common` -> 0.22.
+
 ## [0.8.9] - 2024-04-01
 ### Fixed
 - [PR#110](https://github.com/rust-minidump/minidump-writer/pull/110) changed it so that `SIGCONT` is sent regardless if the process was not able to be `SIGSTOP`ed quickly enough.
