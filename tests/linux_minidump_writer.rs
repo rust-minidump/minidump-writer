@@ -528,8 +528,8 @@ contextual_test! {
             let descriptor = fds.handles.get(i).expect("Descriptor should be present");
             let object_name = descriptor.object_name.as_ref().expect("The path should be populated");
             let file_name = object_name.split('/').last().expect("The filename should be present");
-            assert!(file_name.starts_with("test_file"));
-            assert!(file_name.ends_with(&(i - 3).to_string()));
+            assert!(file_name.starts_with("test_file"), "unexpected filename '{file_name}'");
+            assert!(file_name.ends_with(&(i - 3).to_string()), "unexpected filename '{file_name}'");
         }
     }
 }
