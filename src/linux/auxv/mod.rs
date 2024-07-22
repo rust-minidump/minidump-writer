@@ -1,7 +1,7 @@
 pub use reader::ProcfsAuxvIter;
 use {
     crate::linux::thread_info::Pid,
-    std::{collections::HashMap, fs::File, io::BufReader},
+    std::{fs::File, io::BufReader},
     thiserror::Error,
 };
 
@@ -38,13 +38,24 @@ pub struct AuxvPair {
     pub value: AuxvType,
 }
 
+/// Auxv info that can be passed from crashing process
+///
+/// Since `/proc/{pid}/auxv` can sometimes be inaccessible, the calling process should prefer to transfer this
+/// information directly using the Linux `getauxval()` call (if possible).
+///
+/// Any field that is set to `0` will be considered unset. In that case, minidump-writer might try other techniques
+/// to obtain it (like reading `/proc/{pid}/auxv`).
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DirectAuxvDumpInfo {
-    program_header_count: AuxvType,
-    program_header_address: AuxvType,
-    linux_gate_address: AuxvType,
-    entry_address: AuxvType,
+    /// The value of `getauxval(AT_PHNUM)`
+    pub program_header_count: AuxvType,
+    /// The value of `getauxval(AT_PHDR)`
+    pub program_header_address: AuxvType,
+    /// The value of `getauxval(AT_SYSINFO_EHDR)`
+    pub linux_gate_address: AuxvType,
+    /// The value of `getauxval(AT_ENTRY)`
+    pub entry_address: AuxvType,
 }
 
 impl From<DirectAuxvDumpInfo> for AuxvDumpInfo {
@@ -75,29 +86,20 @@ impl AuxvDumpInfo {
 
         let auxv_path = format!("/proc/{pid}/auxv");
         let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
-        let auxv: HashMap<AuxvType, AuxvType> = ProcfsAuxvIter::new(BufReader::new(auxv_file))
-            .filter_map(Result::ok)
-            .map(|x| (x.key, x.value))
-            .collect();
 
-        if auxv.is_empty() {
-            return Err(AuxvError::NoAuxvEntryFound(pid));
-        }
-
-        if self.program_header_count.is_none() {
-            self.program_header_count = auxv.get(&consts::AT_PHNUM).copied();
-        }
-
-        if self.program_header_address.is_none() {
-            self.program_header_address = auxv.get(&consts::AT_PHDR).copied();
-        }
-
-        if self.linux_gate_address.is_none() {
-            self.linux_gate_address = auxv.get(&consts::AT_SYSINFO_EHDR).copied();
-        }
-
-        if self.entry_address.is_none() {
-            self.entry_address = auxv.get(&consts::AT_ENTRY).copied();
+        for AuxvPair { key, value } in
+            ProcfsAuxvIter::new(BufReader::new(auxv_file)).filter_map(Result::ok)
+        {
+            let dest_field = match key {
+                consts::AT_PHNUM => &mut self.program_header_count,
+                consts::AT_PHDR => &mut self.program_header_address,
+                consts::AT_SYSINFO_EHDR => &mut self.linux_gate_address,
+                consts::AT_ENTRY => &mut self.entry_address,
+                _ => continue,
+            };
+            if dest_field.is_none() {
+                *dest_field = Some(value);
+            }
         }
 
         Ok(())

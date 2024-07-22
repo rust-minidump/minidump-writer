@@ -1,9 +1,9 @@
+pub use crate::linux::auxv::{AuxvType, DirectAuxvDumpInfo};
 use crate::{
     auxv::AuxvDumpInfo,
     dir_section::{DirSection, DumpBuf},
     linux::{
         app_memory::AppMemoryList,
-        auxv::DirectAuxvDumpInfo,
         crash_context::CrashContext,
         dso_debug,
         errors::{InitError, WriterError},
@@ -121,6 +121,13 @@ impl MinidumpWriter {
         self
     }
 
+    /// Directly set important Auxv info determined by the crashing process
+    ///
+    /// Since `/proc/{pid}/auxv` can sometimes be inaccessible, the calling process should prefer to transfer this
+    /// information directly using the Linux `getauxval()` call (if possible).
+    ///
+    /// Any field that is set to `0` will be considered unset. In that case, minidump-writer might try other techniques
+    /// to obtain it (like reading `/proc/{pid}/auxv`).
     pub fn set_direct_auxv_dump_info(
         &mut self,
         direct_auxv_dump_info: DirectAuxvDumpInfo,
