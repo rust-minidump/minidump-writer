@@ -14,20 +14,14 @@ pub type AuxvType = u32;
 #[cfg(target_pointer_width = "64")]
 pub type AuxvType = u64;
 
-#[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
-mod consts {
-    use super::AuxvType;
-    pub const AT_PHDR: AuxvType = 3;
-    pub const AT_PHNUM: AuxvType = 5;
-    pub const AT_ENTRY: AuxvType = 9;
-    pub const AT_SYSINFO_EHDR: AuxvType = 33;
-}
-#[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
 mod consts {
     use super::AuxvType;
     pub const AT_PHDR: AuxvType = libc::AT_PHDR;
     pub const AT_PHNUM: AuxvType = libc::AT_PHNUM;
     pub const AT_ENTRY: AuxvType = libc::AT_ENTRY;
+    #[cfg(target_os = "android")]
+    pub const AT_SYSINFO_EHDR: AuxvType = 33;
+    #[cfg(not(target_os = "android"))]
     pub const AT_SYSINFO_EHDR: AuxvType = libc::AT_SYSINFO_EHDR;
 }
 
