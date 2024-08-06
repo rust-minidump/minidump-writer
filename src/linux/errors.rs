@@ -1,3 +1,4 @@
+use crate::auxv::AuxvError;
 use crate::dir_section::FileWriterError;
 use crate::maps_reader::MappingInfo;
 use crate::mem_writer::MemoryWriterError;
@@ -9,10 +10,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum InitError {
+    #[error("failed to read auxv")]
+    ReadAuxvFailed(AuxvError),
     #[error("IO error for file {0}")]
     IOError(String, #[source] std::io::Error),
-    #[error("No auxv entry found for PID {0}")]
-    NoAuxvEntryFound(Pid),
     #[error("crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
     #[error("Failed Android specific late init")]
@@ -45,14 +46,6 @@ pub enum MapsReaderError {
     MmapSanityCheckFailed,
     #[error("Symlink does not match ({0} vs. {1})")]
     SymlinkError(std::path::PathBuf, std::path::PathBuf),
-}
-
-#[derive(Debug, Error)]
-pub enum AuxvReaderError {
-    #[error("Invalid auxv format (should not hit EOF before AT_NULL)")]
-    InvalidFormat,
-    #[error("IO Error")]
-    IOError(#[from] std::io::Error),
 }
 
 #[derive(Debug, Error)]

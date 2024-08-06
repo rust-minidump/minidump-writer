@@ -1,7 +1,7 @@
 #[cfg(target_os = "android")]
 use crate::linux::android::late_process_mappings;
 use crate::linux::{
-    auxv_reader::{AuxvType, ProcfsAuxvIter},
+    auxv::AuxvDumpInfo,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
     module_reader,
@@ -18,9 +18,7 @@ use procfs_core::{
     FromRead, ProcError,
 };
 use std::{
-    collections::HashMap,
     ffi::c_void,
-    io::BufReader,
     path,
     result::Result,
     time::{Duration, Instant},
@@ -37,7 +35,7 @@ pub struct PtraceDumper {
     pub pid: Pid,
     threads_suspended: bool,
     pub threads: Vec<Thread>,
-    pub auxv: HashMap<AuxvType, AuxvType>,
+    pub auxv: AuxvDumpInfo,
     pub mappings: Vec<MappingInfo>,
     pub page_size: usize,
 }
@@ -91,12 +89,12 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 impl PtraceDumper {
     /// Constructs a dumper for extracting information of a given process
     /// with a process ID of |pid|.
-    pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
+    pub fn new(pid: Pid, stop_timeout: Duration, auxv: AuxvDumpInfo) -> Result<Self, InitError> {
         let mut dumper = PtraceDumper {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
-            auxv: HashMap::new(),
+            auxv,
             mappings: Vec::new(),
             page_size: 0,
         };
@@ -110,7 +108,11 @@ impl PtraceDumper {
         if let Err(e) = self.stop_process(stop_timeout) {
             log::warn!("failed to stop process {}: {e}", self.pid);
         }
-        self.read_auxv()?;
+
+        if let Err(e) = self.auxv.try_filling_missing_info(self.pid) {
+            log::warn!("failed trying to fill in missing auxv info: {e}");
+        }
+
         self.enumerate_threads()?;
         self.enumerate_mappings()?;
         self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
@@ -295,25 +297,6 @@ impl PtraceDumper {
         Ok(())
     }
 
-    fn read_auxv(&mut self) -> Result<(), InitError> {
-        let filename = format!("/proc/{}/auxv", self.pid);
-        let auxv_path = path::PathBuf::from(&filename);
-        let auxv_file =
-            std::fs::File::open(auxv_path).map_err(|e| InitError::IOError(filename, e))?;
-        let input = BufReader::new(auxv_file);
-        let reader = ProcfsAuxvIter::new(input);
-        self.auxv = reader
-            .filter_map(Result::ok)
-            .map(|x| (x.key, x.value))
-            .collect();
-
-        if self.auxv.is_empty() {
-            Err(InitError::NoAuxvEntryFound(self.pid))
-        } else {
-            Ok(())
-        }
-    }
-
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
         // linux_gate_loc is the beginning of the kernel's mapping of
         // linux-gate.so in the process.  It doesn't actually show up in the
@@ -322,21 +305,11 @@ impl PtraceDumper {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        let linux_gate_loc = *self.auxv.get(&AT_SYSINFO_EHDR).unwrap_or(&0);
+        let linux_gate_loc = self.auxv.get_linux_gate_address().unwrap_or_default();
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
-        let at_entry;
-        #[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
-        {
-            at_entry = 9;
-        }
-        #[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
-        {
-            at_entry = libc::AT_ENTRY;
-        }
-
-        let entry_point_loc = *self.auxv.get(&at_entry).unwrap_or(&0);
+        let entry_point_loc = self.auxv.get_entry_address().unwrap_or_default();
         let filename = format!("/proc/{}/maps", self.pid);
         let errmap = |e| InitError::IOError(filename.clone(), e);
         let maps_path = path::PathBuf::from(&filename);

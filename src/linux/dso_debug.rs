@@ -1,9 +1,8 @@
 use crate::{
-    linux::{auxv_reader::AuxvType, errors::SectionDsoDebugError, ptrace_dumper::PtraceDumper},
+    linux::{auxv::AuxvDumpInfo, errors::SectionDsoDebugError, ptrace_dumper::PtraceDumper},
     mem_writer::{write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter},
     minidump_format::*,
 };
-use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 
@@ -77,26 +76,13 @@ pub struct RDebug {
 pub fn write_dso_debug_stream(
     buffer: &mut Buffer,
     blamed_thread: i32,
-    auxv: &HashMap<AuxvType, AuxvType>,
+    auxv: &AuxvDumpInfo,
 ) -> Result<MDRawDirectory> {
-    let at_phnum;
-    let at_phdr;
-    #[cfg(any(target_arch = "arm", all(target_os = "android", target_arch = "x86")))]
-    {
-        at_phdr = 3;
-        at_phnum = 5;
-    }
-    #[cfg(not(any(target_arch = "arm", all(target_os = "android", target_arch = "x86"))))]
-    {
-        at_phdr = libc::AT_PHDR;
-        at_phnum = libc::AT_PHNUM;
-    }
-    let phnum_max = *auxv
-        .get(&at_phnum)
-        .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM in auxv"))?
-        as usize;
-    let phdr = *auxv
-        .get(&at_phdr)
+    let phnum_max =
+        auxv.get_program_header_count()
+            .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHNUM in auxv"))? as usize;
+    let phdr = auxv
+        .get_program_header_address()
         .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;
 
     let ph = PtraceDumper::copy_from_process(
