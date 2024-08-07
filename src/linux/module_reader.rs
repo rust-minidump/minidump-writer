@@ -31,13 +31,20 @@ impl<'a> ModuleMemory for &'a [u8] {
     type Memory = Self;
 
     fn read_module_memory(&self, offset: u64, length: u64) -> std::io::Result<Self::Memory> {
-        self.get(offset as usize..(offset + length) as usize)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!("{} out of bounds", offset + length),
-                )
-            })
+        let end = offset.checked_add(length).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "integer overflow calculating end address (offset={offset}, length={length})"
+                ),
+            )
+        })?;
+        self.get(offset as usize..end as usize).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("{offset}..{end} out of bounds (length={})", self.len()),
+            )
+        })
     }
 }
 
@@ -266,7 +273,12 @@ impl<T: ModuleMemory> ModuleReader<T> {
                         }
                     }
                 }
-                self.read_name_from_strtab(addr, size, offset)
+                if offset < size {
+                    self.read_name_from_strtab(addr, size, offset)
+                } else {
+                    log::warn!("soname strtab offset ({offset}) exceeds strtab size ({size})");
+                    Err(Error::NoSoNameEntry)
+                }
             }
         }
     }
@@ -307,6 +319,11 @@ impl<T: ModuleMemory> ModuleReader<T> {
                         self.section_offset(dynstr_section_header),
                         dynstr_section_header.sh_size,
                         name_offset,
+                    );
+                } else {
+                    log::warn!(
+                        "soname offset ({name_offset}) exceeds dynstr section size ({})",
+                        dynstr_section_header.sh_size
                     );
                 }
             }
@@ -382,6 +399,7 @@ impl<T: ModuleMemory> ModuleReader<T> {
         strtab_size: u64,
         name_offset: u64,
     ) -> Result<String, Error> {
+        assert!(name_offset < strtab_size);
         let name = read(
             &self.module_memory,
             strtab_offset + name_offset,
@@ -423,18 +441,15 @@ impl<T: ModuleMemory> ModuleReader<T> {
             return Err(Error::NoSections);
         }
 
-        // FIXME Until a version following goblin 0.8.0 is published (with
-        // `SectionHeader::parse_from`), we read one extra byte preceding the sections so that
-        // `SectionHeader::parse` doesn't return immediately due to a 0 offset.
-
         let section_headers_data = read(
             &self.module_memory,
-            self.header.e_shoff - 1,
-            self.header.e_shentsize as u64 * self.header.e_shnum as u64 + 1,
+            self.header.e_shoff,
+            self.header.e_shentsize as u64 * self.header.e_shnum as u64,
         )?;
-        let section_headers = elf::SectionHeader::parse(
+        // Use `parse_from` rather than `parse`, which allows a 0 offset.
+        let section_headers = elf::SectionHeader::parse_from(
             &section_headers_data,
-            1,
+            0,
             self.header.e_shnum as usize,
             self.context,
         )?;

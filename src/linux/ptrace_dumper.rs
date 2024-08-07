@@ -570,12 +570,14 @@ impl PtraceDumper {
                     length: u64,
                 ) -> std::io::Result<Self::Memory> {
                     // Leave bounds checks to `copy_from_process`
-                    PtraceDumper::copy_from_process(
-                        self.pid,
-                        (self.start_address + offset) as _,
-                        length as usize,
-                    )
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    let addr = self.start_address.checked_add(offset).ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("integer overflow calculating address: (start_address={}, offset={offset})", self.start_address),
+                        )
+                    })?;
+                    PtraceDumper::copy_from_process(self.pid, addr as _, length as usize)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 }
 
                 fn base_address(&self) -> Option<u64> {
