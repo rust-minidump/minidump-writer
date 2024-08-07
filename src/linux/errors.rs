@@ -254,10 +254,11 @@ pub enum WriterError {
 
 #[derive(Debug, Error)]
 pub enum ModuleReaderError {
-    #[error("failed to read module memory: {length} bytes at {offset}: {error}")]
+    #[error("failed to read module memory: {length} bytes at {offset}{}: {error}", .start_address.map(|addr| format!(" (start address: {addr})")).unwrap_or_default())]
     ReadModuleMemory {
         offset: u64,
         length: u64,
+        start_address: Option<u64>,
         #[source]
         error: nix::Error,
     },
