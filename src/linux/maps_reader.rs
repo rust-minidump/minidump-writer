@@ -38,6 +38,7 @@ pub struct MappingInfo {
     pub offset: usize,              // offset into the backed file.
     pub permissions: MMPermissions, // read, write and execute permissions.
     pub name: Option<OsString>,
+    pub madvise_dontdump: bool,
     // pub elf_obj: Option<elf::Elf>,
 }
 
@@ -95,6 +96,10 @@ impl MappingInfo {
             let start_address: usize = mm.address.0.try_into()?;
             let end_address: usize = mm.address.1.try_into()?;
             let mut offset: usize = mm.offset.try_into()?;
+            let madvise_dontdump = mm
+                .extension
+                .vm_flags
+                .contains(procfs_core::process::VmFlags::DD);
 
             let mut pathname: Option<OsString> = match mm.pathname {
                 MMapPath::Path(p) => Some(sanitize_path(p.into())),
@@ -118,28 +123,33 @@ impl MappingInfo {
             }
 
             if let Some(prev_module) = infos.last_mut() {
-                if (start_address == prev_module.end_address())
-                    && pathname.is_some()
-                    && (pathname == prev_module.name)
-                {
-                    // Merge adjacent mappings into one module, assuming they're a single
-                    // library mapped by the dynamic linker.
-                    prev_module.system_mapping_info.end_address = end_address;
-                    prev_module.size = end_address - prev_module.start_address;
-                    prev_module.permissions |= mm.perms;
-                    continue;
-                } else if (start_address == prev_module.end_address())
-                    && prev_module.is_executable()
-                    && prev_module.name_is_path()
-                    && ((offset == 0) || (offset == prev_module.end_address()))
-                    && (mm.perms == MMPermissions::PRIVATE)
-                {
-                    // Also merge mappings that result from address ranges that the
-                    // linker reserved but which a loaded library did not use. These
-                    // appear as an anonymous private mapping with no access flags set
-                    // and which directly follow an executable mapping.
-                    prev_module.size = end_address - prev_module.start_address;
-                    continue;
+                // Note that we don't merge pages if they have different MADV_DONTMAP
+                // settings, though AFAICT linux will handle this already and
+                // merge adjacent mappings only if they have the same settings
+                if prev_module.madvise_dontdump == madvise_dontdump {
+                    if (start_address == prev_module.end_address())
+                        && pathname.is_some()
+                        && (pathname == prev_module.name)
+                    {
+                        // Merge adjacent mappings into one module, assuming they're a single
+                        // library mapped by the dynamic linker.
+                        prev_module.system_mapping_info.end_address = end_address;
+                        prev_module.size = end_address - prev_module.start_address;
+                        prev_module.permissions |= mm.perms;
+                        continue;
+                    } else if (start_address == prev_module.end_address())
+                        && prev_module.is_executable()
+                        && prev_module.name_is_path()
+                        && ((offset == 0) || (offset == prev_module.end_address()))
+                        && (mm.perms == MMPermissions::PRIVATE)
+                    {
+                        // Also merge mappings that result from address ranges that the
+                        // linker reserved but which a loaded library did not use. These
+                        // appear as an anonymous private mapping with no access flags set
+                        // and which directly follow an executable mapping.
+                        prev_module.size = end_address - prev_module.start_address;
+                        continue;
+                    }
                 }
             }
 
@@ -170,7 +180,7 @@ impl MappingInfo {
                 }
             }
 
-            infos.push(MappingInfo {
+            infos.push(Self {
                 start_address,
                 size: end_address - start_address,
                 system_mapping_info: SystemMappingInfo {
@@ -180,6 +190,7 @@ impl MappingInfo {
                 offset,
                 permissions: mm.perms,
                 name: pathname,
+                madvise_dontdump,
             });
         }
         Ok(infos)
@@ -323,7 +334,11 @@ impl MappingInfo {
         false
     }
 
+    /// Whether the mapping is "interesting" and should be appended to the
+    /// minidump's mappings
+    #[inline]
     pub fn is_interesting(&self) -> bool {
+        !self.madvise_dontdump &&
         // only want modules with filenames.
         self.name.is_some() &&
         // Only want to include one mapping per shared lib.
@@ -529,6 +544,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 | MMPermissions::EXECUTE
                 | MMPermissions::PRIVATE,
             name: Some("/usr/bin/cat".into()),
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[0], cat_map);
@@ -543,6 +559,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: Some("[heap]".into()),
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[1], heap_map);
@@ -557,6 +574,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: None,
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[2], empty_map);
@@ -576,6 +594,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
             name: Some("linux-gate.so".into()),
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[21], gate_map);
@@ -639,6 +658,7 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
                 | MMPermissions::EXECUTE
                 | MMPermissions::PRIVATE,
             name: Some("/lib64/libc-2.32.so".into()),
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[6], gate_map);
@@ -671,6 +691,7 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
                 | MMPermissions::EXECUTE
                 | MMPermissions::PRIVATE,
             name: Some("/data/app/org.mozilla.firefox-1/lib/x86/libxul.so".into()),
+            madvise_dontdump: false,
         };
 
         assert_eq!(mappings[0], gate_map);

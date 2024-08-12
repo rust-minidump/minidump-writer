@@ -294,6 +294,62 @@ mod linux {
         }
     }
 
+    fn spawn_alloc_w_madvise_wait() -> Result<()> {
+        let page_size: usize = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
+            .unwrap()
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let memory_size = std::num::NonZeroUsize::new(page_size * 5).unwrap();
+
+        let mapped_mem = unsafe {
+            mmap_anonymous(
+                None,
+                memory_size,
+                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+                MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON,
+            )
+            .unwrap()
+        };
+
+        let offset = page_size as isize;
+
+        // Mark 2 of the 5 pages MADV_DONTDUMP
+        // |1-dump| |2-dont| |3-dont| |4-dump| |5-dump|
+        let pages = unsafe {
+            [
+                (mapped_mem, true),
+                (mapped_mem.byte_offset(offset), false),
+                (mapped_mem.byte_offset(offset * 2), false),
+                (mapped_mem.byte_offset(offset * 3), true),
+                (mapped_mem.byte_offset(offset * 4), true),
+            ]
+        };
+
+        for (page, dump) in pages {
+            if !dump {
+                unsafe {
+                    nix::sys::mman::madvise(
+                        page,
+                        page_size,
+                        nix::sys::mman::MmapAdvise::MADV_DONTDUMP,
+                    )
+                    .expect("failed to call madvise");
+                }
+            }
+        }
+
+        println!("--start--");
+        for (page, dump) in pages {
+            println!("{:p}{}", page.as_ptr(), if dump { "" } else { " dd" });
+        }
+        println!("--end--");
+
+        loop {
+            std::thread::park();
+        }
+    }
+
     fn create_files_wait(num: usize) -> Result<()> {
         let mut file_array = Vec::<tempfile::NamedTempFile>::with_capacity(num);
         for id in 0..num {
@@ -325,6 +381,7 @@ mod linux {
                 "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
                 "spawn_mmap_wait" => spawn_mmap_wait(),
                 "spawn_alloc_wait" => spawn_alloc_wait(),
+                "spawn_alloc_w_madvise_wait" => spawn_alloc_w_madvise_wait(),
                 _ => Err("Len 1: Unknown test option".into()),
             },
             2 => match args[0].as_ref() {
