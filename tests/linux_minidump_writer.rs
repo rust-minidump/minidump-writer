@@ -706,7 +706,7 @@ fn with_deleted_binary() {
     let pid = child.id() as i32;
 
     let BuildId(mut build_id) =
-        BuildId::read_from_module(mem_slice.as_slice()).expect("Failed to get build_id");
+        BuildId::read_from_module(mem_slice.as_slice().into()).expect("Failed to get build_id");
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 

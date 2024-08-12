@@ -12,7 +12,7 @@ enum Style {
     /// Reads the memory from `/proc/<pid>/mem`
     ///
     /// Available on basically all versions of Linux, but could fail if the process
-    /// has insufficient priveleges, ie ptrace
+    /// has insufficient privileges, ie ptrace
     File(std::fs::File),
     /// Reads the memory with [ptrace (`PTRACE_PEEKDATA`)](https://man7.org/linux/man-pages/man2/ptrace.2.html)
     ///

@@ -139,7 +139,7 @@ mod linux {
                 found_linux_gate = true;
                 dumper.suspend_threads()?;
                 let module_reader::BuildId(id) =
-                    dumper.from_process_memory_for_mapping(&mapping)?;
+                    PtraceDumper::from_process_memory_for_mapping(&mapping, ppid)?;
                 test!(!id.is_empty(), "id-vec is empty")?;
                 test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
                 dumper.resume_threads()?;

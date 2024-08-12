@@ -4,6 +4,7 @@ use crate::linux::{
     auxv::AuxvDumpInfo,
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
+    module_reader,
     thread_info::ThreadInfo,
     Pid,
 };
@@ -18,8 +19,6 @@ use procfs_core::{
     FromRead, ProcError,
 };
 use std::{
-    collections::HashMap,
-    io::BufReader,
     path,
     result::Result,
     time::{Duration, Instant},
@@ -88,9 +87,12 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 }
 
 impl PtraceDumper {
-    /// Constructs a dumper for extracting information of a given process
-    /// with a process ID of |pid|.
-    pub fn new(pid: Pid, stop_timeout: Duration) -> Result<Self, InitError> {
+    /// Constructs a dumper for extracting information from the specified process id
+    pub fn new(pid: Pid, stop_timeout: Duration, auxv: AuxvDumpInfo) -> Result<Self, InitError> {
+        if pid == std::process::id() as _ {
+            return Err(InitError::CannotPtraceSameProcess);
+        }
+
         let mut dumper = Self {
             pid,
             threads_suspended: false,
@@ -512,20 +514,20 @@ impl PtraceDumper {
     }
 
     pub fn from_process_memory_for_index<T: module_reader::ReadFromModule>(
-        &self,
+        &mut self,
         idx: usize,
     ) -> Result<T, DumperError> {
         assert!(idx < self.mappings.len());
 
-        self.from_process_memory_for_mapping(&self.mappings[idx])
+        Self::from_process_memory_for_mapping(&self.mappings[idx], self.pid)
     }
 
-    pub fn elf_identifier_for_mapping(
-        mapping: &mut MappingInfo,
+    pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
+        mapping: &MappingInfo,
         pid: Pid,
-    ) -> Result<Vec<u8>, DumperError> {
-        Ok(build_id_reader::read_build_id(
-            build_id_reader::ProcessReader::new(pid, mapping.start_address),
+    ) -> Result<T, DumperError> {
+        Ok(T::read_from_module(
+            module_reader::ProcessReader::new(pid, mapping.start_address).into(),
         )?)
     }
 }

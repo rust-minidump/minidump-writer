@@ -259,7 +259,7 @@ impl MappingInfo {
         use super::module_reader::{ReadFromModule, SoName};
 
         let mapped_file = MappingInfo::get_mmap(&self.name, self.offset)?;
-        Ok(SoName::read_from_module(&*mapped_file)
+        Ok(SoName::read_from_module((&*mapped_file).into())
             .map_err(|e| MapsReaderError::NoSoName(self.name.clone().unwrap_or_default(), e))?
             .0
             .to_string())

@@ -26,7 +26,7 @@ pub fn write(
         }
         let BuildId(identifier) = dumper
             .from_process_memory_for_index(map_idx)
-            .unwrap_or_default();
+            .unwrap_or_else(|_| BuildId(Vec::new()));
 
         // If the identifier is all 0, its an uninteresting mapping (bmc#1676109)
         if identifier.is_empty() || identifier.iter().all(|&x| x == 0) {

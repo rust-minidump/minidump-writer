@@ -9,7 +9,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum InitError {
     #[error("failed to read auxv")]
-    ReadAuxvFailed(AuxvError),
+    ReadAuxvFailed(crate::auxv::AuxvError),
     #[error("IO error for file {0}")]
     IOError(String, #[source] std::io::Error),
     #[error("crash thread does not reference principal mapping")]
@@ -18,6 +18,8 @@ pub enum InitError {
     AndroidLateInitError(#[from] AndroidError),
     #[error("Failed to read the page size")]
     PageSizeError(#[from] Errno),
+    #[error("Ptrace does not function within the same process")]
+    CannotPtraceSameProcess,
 }
 
 #[derive(Error, Debug)]
