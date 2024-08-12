@@ -518,13 +518,13 @@ contextual_test! {
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
         let fds: MinidumpHandleDataStream = dump.get_stream().expect("Couldn't find MinidumpHandleDataStream");
         // We check that we create num_of_files plus stdin, stdout and stderr
-        for i in 0..2 {
+        for i in 0..3 {
             let descriptor = fds.handles.get(i).expect("Descriptor should be present");
             let fd = *descriptor.raw.handle().expect("Handle should be populated");
             assert_eq!(fd, i as u64);
         }
 
-        for i in 3..num_of_files {
+        for i in 3..3 + num_of_files {
             let descriptor = fds.handles.get(i).expect("Descriptor should be present");
             let object_name = descriptor.object_name.as_ref().expect("The path should be populated");
             let file_name = object_name.split('/').last().expect("The filename should be present");
