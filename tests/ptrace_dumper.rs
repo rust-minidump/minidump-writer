@@ -39,8 +39,10 @@ fn test_thread_list_from_child() {
     let _thread = std::thread::Builder::new()
         .name("sighup-thread".into())
         .spawn(move || {
-            tx.send(unsafe { libc::pthread_self() }).unwrap();
-            loop {}
+            tx.send(unsafe { libc::pthread_self() as usize }).unwrap();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
         })
         .unwrap();
 
@@ -78,7 +80,7 @@ fn test_thread_list_from_child() {
     }
 
     unsafe {
-        libc::pthread_kill(thread_id, libc::SIGHUP);
+        libc::pthread_kill(thread_id as _, libc::SIGHUP);
     }
 
     spawn_child("thread_list", &[]);
