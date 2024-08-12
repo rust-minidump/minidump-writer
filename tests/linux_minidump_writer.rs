@@ -524,12 +524,22 @@ contextual_test! {
             assert_eq!(fd, i as u64);
         }
 
-        for i in 3..3 + num_of_files {
-            let descriptor = fds.handles.get(i).expect("Descriptor should be present");
-            let object_name = descriptor.object_name.as_ref().expect("The path should be populated");
-            let file_name = object_name.split('/').last().expect("The filename should be present");
-            assert!(file_name.starts_with("test_file"), "unexpected filename '{file_name}'");
-            assert!(file_name.ends_with(&(i - 3).to_string()), "unexpected filename '{file_name}'");
+        let non_std_files = &fds.handles[3..];
+
+        // We need to handle the android case where additional pipes might be opened and
+        // interspersed with the test_files (emulator? adb?) so that CI doesn't sporadically fail
+        for i in 0..num_of_files {
+            if !non_std_files.iter().any(|descriptor| {
+                let Some(name) = &descriptor.object_name else { return false; };
+                let Some(file_name) = name.rsplit_once('/').map(|(_, fname)| fname) else { return false; };
+                if !file_name.starts_with("test_file") {
+                    return false;
+                }
+
+                file_name.ends_with(&i.to_string())
+            }) {
+                panic!("unable to locate expected file `test_file{i}` in file handle stream");
+            }
         }
     }
 }
