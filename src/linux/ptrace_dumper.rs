@@ -143,8 +143,31 @@ impl PtraceDumper {
         ptrace::attach(pid).map_err(|e| AttachErr(child, e))?;
         loop {
             match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
-                Ok(_) => break,
-                Err(_e @ Errno::EINTR) => continue,
+                Ok(status) => {
+                    let wait::WaitStatus::Stopped(_, status) = status else {
+                        return Err(DumperError::WaitPidError(
+                            child,
+                            nix::errno::Errno::UnknownErrno,
+                        ));
+                    };
+
+                    // Any signal will stop the thread, make sure it is SIGSTOP. Otherwise, this
+                    // signal will be delivered after PTRACE_DETACH, and the thread will enter
+                    // the "T (stopped)" state.
+                    if status == nix::sys::signal::SIGSTOP {
+                        break;
+                    }
+
+                    // Signals other than SIGSTOP that are received need to be reinjected,
+                    // or they will otherwise get lost.
+                    // Note that the breakpad code doesn't do a detach, but that
+                    // feels like a bug...
+                    if let Err(err) = ptrace::cont(pid, status) {
+                        ptrace_detach(child)?;
+                        return Err(DumperError::WaitPidError(child, err));
+                    }
+                }
+                Err(Errno::EINTR) => continue,
                 Err(e) => {
                     ptrace_detach(child)?;
                     return Err(DumperError::WaitPidError(child, e));
