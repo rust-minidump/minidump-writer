@@ -46,15 +46,23 @@ impl<'buf> ProcessMemory<'buf> {
     #[inline]
     fn read(&mut self, offset: u64, length: u64) -> Result<Buf<'buf>, Error> {
         match self {
-            Self::Process(pr) => pr
-                .inner
-                .read_to_vec((pr.start_address + offset) as _, length as _)
-                .map(Cow::Owned)
-                .map_err(|err| Error::ReadModuleMemory {
-                    offset,
-                    length,
-                    error: err.source,
-                }),
+            Self::Process(pr) => {
+                let len = std::num::NonZero::new(length as usize).ok_or_else(|| {
+                    Error::ReadModuleMemory {
+                        offset,
+                        length,
+                        error: nix::errno::Errno::EINVAL,
+                    }
+                })?;
+                pr.inner
+                    .read_to_vec((pr.start_address + offset) as _, len)
+                    .map(Cow::Owned)
+                    .map_err(|err| Error::ReadModuleMemory {
+                        offset,
+                        length,
+                        error: err.source,
+                    })
+            }
             Self::Slice(s) => s
                 .get(offset as usize..(offset + length) as usize)
                 .map(Cow::Borrowed)

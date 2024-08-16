@@ -97,12 +97,46 @@ impl MemReader {
     pub fn read_to_vec(
         &mut self,
         src: usize,
-        length: usize,
+        length: std::num::NonZero<usize>,
     ) -> Result<Vec<u8>, CopyFromProcessError> {
-        let mut output = vec![0; length];
-        let len = self.read(src, &mut output)?;
-        output.truncate(len);
-        Ok(output)
+        let length = length.into();
+        let layout =
+            std::alloc::Layout::array::<u8>(length).map_err(|_err| CopyFromProcessError {
+                child: self.pid.as_raw(),
+                src,
+                offset: 0,
+                length,
+                source: nix::errno::Errno::EINVAL,
+            })?;
+
+        // SAFETY: we've guaranteed the layout we're allocating is valid at this point
+        let output = unsafe {
+            let ptr = std::alloc::alloc(layout);
+            if ptr.is_null() {
+                return Err(CopyFromProcessError {
+                    child: self.pid.as_raw(),
+                    src,
+                    offset: 0,
+                    length,
+                    source: nix::errno::Errno::ENOMEM,
+                });
+            }
+            std::slice::from_raw_parts_mut(ptr, length)
+        };
+
+        match self.read(src, output) {
+            Ok(read) => {
+                // SAFETY: we've filled initialized read bytes of our allocation block
+                unsafe { Ok(Vec::from_raw_parts(output.as_mut_ptr(), read, length)) }
+            }
+            Err(err) => {
+                // SAFETY: the pointer and layout are the same we just allocated
+                unsafe {
+                    std::alloc::dealloc(output.as_mut_ptr(), layout);
+                }
+                Err(err)
+            }
+        }
     }
 
     pub fn read(&mut self, src: usize, dst: &mut [u8]) -> Result<usize, CopyFromProcessError> {
@@ -224,6 +258,19 @@ impl PtraceDumper {
         src: usize,
         length: usize,
     ) -> Result<Vec<u8>, crate::errors::DumperError> {
+        let length = std::num::NonZero::new(length).ok_or_else(|| {
+            crate::errors::DumperError::CopyFromProcessError(CopyFromProcessError {
+                src,
+                child: pid,
+                offset: 0,
+                length,
+                // TODO: We should make copy_from_process also take a NonZero,
+                // as EINVAL could also come from the syscalls that actually read
+                // memory as well which could be confusing
+                source: nix::errno::Errno::EINVAL,
+            })
+        })?;
+
         let mut mem = MemReader::new(pid);
         Ok(mem.read_to_vec(src, length)?)
     }
