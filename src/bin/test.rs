@@ -49,25 +49,63 @@ mod linux {
     }
 
     fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
+        use minidump_writer::mem_reader::MemReader;
+
         let ppid = getppid().as_raw();
         let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         dumper.suspend_threads()?;
+
+        // We support 3 different methods of reading memory from another
+        // process, ensure they all function and give the same results
+
+        let expected_stack = 0x11223344usize.to_ne_bytes();
+        let expected_heap = 0x55667788usize.to_ne_bytes();
+
+        let validate = |reader: &mut MemReader| -> Result<()> {
+            let mut val = [0u8; std::mem::size_of::<usize>()];
+            let read = reader.read(stack_var, &mut val)?;
+            assert_eq!(read, val.len());
+            test!(val == expected_stack, "stack var not correct")?;
+
+            let read = reader.read(heap_var, &mut val)?;
+            assert_eq!(read, val.len());
+            test!(val == expected_heap, "heap var not correct")?;
+
+            Ok(())
+        };
+
+        // virtual mem
+        {
+            let mut mr = MemReader::for_virtual_mem(ppid);
+            validate(&mut mr)
+                .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
+        }
+
+        // file
+        {
+            let mut mr = MemReader::for_file(ppid)
+                .map_err(|err| format!("failed to open `/proc/{ppid}/mem`: {err}"))?;
+            validate(&mut mr)
+                .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
+        }
+
+        // ptrace
+        {
+            let mut mr = MemReader::for_ptrace(ppid);
+            validate(&mut mr)
+                .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
+        }
+
         let stack_res =
             PtraceDumper::copy_from_process(ppid, stack_var, std::mem::size_of::<usize>())?;
 
-        let expected_stack: libc::c_long = 0x11223344;
-        test!(
-            stack_res == expected_stack.to_ne_bytes(),
-            "stack var not correct"
-        )?;
+        test!(stack_res == expected_stack, "stack var not correct")?;
 
         let heap_res =
             PtraceDumper::copy_from_process(ppid, heap_var, std::mem::size_of::<usize>())?;
-        let expected_heap: libc::c_long = 0x55667788;
-        test!(
-            heap_res == expected_heap.to_ne_bytes(),
-            "heap var not correct"
-        )?;
+
+        test!(heap_res == expected_heap, "heap var not correct")?;
+
         dumper.resume_threads()?;
         Ok(())
     }

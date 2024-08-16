@@ -54,11 +54,42 @@ impl std::fmt::Debug for MemReader {
 }
 
 impl MemReader {
+    /// Creates a [`Self`] for the specified process id, the method used will
+    /// be probed for on the first access
     #[inline]
     pub fn new(pid: i32) -> Self {
         Self {
             pid: nix::unistd::Pid::from_raw(pid),
             style: None,
+        }
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    pub fn for_virtual_mem(pid: i32) -> Self {
+        Self {
+            pid: nix::unistd::Pid::from_raw(pid),
+            style: Some(Style::VirtualMem),
+        }
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    pub fn for_file(pid: i32) -> std::io::Result<Self> {
+        let file = std::fs::File::open(format!("/proc/{pid}/mem"))?;
+
+        Ok(Self {
+            pid: nix::unistd::Pid::from_raw(pid),
+            style: Some(Style::File(file)),
+        })
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    pub fn for_ptrace(pid: i32) -> Self {
+        Self {
+            pid: nix::unistd::Pid::from_raw(pid),
+            style: Some(Style::Ptrace),
         }
     }
 
