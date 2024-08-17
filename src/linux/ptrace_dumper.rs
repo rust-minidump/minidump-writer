@@ -5,7 +5,8 @@ use crate::linux::{
     errors::{DumperError, InitError, ThreadInfoError},
     maps_reader::MappingInfo,
     module_reader,
-    thread_info::{Pid, ThreadInfo},
+    thread_info::ThreadInfo,
+    Pid,
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::thread_info;
@@ -18,7 +19,6 @@ use procfs_core::{
     FromRead, ProcError,
 };
 use std::{
-    ffi::c_void,
     path,
     result::Result,
     time::{Duration, Instant},
@@ -87,10 +87,13 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 }
 
 impl PtraceDumper {
-    /// Constructs a dumper for extracting information of a given process
-    /// with a process ID of |pid|.
+    /// Constructs a dumper for extracting information from the specified process id
     pub fn new(pid: Pid, stop_timeout: Duration, auxv: AuxvDumpInfo) -> Result<Self, InitError> {
-        let mut dumper = PtraceDumper {
+        if pid == std::process::id() as _ {
+            return Err(InitError::CannotPtraceSameProcess);
+        }
+
+        let mut dumper = Self {
             pid,
             threads_suspended: false,
             threads: Vec::new(),
@@ -129,26 +132,6 @@ impl PtraceDumper {
             late_process_mappings(self.pid, &mut self.mappings)?;
         }
         Ok(())
-    }
-
-    /// Copies content of |num_of_bytes| bytes from a given process |child|, starting from |src|.
-    /// This method uses ptrace to extract the content from the target process.
-    pub fn copy_from_process(
-        child: Pid,
-        src: *mut c_void,
-        num_of_bytes: usize,
-    ) -> Result<Vec<u8>, DumperError> {
-        use DumperError::CopyFromProcessError as CFPE;
-        let pid = nix::unistd::Pid::from_raw(child);
-        let mut res = Vec::new();
-        let mut idx = 0usize;
-        while idx < num_of_bytes {
-            let word = ptrace::read(pid, (src as usize + idx) as *mut c_void)
-                .map_err(|e| CFPE(child, src as usize, idx, num_of_bytes, e))?;
-            res.append(&mut word.to_ne_bytes().to_vec());
-            idx += std::mem::size_of::<libc::c_long>();
-        }
-        Ok(res)
     }
 
     /// Suspends a thread by attaching to it.
@@ -531,63 +514,20 @@ impl PtraceDumper {
     }
 
     pub fn from_process_memory_for_index<T: module_reader::ReadFromModule>(
-        &self,
+        &mut self,
         idx: usize,
     ) -> Result<T, DumperError> {
         assert!(idx < self.mappings.len());
 
-        self.from_process_memory_for_mapping(&self.mappings[idx])
+        Self::from_process_memory_for_mapping(&self.mappings[idx], self.pid)
     }
 
     pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
-        &self,
         mapping: &MappingInfo,
+        pid: Pid,
     ) -> Result<T, DumperError> {
-        if std::process::id()
-            .try_into()
-            .map(|v: Pid| v == self.pid)
-            .unwrap_or(false)
-        {
-            let mem_slice = unsafe {
-                std::slice::from_raw_parts(mapping.start_address as *const u8, mapping.size)
-            };
-            T::read_from_module(module_reader::ModuleMemoryAtAddress(
-                mem_slice,
-                mapping.start_address as u64,
-            ))
-        } else {
-            struct ProcessModuleMemory {
-                pid: Pid,
-                start_address: u64,
-            }
-
-            impl module_reader::ModuleMemory for ProcessModuleMemory {
-                type Memory = Vec<u8>;
-
-                fn read_module_memory(
-                    &self,
-                    offset: u64,
-                    length: u64,
-                ) -> std::io::Result<Self::Memory> {
-                    // Leave bounds checks to `copy_from_process`
-                    PtraceDumper::copy_from_process(
-                        self.pid,
-                        (self.start_address + offset) as _,
-                        length as usize,
-                    )
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
-
-                fn base_address(&self) -> Option<u64> {
-                    Some(self.start_address)
-                }
-            }
-
-            T::read_from_module(ProcessModuleMemory {
-                pid: self.pid,
-                start_address: mapping.start_address as u64,
-            })
-        }
-        .map_err(|e| e.into())
+        Ok(T::read_from_module(
+            module_reader::ProcessReader::new(pid, mapping.start_address).into(),
+        )?)
     }
 }

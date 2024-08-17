@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#118](https://github.com/rust-minidump/minidump-writer/pull/118) resolved [#72](https://github.com/rust-minidump/minidump-writer/issues/72) by adding support for reading process memory via `process_vm_readv` and `/proc/{pid}/mem`, in addition to the original `PTRACE_PEEKDATA`. This gives significant performance benefits as memory can now be read in blocks of arbitrary size instead of word-by-word with ptrace.
+
 ## [0.9.0] - 2024-07-20
 ### Fixed
 - [PR#117](https://github.com/rust-minidump/minidump-writer/pull/117) resolved [#79](https://github.com/rust-minidump/minidump-writer/issues/79) by enabling reading of a module's build id and soname directly from the mapped process rather than relying on file reading, though that is still used as a fallback.

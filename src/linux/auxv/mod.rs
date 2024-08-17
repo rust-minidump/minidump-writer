@@ -1,6 +1,6 @@
 pub use reader::ProcfsAuxvIter;
 use {
-    crate::linux::thread_info::Pid,
+    crate::Pid,
     std::{fs::File, io::BufReader},
     thiserror::Error,
 };

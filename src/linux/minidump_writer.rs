@@ -10,10 +10,10 @@ use crate::{
         maps_reader::{MappingInfo, MappingList},
         ptrace_dumper::PtraceDumper,
         sections::*,
-        thread_info::Pid,
     },
     mem_writer::{Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError},
     minidump_format::*,
+    Pid,
 };
 use std::{
     io::{Seek, Write},
@@ -206,7 +206,7 @@ impl MinidumpWriter {
 
         let stack_copy = match PtraceDumper::copy_from_process(
             self.blamed_thread,
-            valid_stack_pointer as *mut libc::c_void,
+            valid_stack_pointer,
             stack_len,
         ) {
             Ok(x) => x,
