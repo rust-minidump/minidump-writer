@@ -160,10 +160,7 @@ impl PtraceDumper {
 
                     // Signals other than SIGSTOP that are received need to be reinjected,
                     // or they will otherwise get lost.
-                    // Note that the breakpad code doesn't do a detach, but that
-                    // feels like a bug...
                     if let Err(err) = ptrace::cont(pid, status) {
-                        ptrace_detach(child)?;
                         return Err(DumperError::WaitPidError(child, err));
                     }
                 }
