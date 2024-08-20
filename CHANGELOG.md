@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - ReleaseDate
 ### Changed
 - [PR#118](https://github.com/rust-minidump/minidump-writer/pull/118) resolved [#72](https://github.com/rust-minidump/minidump-writer/issues/72) by adding support for reading process memory via `process_vm_readv` and `/proc/{pid}/mem`, in addition to the original `PTRACE_PEEKDATA`. This gives significant performance benefits as memory can now be read in blocks of arbitrary size instead of word-by-word with ptrace.
+- [PR#128](https://github.com/rust-minidump/minidump-writer/pull/128) and [PR#133](https://github.com/rust-minidump/minidump-writer/pull/133) updated the lockfile.
+
+### Fixed
+- [PR#127](https://github.com/rust-minidump/minidump-writer/pull/127) resolved [#27](https://github.com/rust-minidump/minidump-writer/issues/27) by allowing programs to pass the needed auxv information, still falling back to reading `/proc/{pid}/auxv` to fill missing information, and being more permissive by still writing a dump if some or all of the auxv information could not be retrieved successfully rather than completely failing to write the minidump.
+- [PR#131](https://github.com/rust-minidump/minidump-writer/pull/131) resolved [#124](https://github.com/rust-minidump/minidump-writer/issues/124) by reinjecting non-`SIGSTOP` signals after `ptrace::attach` so that the thread would be in the correct state after `ptrace::detach`.
 
 ## [0.9.0] - 2024-07-20
 ### Fixed
