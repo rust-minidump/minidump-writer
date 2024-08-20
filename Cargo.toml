@@ -1,6 +1,6 @@
 [package]
 name = "minidump-writer"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["Martin Sirringhaus"]
 description = "Rust rewrite of Breakpad's minidump_writer"
 repository = "https://github.com/rust-minidump/minidump-writer"

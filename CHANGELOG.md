@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.10.0] - 2024-08-20
 ### Changed
 - [PR#118](https://github.com/rust-minidump/minidump-writer/pull/118) resolved [#72](https://github.com/rust-minidump/minidump-writer/issues/72) by adding support for reading process memory via `process_vm_readv` and `/proc/{pid}/mem`, in addition to the original `PTRACE_PEEKDATA`. This gives significant performance benefits as memory can now be read in blocks of arbitrary size instead of word-by-word with ptrace.
 - [PR#128](https://github.com/rust-minidump/minidump-writer/pull/128) and [PR#133](https://github.com/rust-minidump/minidump-writer/pull/133) updated the lockfile.
@@ -150,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/rust-minidump/minidump-writer/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/rust-minidump/minidump-writer/compare/0.8.9...0.9.0
 [0.8.9]: https://github.com/rust-minidump/minidump-writer/compare/0.8.8...0.8.9
 [0.8.8]: https://github.com/rust-minidump/minidump-writer/compare/0.8.7...0.8.8
