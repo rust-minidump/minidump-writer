@@ -31,6 +31,58 @@ fn test_setup() {
 #[test]
 fn test_thread_list_from_child() {
     // Child spawns and looks in the parent (== this process) for its own thread-ID
+
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+
+    // // We also spawn another thread that we send a SIGHUP to to ensure that the
+    // // ptracedumper correctly handles it
+    let _thread = std::thread::Builder::new()
+        .name("sighup-thread".into())
+        .spawn(move || {
+            tx.send(unsafe { libc::pthread_self() as usize }).unwrap();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        })
+        .unwrap();
+
+    let thread_id = rx.recv().unwrap();
+
+    // Unfortunately we need to set a signal handler to ignore the SIGHUP we send
+    // to the thread, as otherwise the default test harness fails
+    unsafe {
+        let mut act: libc::sigaction = std::mem::zeroed();
+        if libc::sigemptyset(&mut act.sa_mask) != 0 {
+            eprintln!(
+                "unable to clear action mask: {:?}",
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
+
+        unsafe extern "C" fn on_sig(
+            _sig: libc::c_int,
+            _info: *mut libc::siginfo_t,
+            _uc: *mut libc::c_void,
+        ) {
+        }
+
+        act.sa_flags = libc::SA_SIGINFO;
+        act.sa_sigaction = on_sig as usize;
+
+        // Register the action with the signal handler
+        if libc::sigaction(libc::SIGHUP, &act, std::ptr::null_mut()) != 0 {
+            eprintln!(
+                "unable to register signal handler: {:?}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+
+    unsafe {
+        libc::pthread_kill(thread_id as _, libc::SIGHUP);
+    }
+
     spawn_child("thread_list", &[]);
 }
 

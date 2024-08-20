@@ -18,10 +18,8 @@ mod linux {
 
     macro_rules! test {
         ($x:expr, $errmsg:expr) => {
-            if $x {
-                Ok(())
-            } else {
-                Err($errmsg)
+            if !$x {
+                return Err($errmsg.into());
             }
         };
     }
@@ -35,7 +33,7 @@ mod linux {
     fn test_thread_list() -> Result<()> {
         let ppid = getppid();
         let dumper = PtraceDumper::new(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
-        test!(!dumper.threads.is_empty(), "No threads")?;
+        test!(!dumper.threads.is_empty(), "No threads");
         test!(
             dumper
                 .threads
@@ -44,7 +42,16 @@ mod linux {
                 .count()
                 == 1,
             "Thread found multiple times"
-        )?;
+        );
+
+        test!(
+            dumper
+                .threads
+                .iter()
+                .any(|thread| thread.name.as_deref() == Some("sighup-thread")),
+            "Failed to locate and/or stop sighup-thread"
+        );
+
         Ok(())
     }
 
@@ -65,11 +72,11 @@ mod linux {
             let mut val = [0u8; std::mem::size_of::<usize>()];
             let read = reader.read(stack_var, &mut val)?;
             assert_eq!(read, val.len());
-            test!(val == expected_stack, "stack var not correct")?;
+            test!(val == expected_stack, "stack var not correct");
 
             let read = reader.read(heap_var, &mut val)?;
             assert_eq!(read, val.len());
-            test!(val == expected_heap, "heap var not correct")?;
+            test!(val == expected_heap, "heap var not correct");
 
             Ok(())
         };
@@ -99,12 +106,12 @@ mod linux {
         let stack_res =
             PtraceDumper::copy_from_process(ppid, stack_var, std::mem::size_of::<usize>())?;
 
-        test!(stack_res == expected_stack, "stack var not correct")?;
+        test!(stack_res == expected_stack, "stack var not correct");
 
         let heap_res =
             PtraceDumper::copy_from_process(ppid, heap_var, std::mem::size_of::<usize>())?;
 
-        test!(heap_res == expected_heap, "heap var not correct")?;
+        test!(heap_res == expected_heap, "heap var not correct");
 
         dumper.resume_threads()?;
         Ok(())
@@ -121,13 +128,13 @@ mod linux {
             .find_mapping(addr2)
             .ok_or("No mapping for addr2 found")?;
 
-        test!(dumper.find_mapping(0).is_none(), "NULL found")?;
+        test!(dumper.find_mapping(0).is_none(), "NULL found");
         Ok(())
     }
 
     fn test_file_id() -> Result<()> {
         let ppid = getppid().as_raw();
-        let exe_link = format!("/proc/{}/exe", ppid);
+        let exe_link = format!("/proc/{ppid}/exe");
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
         let mut dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         dumper.suspend_threads()?;
@@ -178,13 +185,13 @@ mod linux {
                 dumper.suspend_threads()?;
                 let module_reader::BuildId(id) =
                     PtraceDumper::from_process_memory_for_mapping(&mapping, ppid)?;
-                test!(!id.is_empty(), "id-vec is empty")?;
-                test!(id.iter().any(|&x| x > 0), "all id elements are 0")?;
+                test!(!id.is_empty(), "id-vec is empty");
+                test!(id.iter().any(|&x| x > 0), "all id elements are 0");
                 dumper.resume_threads()?;
                 break;
             }
         }
-        test!(found_linux_gate, "found no linux_gate")?;
+        test!(found_linux_gate, "found no linux_gate");
         Ok(())
     }
 
@@ -192,7 +199,7 @@ mod linux {
         let ppid = getppid().as_raw();
         let dumper = PtraceDumper::new(ppid, STOP_TIMEOUT, Default::default())?;
         let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
-        test!(linux_gate_loc != 0, "linux_gate_loc == 0")?;
+        test!(linux_gate_loc != 0, "linux_gate_loc == 0");
         let mut found_linux_gate = false;
         for mapping in &dumper.mappings {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
@@ -200,7 +207,7 @@ mod linux {
                 test!(
                     linux_gate_loc == mapping.start_address.try_into()?,
                     "linux_gate_loc != start_address"
-                )?;
+                );
 
                 // This doesn't work here, as we do not test via "fork()", so the addresses are different
                 // let ll = mapping.start_address as *const u8;
@@ -214,7 +221,7 @@ mod linux {
                 break;
             }
         }
-        test!(found_linux_gate, "found no linux_gate")?;
+        test!(found_linux_gate, "found no linux_gate");
         Ok(())
     }
 
