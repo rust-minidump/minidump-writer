@@ -126,7 +126,11 @@ fn section_header_with_name<'sc>(
     name: &[u8],
     module_memory: &mut ProcessMemory<'_>,
 ) -> Result<Option<&'sc elf::SectionHeader>, Error> {
-    let strtab_section_header = section_headers.get(strtab_index).ok_or(Error::NoStrTab)?;
+    let strtab_section_header = section_headers
+        .get(strtab_index)
+        .and_then(|hdr| (hdr.sh_type == elf::section_header::SHT_STRTAB).then_some(hdr))
+        .ok_or(Error::NoStrTab)?;
+
     for header in section_headers {
         let sh_name = header.sh_name as u64;
         if sh_name >= strtab_section_header.sh_size {
