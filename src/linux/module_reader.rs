@@ -45,32 +45,36 @@ impl<'buf> From<ProcessReader> for ProcessMemory<'buf> {
 impl<'buf> ProcessMemory<'buf> {
     #[inline]
     fn read(&mut self, offset: u64, length: u64) -> Result<Buf<'buf>, Error> {
+        let error = move |start_address, error| Error::ReadModuleMemory {
+            start_address,
+            offset,
+            length,
+            error,
+        };
+
         match self {
             Self::Process(pr) => {
-                let len = std::num::NonZero::new(length as usize).ok_or_else(|| {
-                    Error::ReadModuleMemory {
-                        offset,
-                        length,
-                        error: nix::errno::Errno::EINVAL,
-                    }
-                })?;
+                let error = |e| error(Some(pr.start_address), e);
+                let len = std::num::NonZero::new(length as usize)
+                    .ok_or_else(|| error(nix::Error::EINVAL))?;
+                let proc_offset = pr
+                    .start_address
+                    .checked_add(offset)
+                    .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
                 pr.inner
-                    .read_to_vec((pr.start_address + offset) as _, len)
+                    .read_to_vec(proc_offset as _, len)
                     .map(Cow::Owned)
-                    .map_err(|err| Error::ReadModuleMemory {
-                        offset,
-                        length,
-                        error: err.source,
-                    })
+                    .map_err(|err| error(err.source))
             }
-            Self::Slice(s) => s
-                .get(offset as usize..(offset + length) as usize)
-                .map(Cow::Borrowed)
-                .ok_or_else(|| Error::ReadModuleMemory {
-                    offset,
-                    length,
-                    error: nix::Error::EACCES,
-                }),
+            Self::Slice(s) => {
+                let error = |e| error(None, e);
+                let end = offset
+                    .checked_add(length)
+                    .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
+                s.get(offset as usize..end as usize)
+                    .map(Cow::Borrowed)
+                    .ok_or_else(|| error(nix::Error::EACCES))
+            }
         }
     }
 
@@ -122,7 +126,11 @@ fn section_header_with_name<'sc>(
     name: &[u8],
     module_memory: &mut ProcessMemory<'_>,
 ) -> Result<Option<&'sc elf::SectionHeader>, Error> {
-    let strtab_section_header = section_headers.get(strtab_index).ok_or(Error::NoStrTab)?;
+    let strtab_section_header = section_headers
+        .get(strtab_index)
+        .and_then(|hdr| (hdr.sh_type == elf::section_header::SHT_STRTAB).then_some(hdr))
+        .ok_or(Error::NoStrTab)?;
+
     for header in section_headers {
         let sh_name = header.sh_name as u64;
         if sh_name >= strtab_section_header.sh_size {
@@ -141,7 +149,7 @@ fn section_header_with_name<'sc>(
     Ok(None)
 }
 
-/// Types which can be read from an `impl ModuleMemory`.
+/// Types which can be read from ProcessMemory.
 pub trait ReadFromModule: Sized {
     fn read_from_module(module_memory: ProcessMemory<'_>) -> Result<Self, Error>;
 }
@@ -279,7 +287,12 @@ impl<'buf> ModuleReader<'buf> {
             (_, _, None) => Err(Error::NoSoNameEntry),
             (Some(addr), Some(size), Some(offset)) => {
                 // If loaded in memory, the address will be altered to be absolute.
-                self.read_name_from_strtab(self.module_memory.absolute(addr), size, offset)
+                if offset < size {
+                    self.read_name_from_strtab(self.module_memory.absolute(addr), size, offset)
+                } else {
+                    log::warn!("soname strtab offset ({offset}) exceeds strtab size ({size})");
+                    Err(Error::NoSoNameEntry)
+                }
             }
         }
     }
@@ -319,6 +332,11 @@ impl<'buf> ModuleReader<'buf> {
                         self.section_offset(dynstr_section_header),
                         dynstr_section_header.sh_size,
                         name_offset,
+                    );
+                } else {
+                    log::warn!(
+                        "soname offset ({name_offset}) exceeds dynstr section size ({})",
+                        dynstr_section_header.sh_size
                     );
                 }
             }
@@ -394,6 +412,7 @@ impl<'buf> ModuleReader<'buf> {
         strtab_size: u64,
         name_offset: u64,
     ) -> Result<String, Error> {
+        assert!(name_offset < strtab_size);
         let name = self
             .module_memory
             .read(strtab_offset + name_offset, strtab_size - name_offset)?;
@@ -436,6 +455,7 @@ impl<'buf> ModuleReader<'buf> {
             self.header.e_shoff,
             self.header.e_shentsize as u64 * self.header.e_shnum as u64,
         )?;
+        // Use `parse_from` rather than `parse`, which allows a 0 offset.
         let section_headers = elf::SectionHeader::parse_from(
             &section_headers_data,
             0,
