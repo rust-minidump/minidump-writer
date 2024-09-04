@@ -152,6 +152,17 @@ fn section_header_with_name<'sc>(
 /// Types which can be read from ProcessMemory.
 pub trait ReadFromModule: Sized {
     fn read_from_module(module_memory: ProcessMemory<'_>) -> Result<Self, Error>;
+
+    fn read_from_file(path: &std::path::Path) -> Result<Self, Error> {
+        let map = std::fs::File::open(path)
+            // Safety: the file is an executable binary (very likely read-only), and won't be changed.
+            .and_then(|file| unsafe { memmap2::Mmap::map(&file) })
+            .map_err(|error| Error::MapFile {
+                path: path.to_owned(),
+                error,
+            })?;
+        Self::read_from_module(ProcessMemory::Slice(&map))
+    }
 }
 
 /// The module build id.
