@@ -254,6 +254,12 @@ pub enum WriterError {
 
 #[derive(Debug, Error)]
 pub enum ModuleReaderError {
+    #[error("failed to read module file ({path}): {error}")]
+    MapFile {
+        path: std::path::PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
     #[error("failed to read module memory: {length} bytes at {offset}{}: {error}", .start_address.map(|addr| format!(" (start address: {addr})")).unwrap_or_default())]
     ReadModuleMemory {
         offset: u64,

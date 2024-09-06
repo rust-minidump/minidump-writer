@@ -1,6 +1,6 @@
 use super::*;
 use crate::linux::maps_reader::MappingInfo;
-use crate::linux::module_reader::{BuildId, SoName};
+use crate::linux::module_reader::{BuildId, ReadFromModule, SoName};
 
 /// Write information about the mappings in effect. Because we are using the
 /// minidump format, the information about the mappings is pretty limited.
@@ -24,15 +24,40 @@ pub fn write(
         {
             continue;
         }
+        log::debug!("retrieving build id for {:?}", &dumper.mappings[map_idx]);
         let BuildId(identifier) = dumper
             .from_process_memory_for_index(map_idx)
-            .unwrap_or_else(|_| BuildId(Vec::new()));
+            .or_else(|e| {
+                // If the mapping has an associated name that is a file, try to read the build id
+                // from the file. If there is no note segment with the build id in
+                // the program headers, we can't get to the note section if the section header
+                // table isn't loaded.
+                if let Some(path) = &dumper.mappings[map_idx].name {
+                    let path = std::path::Path::new(&path);
+                    if path.exists() {
+                        log::debug!("failed to get build id from process memory ({e}), attempting to retrieve from {}", path.display());
+                        return BuildId::read_from_file(path)
+                            .map_err(errors::DumperError::ModuleReaderError);
+                    }
+                    log::debug!(
+                        "not attempting to get build id from {}: path does not exist",
+                        path.display()
+                    );
+                }
+                Err(e)
+            })
+            .unwrap_or_else(|e| {
+                log::warn!("failed to get build id for mapping: {e}");
+                BuildId(Vec::new())
+            });
 
         // If the identifier is all 0, its an uninteresting mapping (bmc#1676109)
         if identifier.is_empty() || identifier.iter().all(|&x| x == 0) {
             continue;
         }
 
+        // SONAME should always be accessible through program headers alone, so we don't really
+        // need to fall back to trying to read from the mapping file.
         let soname = dumper
             .from_process_memory_for_index(map_idx)
             .ok()
