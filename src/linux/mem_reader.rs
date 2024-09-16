@@ -97,7 +97,7 @@ impl MemReader {
     pub fn read_to_vec(
         &mut self,
         src: usize,
-        length: std::num::NonZero<usize>,
+        length: std::num::NonZeroUsize,
     ) -> Result<Vec<u8>, CopyFromProcessError> {
         let length = length.into();
         let layout =
@@ -258,7 +258,7 @@ impl PtraceDumper {
         src: usize,
         length: usize,
     ) -> Result<Vec<u8>, crate::errors::DumperError> {
-        let length = std::num::NonZero::new(length).ok_or_else(|| {
+        let length = std::num::NonZeroUsize::new(length).ok_or_else(|| {
             crate::errors::DumperError::CopyFromProcessError(CopyFromProcessError {
                 src,
                 child: pid,
