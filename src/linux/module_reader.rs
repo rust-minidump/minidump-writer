@@ -55,7 +55,7 @@ impl<'buf> ProcessMemory<'buf> {
         match self {
             Self::Process(pr) => {
                 let error = |e| error(Some(pr.start_address), e);
-                let len = std::num::NonZero::new(length as usize)
+                let len = std::num::NonZeroUsize::new(length as usize)
                     .ok_or_else(|| error(nix::Error::EINVAL))?;
                 let proc_offset = pr
                     .start_address
