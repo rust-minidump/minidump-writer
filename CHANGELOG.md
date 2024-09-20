@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.10.1] - 2024-09-20
 ### Fixed
 - [PR#129](https://github.com/rust-minidump/minidump-writer/pull/129) added checking of additions to ensure invalid memory offsets are gracefully handled.
 - [PR#135](https://github.com/rust-minidump/minidump-writer/pull/135) resolved [#134](https://github.com/rust-minidump/minidump-writer/issues/134) by attempting to read the executables build id from the mapped file if it could not be retrieved from process memory.
@@ -156,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.10.1...HEAD
+[0.10.1]: https://github.com/rust-minidump/minidump-writer/compare/0.10.0...0.10.1
 [0.10.0]: https://github.com/rust-minidump/minidump-writer/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/rust-minidump/minidump-writer/compare/0.8.9...0.9.0
 [0.8.9]: https://github.com/rust-minidump/minidump-writer/compare/0.8.8...0.8.9
