@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Fixed
+- [PR#129](https://github.com/rust-minidump/minidump-writer/pull/129) added checking of additions to ensure invalid memory offsets are gracefully handled.
+- [PR#135](https://github.com/rust-minidump/minidump-writer/pull/135) resolved [#134](https://github.com/rust-minidump/minidump-writer/issues/134) by attempting to read the executables build id from the mapped file if it could not be retrieved from process memory.
+- [PR#136](https://github.com/rust-minidump/minidump-writer/pull/136) changed to an older type to avoid requiring a semi-recent rust version.
+
 ## [0.10.0] - 2024-08-20
 ### Changed
 - [PR#118](https://github.com/rust-minidump/minidump-writer/pull/118) resolved [#72](https://github.com/rust-minidump/minidump-writer/issues/72) by adding support for reading process memory via `process_vm_readv` and `/proc/{pid}/mem`, in addition to the original `PTRACE_PEEKDATA`. This gives significant performance benefits as memory can now be read in blocks of arbitrary size instead of word-by-word with ptrace.
