@@ -1,4 +1,6 @@
+use crate::error_list::SoftErrorList;
 pub use reader::ProcfsAuxvIter;
+
 use {
     crate::Pid,
     std::{fs::File, io::BufReader},
@@ -79,17 +81,27 @@ pub struct AuxvDumpInfo {
 }
 
 impl AuxvDumpInfo {
-    pub fn try_filling_missing_info(&mut self, pid: Pid) -> Result<(), AuxvError> {
+    pub fn try_filling_missing_info(
+        &mut self,
+        pid: Pid,
+    ) -> Result<SoftErrorList<AuxvError>, AuxvError> {
         if self.is_complete() {
-            return Ok(());
+            return Ok(SoftErrorList::default());
         }
 
         let auxv_path = format!("/proc/{pid}/auxv");
         let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
 
-        for AuxvPair { key, value } in
-            ProcfsAuxvIter::new(BufReader::new(auxv_file)).filter_map(Result::ok)
-        {
+        let mut soft_errors = SoftErrorList::default();
+
+        for pair_result in ProcfsAuxvIter::new(BufReader::new(auxv_file)) {
+            let AuxvPair { key, value } = match pair_result {
+                Ok(pair) => pair,
+                Err(e) => {
+                    soft_errors.push(e);
+                    continue;
+                }
+            };
             let dest_field = match key {
                 consts::AT_PHNUM => &mut self.program_header_count,
                 consts::AT_PHDR => &mut self.program_header_address,
@@ -102,7 +114,7 @@ impl AuxvDumpInfo {
             }
         }
 
-        Ok(())
+        Ok(soft_errors)
     }
     pub fn get_program_header_count(&self) -> Option<AuxvType> {
         self.program_header_count

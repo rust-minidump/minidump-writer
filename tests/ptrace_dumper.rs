@@ -91,14 +91,17 @@ fn test_thread_list_from_parent() {
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
-    let mut dumper = PtraceDumper::new(
+    let (mut dumper, _) = PtraceDumper::new_report_soft_errors(
         pid,
         minidump_writer::minidump_writer::STOP_TIMEOUT,
         Default::default(),
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
-    dumper.suspend_threads().expect("Could not suspend threads");
+    assert!(
+        dumper.suspend_threads().is_empty(),
+        "failed to suspend all threads"
+    );
 
     // let mut matching_threads = 0;
     for (idx, curr_thread) in dumper.threads.iter().enumerate() {
@@ -146,7 +149,10 @@ fn test_thread_list_from_parent() {
             0
         }; */
     }
-    dumper.resume_threads().expect("Failed to resume threads");
+    assert!(
+        dumper.resume_threads().is_empty(),
+        "Failed to resume threads"
+    );
     child.kill().expect("Failed to kill process");
 
     // Reap child
@@ -272,14 +278,17 @@ fn test_sanitize_stack_copy() {
     let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
 
-    let mut dumper = PtraceDumper::new(
+    let (mut dumper, _) = PtraceDumper::new_report_soft_errors(
         pid,
         minidump_writer::minidump_writer::STOP_TIMEOUT,
         Default::default(),
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
-    dumper.suspend_threads().expect("Could not suspend threads");
+    assert!(
+        dumper.suspend_threads().is_empty(),
+        "failed to suspend all threads"
+    );
     let thread_info = dumper
         .get_thread_info_by_index(0)
         .expect("Couldn't find thread_info");
@@ -374,7 +383,10 @@ fn test_sanitize_stack_copy() {
 
     assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
 
-    dumper.resume_threads().expect("Failed to resume threads");
+    assert!(
+        dumper.resume_threads().is_empty(),
+        "Failed to resume threads"
+    );
     child.kill().expect("Failed to kill process");
 
     // Reap child

@@ -1,15 +1,18 @@
 #[cfg(target_os = "android")]
 use crate::linux::android::late_process_mappings;
-use crate::linux::{
-    auxv::AuxvDumpInfo,
-    errors::{DumperError, InitError, ThreadInfoError},
-    maps_reader::MappingInfo,
-    module_reader,
-    thread_info::ThreadInfo,
-    Pid,
-};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::thread_info;
+use crate::{
+    error_list::SoftErrorList,
+    linux::{
+        auxv::AuxvDumpInfo,
+        errors::{DumperError, ThreadInfoError},
+        maps_reader::MappingInfo,
+        module_reader,
+        thread_info::ThreadInfo,
+        Pid,
+    },
+};
 use nix::{
     errno::Errno,
     sys::{ptrace, signal, wait},
@@ -19,9 +22,15 @@ use procfs_core::{
     FromRead, ProcError,
 };
 use std::{
+    ffi::OsString,
     path,
     result::Result,
     time::{Duration, Instant},
+};
+
+use super::{
+    auxv::AuxvError,
+    errors::{AndroidError, MapsReaderError},
 };
 
 #[derive(Debug, Clone)]
@@ -55,7 +64,45 @@ impl Drop for PtraceDumper {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum StopProcessError {
+pub enum InitError {
+    #[error("failed to read auxv")]
+    ReadAuxvFailed(#[source] crate::auxv::AuxvError),
+    #[error("IO error for file {0}")]
+    IOError(String, #[source] std::io::Error),
+    #[error("Failed Android specific late init")]
+    AndroidLateInitError(#[from] AndroidError),
+    #[error("Failed to read the page size")]
+    PageSizeError(#[from] Errno),
+    #[error("Ptrace does not function within the same process")]
+    CannotPtraceSameProcess,
+    #[error("Failed to stop the target process")]
+    StopProcessFailed(#[source] StopProcessError),
+    #[error("Errors occurred while filling missing Auxv info")]
+    FillMissingAuxvInfoErrors(#[source] SoftErrorList<AuxvError>),
+    #[error("Failed filling missing Auxv info")]
+    FillMissingAuxvInfoFailed(#[source] AuxvError),
+    #[error("Failed reading proc/pid/task entry for process")]
+    ReadProcessThreadEntryFailed(#[source] std::io::Error),
+    #[error("Process task entry `{0:?}` could not be parsed as a TID")]
+    ProcessTaskEntryNotTid(OsString),
+    #[error("Failed to read thread name")]
+    ReadThreadNameFailed(#[source] std::io::Error),
+    #[error("Proc task directory `{0:?}` is not a directory")]
+    ProcPidTaskNotDirectory(String),
+    #[error("Errors while enumerating threads")]
+    EnumerateThreadsErrors(#[source] SoftErrorList<InitError>),
+    #[error("Failed to enumerate threads")]
+    EnumerateThreadsFailed(#[source] Box<InitError>),
+    #[error("Failed to read process map file")]
+    ReadProcessMapFileFailed(#[source] ProcError),
+    #[error("Failed to aggregate process mappings")]
+    AggregateMappingsFailed(#[source] MapsReaderError),
+    #[error("Failed to enumerate process mappings")]
+    EnumerateMappingsFailed(#[source] Box<InitError>),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StopProcessError {
     #[error("Failed to stop the process")]
     Stop(#[from] Errno),
     #[error("Failed to get the process state")]
@@ -65,7 +112,7 @@ enum StopProcessError {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ContinueProcessError {
+pub enum ContinueProcessError {
     #[error("Failed to continue the process")]
     Continue(#[from] Errno),
 }
@@ -88,7 +135,11 @@ fn ptrace_detach(child: Pid) -> Result<(), DumperError> {
 
 impl PtraceDumper {
     /// Constructs a dumper for extracting information from the specified process id
-    pub fn new(pid: Pid, stop_timeout: Duration, auxv: AuxvDumpInfo) -> Result<Self, InitError> {
+    pub fn new_report_soft_errors(
+        pid: Pid,
+        stop_timeout: Duration,
+        auxv: AuxvDumpInfo,
+    ) -> Result<(Self, SoftErrorList<InitError>), InitError> {
         if pid == std::process::id() as _ {
             return Err(InitError::CannotPtraceSameProcess);
         }
@@ -101,28 +152,56 @@ impl PtraceDumper {
             mappings: Vec::new(),
             page_size: 0,
         };
-        dumper.init(stop_timeout)?;
-        Ok(dumper)
+        let soft_errors = dumper.init(stop_timeout)?;
+        Ok((dumper, soft_errors))
     }
 
     // TODO: late_init for chromeos and android
-    pub fn init(&mut self, stop_timeout: Duration) -> Result<(), InitError> {
+    pub fn init(&mut self, stop_timeout: Duration) -> Result<SoftErrorList<InitError>, InitError> {
+        let mut soft_errors = SoftErrorList::default();
+
         // Stopping the process is best-effort.
         if let Err(e) = self.stop_process(stop_timeout) {
-            log::warn!("failed to stop process {}: {e}", self.pid);
+            soft_errors.push(InitError::StopProcessFailed(e));
         }
 
-        if let Err(e) = self.auxv.try_filling_missing_info(self.pid) {
-            log::warn!("failed trying to fill in missing auxv info: {e}");
+        // Even if we completely fail to fill in any additional Auxv info, we can still press
+        // forward.
+        match self.auxv.try_filling_missing_info(self.pid) {
+            Ok(auxv_soft_errors) if !auxv_soft_errors.is_empty() => {
+                soft_errors.push(InitError::FillMissingAuxvInfoErrors(auxv_soft_errors));
+            }
+            Err(e) => {
+                soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
+            }
+            _ => (),
         }
 
-        self.enumerate_threads()?;
-        self.enumerate_mappings()?;
+        // If we completely fail to enumerate any threads... Some information is still better than
+        // no information!
+        match self.enumerate_threads() {
+            Ok(enumerate_soft_errors) if !enumerate_soft_errors.is_empty() => {
+                soft_errors.push(InitError::EnumerateThreadsErrors(enumerate_soft_errors));
+            }
+            Err(e) => {
+                soft_errors.push(InitError::EnumerateThreadsFailed(Box::new(e)));
+            }
+            _ => (),
+        }
+
+        // Same with mappings -- Some information is still better than no information!
+        match self.enumerate_mappings() {
+            Ok(()) => (),
+            Err(e) => {
+                soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
+            }
+        }
+
         self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
             .expect("page size apparently unlimited: doesn't make sense.")
             as usize;
 
-        Ok(())
+        Ok(soft_errors)
     }
 
     #[cfg_attr(not(target_os = "android"), allow(clippy::unused_self))]
@@ -207,36 +286,39 @@ impl PtraceDumper {
         ptrace_detach(child)
     }
 
-    pub fn suspend_threads(&mut self) -> Result<(), DumperError> {
-        let threads_count = self.threads.len();
+    pub fn suspend_threads(&mut self) -> SoftErrorList<DumperError> {
+        let mut soft_errors = SoftErrorList::default();
+
         // Iterate over all threads and try to suspend them.
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(|x| Self::suspend_thread(x.tid).is_ok());
+        self.threads.retain(|x| match Self::suspend_thread(x.tid) {
+            Ok(()) => true,
+            Err(e) => {
+                soft_errors.push(e);
+                false
+            }
+        });
 
-        if self.threads.is_empty() {
-            Err(DumperError::SuspendNoThreadsLeft(threads_count))
-        } else {
-            self.threads_suspended = true;
-            Ok(())
-        }
+        self.threads_suspended = true;
+        soft_errors
     }
 
-    pub fn resume_threads(&mut self) -> Result<(), DumperError> {
-        let mut result = Ok(());
+    pub fn resume_threads(&mut self) -> SoftErrorList<DumperError> {
+        let mut soft_errors = SoftErrorList::default();
         if self.threads_suspended {
             for thread in &self.threads {
                 match Self::resume_thread(thread.tid) {
-                    Ok(_) => {}
-                    x => {
-                        result = x;
+                    Ok(()) => (),
+                    Err(e) => {
+                        soft_errors.push(e);
                     }
                 }
             }
         }
         self.threads_suspended = false;
-        result
+        soft_errors
     }
 
     /// Send SIGSTOP to the process so that we can get a consistent state.
@@ -273,31 +355,46 @@ impl PtraceDumper {
 
     /// Parse /proc/$pid/task to list all the threads of the process identified by
     /// pid.
-    fn enumerate_threads(&mut self) -> Result<(), InitError> {
+    fn enumerate_threads(&mut self) -> Result<SoftErrorList<InitError>, InitError> {
+        let mut soft_errors = SoftErrorList::default();
+
         let pid = self.pid;
         let filename = format!("/proc/{}/task", pid);
         let task_path = path::PathBuf::from(&filename);
-        if task_path.is_dir() {
-            std::fs::read_dir(task_path)
-                .map_err(|e| InitError::IOError(filename, e))?
-                .filter_map(|entry| entry.ok()) // Filter out bad entries
-                .filter_map(|entry| {
-                    entry
-                        .file_name() // Parse name to Pid, filter out those that are unparsable
-                        .to_str()
-                        .and_then(|name| name.parse::<Pid>().ok())
-                })
-                .map(|tid| {
-                    // Read the thread-name (if there is any)
-                    let name = std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid))
-                        // NOTE: This is a bit wasteful as it does two allocations in order to trim, but leaving it for now
-                        .map(|s| s.trim_end().to_string())
-                        .ok();
-                    (tid, name)
-                })
-                .for_each(|(tid, name)| self.threads.push(Thread { tid, name }));
+        if !task_path.is_dir() {
+            return Err(InitError::ProcPidTaskNotDirectory(filename));
         }
-        Ok(())
+
+        for entry in std::fs::read_dir(task_path).map_err(|e| InitError::IOError(filename, e))? {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    soft_errors.push(InitError::ReadProcessThreadEntryFailed(e));
+                    continue;
+                }
+            };
+            let file_name = entry.file_name();
+            let tid = match file_name.to_str().and_then(|name| name.parse::<Pid>().ok()) {
+                Some(tid) => tid,
+                None => {
+                    soft_errors.push(InitError::ProcessTaskEntryNotTid(file_name));
+                    continue;
+                }
+            };
+
+            // Read the thread-name (if there is any)
+            let name = match std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid)) {
+                Ok(name) => Some(name.trim_end().to_string()),
+                Err(e) => {
+                    soft_errors.push(InitError::ReadThreadNameFailed(e));
+                    None
+                }
+            };
+
+            self.threads.push(Thread { tid, name });
+        }
+
+        Ok(soft_errors)
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
@@ -309,22 +406,21 @@ impl PtraceDumper {
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
         let linux_gate_loc = self.auxv.get_linux_gate_address().unwrap_or_default();
+        let maps_path = format!("/proc/{}/maps", self.pid);
+        let maps_file =
+            std::fs::File::open(&maps_path).map_err(|e| InitError::IOError(maps_path, e))?;
+
+        use procfs_core::FromRead;
+        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
+            .map_err(InitError::ReadProcessMapFileFailed)?;
+
+        self.mappings = MappingInfo::aggregate(maps, linux_gate_loc)
+            .map_err(InitError::AggregateMappingsFailed)?;
+
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
-        let entry_point_loc = self.auxv.get_entry_address().unwrap_or_default();
-        let filename = format!("/proc/{}/maps", self.pid);
-        let errmap = |e| InitError::IOError(filename.clone(), e);
-        let maps_path = path::PathBuf::from(&filename);
-        let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
-
-        use procfs_core::FromRead;
-        self.mappings = procfs_core::process::MemoryMaps::from_read(maps_file)
-            .ok()
-            .and_then(|maps| MappingInfo::aggregate(maps, linux_gate_loc).ok())
-            .unwrap_or_default();
-
-        if entry_point_loc != 0 {
+        if let Some(entry_point_loc) = self.auxv.get_entry_address() {
             let mut swap_idx = None;
             for (idx, module) in self.mappings.iter().enumerate() {
                 // If this module contains the entry-point, and it's not already the first

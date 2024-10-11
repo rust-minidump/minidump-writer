@@ -1,26 +1,12 @@
 use crate::{
-    dir_section::FileWriterError, maps_reader::MappingInfo, mem_writer::MemoryWriterError, Pid,
+    dir_section::FileWriterError, error_list::SoftErrorList, maps_reader::MappingInfo,
+    mem_writer::MemoryWriterError, Pid,
 };
 use goblin;
-use nix::errno::Errno;
 use std::ffi::OsString;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum InitError {
-    #[error("failed to read auxv")]
-    ReadAuxvFailed(crate::auxv::AuxvError),
-    #[error("IO error for file {0}")]
-    IOError(String, #[source] std::io::Error),
-    #[error("crash thread does not reference principal mapping")]
-    PrincipalMappingNotReferenced,
-    #[error("Failed Android specific late init")]
-    AndroidLateInitError(#[from] AndroidError),
-    #[error("Failed to read the page size")]
-    PageSizeError(#[from] Errno),
-    #[error("Ptrace does not function within the same process")]
-    CannotPtraceSameProcess,
-}
+use super::ptrace_dumper::InitError;
 
 #[derive(Error, Debug)]
 pub enum MapsReaderError {
@@ -110,8 +96,6 @@ pub enum DumperError {
     CopyFromProcessError(#[from] CopyFromProcessError),
     #[error("Skipped thread {0} due to it being part of the seccomp sandbox's trusted code")]
     DetachSkippedThread(Pid),
-    #[error("No threads left to suspend out of {0}")]
-    SuspendNoThreadsLeft(usize),
     #[error("No mapping for stack pointer found")]
     NoStackPointerMapping,
     #[error("Failed slice conversion")]
@@ -180,6 +164,8 @@ pub enum SectionSystemInfoError {
     MemoryWriterError(#[from] MemoryWriterError),
     #[error("Failed to get CPU Info")]
     CpuInfoError(#[from] CpuInfoError),
+    #[error("Failed trying to write CPU information")]
+    WriteCpuInformationFailed(#[source] CpuInfoError),
 }
 
 #[derive(Debug, Error)]
@@ -250,6 +236,38 @@ pub enum WriterError {
     FileWriterError(#[from] FileWriterError),
     #[error("Failed to get current timestamp when writing header of minidump")]
     SystemTimeError(#[from] std::time::SystemTimeError),
+    #[error("Errors occurred while initializing PTraceDumper")]
+    InitErrors(#[source] SoftErrorList<InitError>),
+    #[error("Errors occurred while suspending threads")]
+    SuspendThreadsErrors(#[source] SoftErrorList<DumperError>),
+    #[error("Crash thread does not reference principal mapping")]
+    PrincipalMappingNotReferenced,
+    #[error("Errors occurred while writing system info")]
+    WriteSystemInfoErrors(#[source] SoftErrorList<SectionSystemInfoError>),
+    #[error("Failed writing cpuinfo")]
+    WriteCpuInfoFailed(#[source] MemoryWriterError),
+    #[error("Failed writing thread proc status")]
+    WriteThreadProcStatusFailed(#[source] MemoryWriterError),
+    #[error("Failed writing OS Release Information")]
+    WriteOsReleaseInfoFailed(#[source] MemoryWriterError),
+    #[error("Failed writing process command line")]
+    WriteCommandLineFailed(#[source] MemoryWriterError),
+    #[error("Writing process environment failed")]
+    WriteEnvironmentFailed(#[source] MemoryWriterError),
+    #[error("Failed to write auxv file")]
+    WriteAuxvFailed(#[source] MemoryWriterError),
+    #[error("Failed to write maps file")]
+    WriteMapsFailed(#[source] MemoryWriterError),
+    #[error("Failed writing DSO Debug Stream")]
+    WriteDSODebugStreamFailed(#[source] SectionDsoDebugError),
+    #[error("Failed writing limits file")]
+    WriteLimitsFailed(#[source] MemoryWriterError),
+    #[error("Failed writing handle data stream")]
+    WriteHandleDataStreamFailed(#[source] SectionHandleDataStreamError),
+    #[error("Failed writing handle data stream direction entry")]
+    WriteHandleDataStreamDirentFailed(#[source] FileWriterError),
+    #[error("No threads left to suspend out of {0}")]
+    SuspendNoThreadsLeft(usize),
 }
 
 #[derive(Debug, Error)]

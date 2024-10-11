@@ -19,3 +19,5 @@ pub mod minidump_format;
 
 pub mod dir_section;
 pub mod mem_writer;
+
+mod error_list;

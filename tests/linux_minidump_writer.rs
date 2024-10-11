@@ -330,8 +330,6 @@ contextual_test! {
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
         assert_eq!(status, Signal::SIGKILL as i32);
-
-        assert!(res.is_err());
     }
 }
 

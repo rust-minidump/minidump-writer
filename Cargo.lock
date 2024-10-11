@@ -181,7 +181,7 @@ dependencies = [
  "circular",
  "debugid",
  "futures-util",
- "minidump-common",
+ "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom",
  "range-map",
  "thiserror",
@@ -1191,7 +1191,7 @@ dependencies = [
  "debugid",
  "encoding_rs",
  "memmap2",
- "minidump-common",
+ "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits",
  "procfs-core",
  "range-map",
@@ -1200,6 +1200,19 @@ dependencies = [
  "time",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "minidump-common"
+version = "0.22.0"
+dependencies = [
+ "bitflags 2.6.0",
+ "debugid",
+ "num-derive",
+ "num-traits",
+ "range-map",
+ "scroll 0.12.0",
+ "smart-default",
 ]
 
 [[package]]
@@ -1228,7 +1241,7 @@ dependencies = [
  "debugid",
  "futures-util",
  "minidump",
- "minidump-common",
+ "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "minidump-unwind",
  "scroll 0.12.0",
  "serde",
@@ -1250,7 +1263,7 @@ dependencies = [
  "futures-util",
  "memmap2",
  "minidump",
- "minidump-common",
+ "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "object",
  "scroll 0.12.0",
  "tracing",
@@ -1275,7 +1288,7 @@ dependencies = [
  "memmap2",
  "memoffset",
  "minidump",
- "minidump-common",
+ "minidump-common 0.22.0",
  "minidump-processor",
  "minidump-unwind",
  "nix",

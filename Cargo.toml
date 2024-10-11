@@ -15,7 +15,7 @@ cfg-if = "1.0"
 crash-context = "0.6"
 log = "0.4"
 memoffset = "0.9"
-minidump-common = "0.22"
+minidump-common = { path = "../rust-minidump/minidump-common" }
 scroll = "0.12"
 tempfile = "3.8"
 thiserror = "1.0"
