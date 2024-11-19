@@ -1,4 +1,4 @@
-use crate::error_list::SoftErrorList;
+use crate::error_list::{serializers::*, SoftErrorSublist};
 pub use reader::ProcfsAuxvIter;
 
 use {
@@ -84,15 +84,14 @@ impl AuxvDumpInfo {
     pub fn try_filling_missing_info(
         &mut self,
         pid: Pid,
-    ) -> Result<SoftErrorList<AuxvError>, AuxvError> {
+        mut soft_errors: SoftErrorSublist<'_, AuxvError>,
+    ) -> Result<(), AuxvError> {
         if self.is_complete() {
-            return Ok(SoftErrorList::default());
+            return Ok(());
         }
 
         let auxv_path = format!("/proc/{pid}/auxv");
         let auxv_file = File::open(&auxv_path).map_err(|e| AuxvError::OpenError(auxv_path, e))?;
-
-        let mut soft_errors = SoftErrorList::default();
 
         for pair_result in ProcfsAuxvIter::new(BufReader::new(auxv_file)) {
             let AuxvPair { key, value } = match pair_result {
@@ -114,7 +113,12 @@ impl AuxvDumpInfo {
             }
         }
 
-        Ok(soft_errors)
+        crate::if_fail_enabled!(
+            FillMissingAuxvInfo,
+            soft_errors.push(AuxvError::InvalidFormat)
+        );
+
+        Ok(())
     }
     pub fn get_program_header_count(&self) -> Option<AuxvType> {
         self.program_header_count
@@ -136,14 +140,23 @@ impl AuxvDumpInfo {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, serde::Serialize)]
 pub enum AuxvError {
     #[error("Failed to open file {0}")]
-    OpenError(String, #[source] std::io::Error),
+    OpenError(
+        String,
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("No auxv entry found for PID {0}")]
     NoAuxvEntryFound(Pid),
     #[error("Invalid auxv format (should not hit EOF before AT_NULL)")]
     InvalidFormat,
     #[error("IO Error")]
-    IOError(#[from] std::io::Error),
+    IOError(
+        #[from]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
 }

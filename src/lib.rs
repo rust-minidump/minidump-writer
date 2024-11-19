@@ -1,3 +1,5 @@
+pub use error_list::SoftErrorList;
+
 cfg_if::cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
@@ -19,5 +21,7 @@ pub mod minidump_format;
 
 pub mod dir_section;
 pub mod mem_writer;
+
+pub mod fail_enabled;
 
 mod error_list;

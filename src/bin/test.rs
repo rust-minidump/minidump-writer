@@ -8,7 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 mod linux {
     use super::*;
     use minidump_writer::{
-        minidump_writer::STOP_TIMEOUT, module_reader, ptrace_dumper::PtraceDumper,
+        minidump_writer::STOP_TIMEOUT, module_reader, ptrace_dumper::PtraceDumper, SoftErrorList,
         LINUX_GATE_LIBRARY_NAME,
     };
     use nix::{
@@ -26,15 +26,23 @@ mod linux {
 
     fn test_setup() -> Result<()> {
         let ppid = getppid();
-        let (_dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
+        let _dumper = PtraceDumper::new_report_soft_errors(
+            ppid.as_raw(),
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
         Ok(())
     }
 
     fn test_thread_list() -> Result<()> {
         let ppid = getppid();
-        let (dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
+        let dumper = PtraceDumper::new_report_soft_errors(
+            ppid.as_raw(),
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
         test!(!dumper.threads.is_empty(), "No threads");
         test!(
             dumper
@@ -61,10 +69,16 @@ mod linux {
         use minidump_writer::mem_reader::MemReader;
 
         let ppid = getppid().as_raw();
-        let (mut dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid, STOP_TIMEOUT, Default::default())?;
+        let mut dumper = PtraceDumper::new_report_soft_errors(
+            ppid,
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
 
-        if let Some(soft_errors) = dumper.suspend_threads().some() {
+        let mut soft_errors = SoftErrorList::default();
+        dumper.suspend_threads(soft_errors.inserted_sublist());
+        if !soft_errors.is_empty() {
             return Err(soft_errors.into());
         }
 
@@ -119,7 +133,9 @@ mod linux {
 
         test!(heap_res == expected_heap, "heap var not correct");
 
-        if let Some(soft_errors) = dumper.resume_threads().some() {
+        let mut soft_errors = SoftErrorList::default();
+        dumper.resume_threads(soft_errors.inserted_sublist());
+        if !soft_errors.is_empty() {
             return Err(soft_errors.into());
         }
 
@@ -128,8 +144,12 @@ mod linux {
 
     fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
         let ppid = getppid();
-        let (dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid.as_raw(), STOP_TIMEOUT, Default::default())?;
+        let dumper = PtraceDumper::new_report_soft_errors(
+            ppid.as_raw(),
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
         dumper
             .find_mapping(addr1)
             .ok_or("No mapping for addr1 found")?;
@@ -146,9 +166,15 @@ mod linux {
         let ppid = getppid().as_raw();
         let exe_link = format!("/proc/{ppid}/exe");
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
-        let (mut dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid, STOP_TIMEOUT, Default::default())?;
-        if let Some(soft_errors) = dumper.suspend_threads().some() {
+        let mut dumper = PtraceDumper::new_report_soft_errors(
+            ppid,
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
+        let mut soft_errors = SoftErrorList::default();
+        dumper.suspend_threads(soft_errors.inserted_sublist());
+        if !soft_errors.is_empty() {
             return Err(soft_errors.into());
         }
 
@@ -161,9 +187,12 @@ mod linux {
         }
         let idx = found_exe.unwrap();
         let module_reader::BuildId(id) = dumper.from_process_memory_for_index(idx)?;
-        if let Some(soft_errors) = dumper.resume_threads().some() {
+        let mut soft_errors = SoftErrorList::default();
+        dumper.resume_threads(soft_errors.inserted_sublist());
+        if !soft_errors.is_empty() {
             return Err(soft_errors.into());
         }
+
         assert!(!id.is_empty());
         assert!(id.iter().any(|&x| x > 0));
         Ok(())
@@ -171,10 +200,11 @@ mod linux {
 
     fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
         // Now check that PtraceDumper interpreted the mappings properly.
-        let (dumper, _soft_errors) = PtraceDumper::new_report_soft_errors(
+        let dumper = PtraceDumper::new_report_soft_errors(
             getppid().as_raw(),
             STOP_TIMEOUT,
             Default::default(),
+            SoftErrorList::null_sublist(),
         )?;
         let mut mapping_count = 0;
         for map in &dumper.mappings {
@@ -197,20 +227,28 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid().as_raw();
-        let (mut dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid, STOP_TIMEOUT, Default::default())?;
+        let mut dumper = PtraceDumper::new_report_soft_errors(
+            ppid,
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
         let mut found_linux_gate = false;
         for mapping in dumper.mappings.clone() {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
                 found_linux_gate = true;
-                if let Some(soft_errors) = dumper.suspend_threads().some() {
+                let mut soft_errors = SoftErrorList::default();
+                dumper.suspend_threads(soft_errors.inserted_sublist());
+                if !soft_errors.is_empty() {
                     return Err(soft_errors.into());
                 }
                 let module_reader::BuildId(id) =
                     PtraceDumper::from_process_memory_for_mapping(&mapping, ppid)?;
                 test!(!id.is_empty(), "id-vec is empty");
                 test!(id.iter().any(|&x| x > 0), "all id elements are 0");
-                if let Some(soft_errors) = dumper.resume_threads().some() {
+                let mut soft_errors = SoftErrorList::default();
+                dumper.resume_threads(soft_errors.inserted_sublist());
+                if !soft_errors.is_empty() {
                     return Err(soft_errors.into());
                 }
                 break;
@@ -222,8 +260,12 @@ mod linux {
 
     fn test_mappings_include_linux_gate() -> Result<()> {
         let ppid = getppid().as_raw();
-        let (dumper, _soft_errors) =
-            PtraceDumper::new_report_soft_errors(ppid, STOP_TIMEOUT, Default::default())?;
+        let dumper = PtraceDumper::new_report_soft_errors(
+            ppid,
+            STOP_TIMEOUT,
+            Default::default(),
+            SoftErrorList::null_sublist(),
+        )?;
         let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
         test!(linux_gate_loc != 0, "linux_gate_loc == 0");
         let mut found_linux_gate = false;
@@ -231,7 +273,7 @@ mod linux {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
                 found_linux_gate = true;
                 test!(
-                    linux_gate_loc == mapping.start_address.try_into()?,
+                    usize::try_from(linux_gate_loc)? == mapping.start_address,
                     "linux_gate_loc != start_address"
                 );
 

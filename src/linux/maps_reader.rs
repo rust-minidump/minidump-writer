@@ -1,5 +1,4 @@
-use crate::auxv::AuxvType;
-use crate::errors::MapsReaderError;
+use crate::{auxv::AuxvType, errors::MapsReaderError};
 use byteorder::{NativeEndian, ReadBytesExt};
 use goblin::elf;
 use memmap2::{Mmap, MmapOptions};
@@ -13,7 +12,7 @@ pub const DELETED_SUFFIX: &[u8] = b" (deleted)";
 
 type Result<T> = std::result::Result<T, MapsReaderError>;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
 pub struct SystemMappingInfo {
     pub start_address: usize,
     pub end_address: usize,
@@ -21,7 +20,7 @@ pub struct SystemMappingInfo {
 
 // One of these is produced for each mapping in the process (i.e. line in
 // /proc/$x/maps).
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
 pub struct MappingInfo {
     // On Android, relocation packing can mean that the reported start
     // address of the mapping must be adjusted by a bias in order to
@@ -112,7 +111,8 @@ impl MappingInfo {
 
             let is_path = is_mapping_a_path(pathname.as_deref());
 
-            if !is_path && linux_gate_loc != 0 && start_address == linux_gate_loc.try_into()? {
+            if !is_path && linux_gate_loc != 0 && start_address == usize::try_from(linux_gate_loc)?
+            {
                 pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
                 offset = 0;
             }

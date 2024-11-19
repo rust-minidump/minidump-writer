@@ -44,6 +44,11 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64
     } as u16;
 
+    crate::return_err_if_fail_enabled!(
+        CpuInfoFileOpen,
+        std::io::Error::other("test requested cpuinfo file failure")
+    );
+
     let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
 
     let mut vendor_id = String::new();

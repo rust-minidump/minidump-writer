@@ -148,22 +148,21 @@ impl MinidumpWriter {
 
         let mut soft_errors = SoftErrorList::default();
 
-        let (mut dumper, init_soft_errors) =
-            PtraceDumper::new_report_soft_errors(self.process_id, self.stop_timeout, auxv)?;
-
-        if !init_soft_errors.is_empty() {
-            soft_errors.push(WriterError::InitErrors(init_soft_errors));
-        }
+        let mut dumper = PtraceDumper::new_report_soft_errors(
+            self.process_id,
+            self.stop_timeout,
+            auxv,
+            soft_errors.map_sublist(WriterError::InitErrors),
+        )?;
 
         let threads_count = dumper.threads.len();
 
-        if let Some(suspend_soft_errors) = dumper.suspend_threads().some() {
-            if dumper.threads.is_empty() {
-                // TBH I'm not sure this even needs to be a hard error. Is a minidump without any
-                // thread info still at-least a little useful?
-                return Err(WriterError::SuspendNoThreadsLeft(threads_count));
-            }
-            soft_errors.push(WriterError::SuspendThreadsErrors(suspend_soft_errors));
+        dumper.suspend_threads(soft_errors.map_sublist(WriterError::SuspendThreadsErrors));
+
+        if dumper.threads.is_empty() {
+            // TBH I'm not sure this even needs to be a hard error. Is a minidump without any
+            // thread info still at-least a little useful?
+            return Err(WriterError::SuspendNoThreadsLeft(threads_count));
         }
 
         dumper.late_init()?;
@@ -182,7 +181,8 @@ impl MinidumpWriter {
         self.generate_dump(&mut buffer, &mut dumper, soft_errors, destination)?;
 
         // TODO - Record these errors? Or maybe we don't care?
-        let _resume_soft_errors = dumper.resume_threads();
+        let mut soft_errors = SoftErrorList::default();
+        dumper.resume_threads(soft_errors.map_sublist(WriterError::ResumeThreadsErrors));
 
         Ok(buffer.into())
     }
@@ -290,12 +290,11 @@ impl MinidumpWriter {
         let dirent = exception_stream::write(self, buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let (dirent, systeminfo_soft_errors) = systeminfo_stream::write(buffer)?;
+        let dirent = systeminfo_stream::write(
+            buffer,
+            soft_errors.map_sublist(WriterError::WriteSystemInfoErrors),
+        )?;
         dir_section.write_to_file(buffer, Some(dirent))?;
-
-        if !systeminfo_soft_errors.is_empty() {
-            soft_errors.push(WriterError::WriteSystemInfoErrors(systeminfo_soft_errors));
-        }
 
         let dirent = memory_info_list_stream::write(self, buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
@@ -455,8 +454,10 @@ fn write_soft_errors(
     buffer: &mut DumpBuf,
     soft_errors: SoftErrorList<WriterError>,
 ) -> Result<MDLocationDescriptor> {
-    let soft_error_list_str = format!("{soft_errors:?}");
-
-    let section = MemoryArrayWriter::write_bytes(buffer, soft_error_list_str.as_bytes());
+    let soft_errors_json = soft_errors
+        .to_json()
+        .map_err(WriterError::ConvertToJsonFailed)?;
+    let soft_errors_json_str = format!("{soft_errors_json:#}");
+    let section = MemoryArrayWriter::write_bytes(buffer, soft_errors_json_str.as_bytes());
     Ok(section.location())
 }

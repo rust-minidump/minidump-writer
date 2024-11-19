@@ -1,7 +1,7 @@
 //! All of these tests are specific to ptrace
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
-use minidump_writer::ptrace_dumper::PtraceDumper;
+use minidump_writer::{ptrace_dumper::PtraceDumper, SoftErrorList};
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::sys::signal::Signal;
 use std::convert::TryInto;
@@ -91,17 +91,18 @@ fn test_thread_list_from_parent() {
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
-    let (mut dumper, _) = PtraceDumper::new_report_soft_errors(
+    let mut dumper = PtraceDumper::new_report_soft_errors(
         pid,
         minidump_writer::minidump_writer::STOP_TIMEOUT,
         Default::default(),
+        SoftErrorList::null_sublist(),
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
-    assert!(
-        dumper.suspend_threads().is_empty(),
-        "failed to suspend all threads"
-    );
+
+    let mut soft_errors = SoftErrorList::default();
+    dumper.suspend_threads(soft_errors.inserted_sublist());
+    assert!(soft_errors.is_empty(), "failed to suspend all threads");
 
     // let mut matching_threads = 0;
     for (idx, curr_thread) in dumper.threads.iter().enumerate() {
@@ -149,10 +150,9 @@ fn test_thread_list_from_parent() {
             0
         }; */
     }
-    assert!(
-        dumper.resume_threads().is_empty(),
-        "Failed to resume threads"
-    );
+    let mut soft_errors = SoftErrorList::default();
+    dumper.resume_threads(soft_errors.inserted_sublist());
+    assert!(soft_errors.is_empty(), "Failed to resume threads");
     child.kill().expect("Failed to kill process");
 
     // Reap child
@@ -278,17 +278,18 @@ fn test_sanitize_stack_copy() {
     let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
 
-    let (mut dumper, _) = PtraceDumper::new_report_soft_errors(
+    let mut dumper = PtraceDumper::new_report_soft_errors(
         pid,
         minidump_writer::minidump_writer::STOP_TIMEOUT,
         Default::default(),
+        SoftErrorList::null_sublist(),
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
-    assert!(
-        dumper.suspend_threads().is_empty(),
-        "failed to suspend all threads"
-    );
+
+    let mut soft_errors = SoftErrorList::default();
+    dumper.suspend_threads(soft_errors.inserted_sublist());
+    assert!(soft_errors.is_empty(), "failed to suspend all threads");
     let thread_info = dumper
         .get_thread_info_by_index(0)
         .expect("Couldn't find thread_info");
@@ -383,10 +384,9 @@ fn test_sanitize_stack_copy() {
 
     assert_eq!(simulated_stack[0..size_of::<usize>()], defaced);
 
-    assert!(
-        dumper.resume_threads().is_empty(),
-        "Failed to resume threads"
-    );
+    let mut soft_errors = SoftErrorList::default();
+    dumper.resume_threads(soft_errors.inserted_sublist());
+    assert!(soft_errors.is_empty(), "Failed to resume threads");
     child.kill().expect("Failed to kill process");
 
     // Reap child

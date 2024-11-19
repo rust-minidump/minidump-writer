@@ -3,7 +3,7 @@ use crate::linux::android::late_process_mappings;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::thread_info;
 use crate::{
-    error_list::SoftErrorList,
+    error_list::{serializers::*, SoftErrorList, SoftErrorSublist},
     linux::{
         auxv::AuxvDumpInfo,
         errors::{DumperError, ThreadInfoError},
@@ -57,22 +57,31 @@ pub const AT_SYSINFO_EHDR: u64 = 33;
 impl Drop for PtraceDumper {
     fn drop(&mut self) {
         // Always try to resume all threads (e.g. in case of error)
-        let _ = self.resume_threads();
+        self.resume_threads(SoftErrorList::null_sublist());
         // Always allow the process to continue.
         let _ = self.continue_process();
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum InitError {
     #[error("failed to read auxv")]
     ReadAuxvFailed(#[source] crate::auxv::AuxvError),
     #[error("IO error for file {0}")]
-    IOError(String, #[source] std::io::Error),
+    IOError(
+        String,
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
     #[error("Failed to read the page size")]
-    PageSizeError(#[from] Errno),
+    PageSizeError(
+        #[from]
+        #[serde(serialize_with = "serialize_nix_error")]
+        nix::Error,
+    ),
     #[error("Ptrace does not function within the same process")]
     CannotPtraceSameProcess,
     #[error("Failed to stop the target process")]
@@ -82,11 +91,19 @@ pub enum InitError {
     #[error("Failed filling missing Auxv info")]
     FillMissingAuxvInfoFailed(#[source] AuxvError),
     #[error("Failed reading proc/pid/task entry for process")]
-    ReadProcessThreadEntryFailed(#[source] std::io::Error),
+    ReadProcessThreadEntryFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Process task entry `{0:?}` could not be parsed as a TID")]
     ProcessTaskEntryNotTid(OsString),
     #[error("Failed to read thread name")]
-    ReadThreadNameFailed(#[source] std::io::Error),
+    ReadThreadNameFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Proc task directory `{0:?}` is not a directory")]
     ProcPidTaskNotDirectory(String),
     #[error("Errors while enumerating threads")]
@@ -94,19 +111,31 @@ pub enum InitError {
     #[error("Failed to enumerate threads")]
     EnumerateThreadsFailed(#[source] Box<InitError>),
     #[error("Failed to read process map file")]
-    ReadProcessMapFileFailed(#[source] ProcError),
+    ReadProcessMapFileFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_proc_error")]
+        ProcError,
+    ),
     #[error("Failed to aggregate process mappings")]
     AggregateMappingsFailed(#[source] MapsReaderError),
     #[error("Failed to enumerate process mappings")]
     EnumerateMappingsFailed(#[source] Box<InitError>),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum StopProcessError {
     #[error("Failed to stop the process")]
-    Stop(#[from] Errno),
+    Stop(
+        #[from]
+        #[serde(serialize_with = "serialize_nix_error")]
+        nix::Error,
+    ),
     #[error("Failed to get the process state")]
-    State(#[from] ProcError),
+    State(
+        #[from]
+        #[serde(serialize_with = "serialize_proc_error")]
+        ProcError,
+    ),
     #[error("Timeout waiting for process to stop")]
     Timeout,
 }
@@ -139,8 +168,9 @@ impl PtraceDumper {
         pid: Pid,
         stop_timeout: Duration,
         auxv: AuxvDumpInfo,
-    ) -> Result<(Self, SoftErrorList<InitError>), InitError> {
-        if pid == std::process::id() as _ {
+        soft_errors: SoftErrorSublist<'_, InitError>,
+    ) -> Result<Self, InitError> {
+        if pid == std::process::id() as i32 {
             return Err(InitError::CannotPtraceSameProcess);
         }
 
@@ -152,14 +182,16 @@ impl PtraceDumper {
             mappings: Vec::new(),
             page_size: 0,
         };
-        let soft_errors = dumper.init(stop_timeout)?;
-        Ok((dumper, soft_errors))
+        dumper.init(stop_timeout, soft_errors)?;
+        Ok(dumper)
     }
 
     // TODO: late_init for chromeos and android
-    pub fn init(&mut self, stop_timeout: Duration) -> Result<SoftErrorList<InitError>, InitError> {
-        let mut soft_errors = SoftErrorList::default();
-
+    pub fn init(
+        &mut self,
+        stop_timeout: Duration,
+        mut soft_errors: SoftErrorSublist<'_, InitError>,
+    ) -> Result<(), InitError> {
         // Stopping the process is best-effort.
         if let Err(e) = self.stop_process(stop_timeout) {
             soft_errors.push(InitError::StopProcessFailed(e));
@@ -167,41 +199,31 @@ impl PtraceDumper {
 
         // Even if we completely fail to fill in any additional Auxv info, we can still press
         // forward.
-        match self.auxv.try_filling_missing_info(self.pid) {
-            Ok(auxv_soft_errors) if !auxv_soft_errors.is_empty() => {
-                soft_errors.push(InitError::FillMissingAuxvInfoErrors(auxv_soft_errors));
-            }
-            Err(e) => {
-                soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
-            }
-            _ => (),
+        if let Err(e) = self.auxv.try_filling_missing_info(
+            self.pid,
+            soft_errors.map_sublist(InitError::FillMissingAuxvInfoErrors),
+        ) {
+            soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
         }
 
         // If we completely fail to enumerate any threads... Some information is still better than
         // no information!
-        match self.enumerate_threads() {
-            Ok(enumerate_soft_errors) if !enumerate_soft_errors.is_empty() => {
-                soft_errors.push(InitError::EnumerateThreadsErrors(enumerate_soft_errors));
-            }
-            Err(e) => {
-                soft_errors.push(InitError::EnumerateThreadsFailed(Box::new(e)));
-            }
-            _ => (),
+        if let Err(e) =
+            self.enumerate_threads(soft_errors.map_sublist(InitError::EnumerateThreadsErrors))
+        {
+            soft_errors.push(InitError::EnumerateThreadsFailed(Box::new(e)));
         }
 
         // Same with mappings -- Some information is still better than no information!
-        match self.enumerate_mappings() {
-            Ok(()) => (),
-            Err(e) => {
-                soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
-            }
+        if let Err(e) = self.enumerate_mappings() {
+            soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
         }
 
         self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
             .expect("page size apparently unlimited: doesn't make sense.")
             as usize;
 
-        Ok(soft_errors)
+        Ok(())
     }
 
     #[cfg_attr(not(target_os = "android"), allow(clippy::unused_self))]
@@ -286,9 +308,7 @@ impl PtraceDumper {
         ptrace_detach(child)
     }
 
-    pub fn suspend_threads(&mut self) -> SoftErrorList<DumperError> {
-        let mut soft_errors = SoftErrorList::default();
-
+    pub fn suspend_threads(&mut self, mut soft_errors: SoftErrorSublist<'_, DumperError>) {
         // Iterate over all threads and try to suspend them.
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
@@ -302,11 +322,14 @@ impl PtraceDumper {
         });
 
         self.threads_suspended = true;
-        soft_errors
+
+        crate::if_fail_enabled!(
+            SuspendThreads,
+            soft_errors.push(DumperError::PtraceAttachError(1234, nix::Error::EPERM))
+        );
     }
 
-    pub fn resume_threads(&mut self) -> SoftErrorList<DumperError> {
-        let mut soft_errors = SoftErrorList::default();
+    pub fn resume_threads(&mut self, mut soft_errors: SoftErrorSublist<'_, DumperError>) {
         if self.threads_suspended {
             for thread in &self.threads {
                 match Self::resume_thread(thread.tid) {
@@ -318,13 +341,14 @@ impl PtraceDumper {
             }
         }
         self.threads_suspended = false;
-        soft_errors
     }
 
     /// Send SIGSTOP to the process so that we can get a consistent state.
     ///
     /// This will block waiting for the process to stop until `timeout` has passed.
     fn stop_process(&mut self, timeout: Duration) -> Result<(), StopProcessError> {
+        crate::return_err_if_fail_enabled!(StopProcess, nix::Error::EPERM);
+
         signal::kill(nix::unistd::Pid::from_raw(self.pid), Some(signal::SIGSTOP))?;
 
         // Something like waitpid for non-child processes would be better, but we have no such
@@ -355,9 +379,10 @@ impl PtraceDumper {
 
     /// Parse /proc/$pid/task to list all the threads of the process identified by
     /// pid.
-    fn enumerate_threads(&mut self) -> Result<SoftErrorList<InitError>, InitError> {
-        let mut soft_errors = SoftErrorList::default();
-
+    fn enumerate_threads(
+        &mut self,
+        mut soft_errors: SoftErrorSublist<'_, InitError>,
+    ) -> Result<(), InitError> {
         let pid = self.pid;
         let filename = format!("/proc/{}/task", pid);
         let task_path = path::PathBuf::from(&filename);
@@ -383,7 +408,15 @@ impl PtraceDumper {
             };
 
             // Read the thread-name (if there is any)
-            let name = match std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid)) {
+            let name_result = crate::if_fail_enabled_else!(
+                ThreadName,
+                Err(std::io::Error::other(
+                    "testing requested failure reading thread name"
+                )),
+                std::fs::read_to_string(format!("/proc/{}/task/{}/comm", pid, tid))
+            );
+
+            let name = match name_result {
                 Ok(name) => Some(name.trim_end().to_string()),
                 Err(e) => {
                     soft_errors.push(InitError::ReadThreadNameFailed(e));
@@ -394,7 +427,7 @@ impl PtraceDumper {
             self.threads.push(Thread { tid, name });
         }
 
-        Ok(soft_errors)
+        Ok(())
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {

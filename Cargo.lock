@@ -160,6 +160,9 @@ name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "block-buffer"
@@ -181,7 +184,7 @@ dependencies = [
  "circular",
  "debugid",
  "futures-util",
- "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "minidump-common",
  "nom",
  "range-map",
  "thiserror",
@@ -1191,7 +1194,7 @@ dependencies = [
  "debugid",
  "encoding_rs",
  "memmap2",
- "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "minidump-common",
  "num-traits",
  "procfs-core",
  "range-map",
@@ -1216,21 +1219,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minidump-common"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a2b640f80e5514f49509ff1f97fb24693f95ef5be5ed810d70df4283a68acc"
-dependencies = [
- "bitflags 2.6.0",
- "debugid",
- "num-derive",
- "num-traits",
- "range-map",
- "scroll 0.12.0",
- "smart-default",
-]
-
-[[package]]
 name = "minidump-processor"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,7 +1229,7 @@ dependencies = [
  "debugid",
  "futures-util",
  "minidump",
- "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "minidump-common",
  "minidump-unwind",
  "scroll 0.12.0",
  "serde",
@@ -1263,7 +1251,7 @@ dependencies = [
  "futures-util",
  "memmap2",
  "minidump",
- "minidump-common 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "minidump-common",
  "object",
  "scroll 0.12.0",
  "tracing",
@@ -1288,12 +1276,14 @@ dependencies = [
  "memmap2",
  "memoffset",
  "minidump",
- "minidump-common 0.22.0",
+ "minidump-common",
  "minidump-processor",
  "minidump-unwind",
  "nix",
  "procfs-core",
  "scroll 0.12.0",
+ "serde",
+ "serde_json",
  "similar-asserts",
  "tempfile",
  "thiserror",
@@ -1619,6 +1609,7 @@ checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
 dependencies = [
  "bitflags 2.6.0",
  "hex",
+ "serde",
 ]
 
 [[package]]

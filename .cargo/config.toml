@@ -14,3 +14,6 @@ linker = "x86_64-linux-android30-clang"
 # By default the linker _doesn't_ generate a build-id, however we want one for our tests.
 rustflags = ["-C", "link-args=-Wl,--build-id=sha1"]
 runner = [".cargo/android-runner.sh"]
+
+[patch.crates-io]
+minidump-common = { path = "../rust-minidump/minidump-common" }
