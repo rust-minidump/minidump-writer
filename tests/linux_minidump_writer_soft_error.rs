@@ -1,14 +1,10 @@
 #![cfg(any(target_os = "linux", target_os = "android"))]
-#![cfg(feature = "fail-enabled")]
 
 use {
     common::*,
     minidump::Minidump,
-    minidump_writer::{
-        fail_enabled::{self, FailName},
-        minidump_writer::MinidumpWriter,
-    },
-    serde_json::{json, Value as JsonValue},
+    minidump_writer::{minidump_writer::MinidumpWriter, FailSpotName},
+    serde_json::json,
 };
 
 mod common;
@@ -23,9 +19,8 @@ fn soft_error_stream() {
         .tempfile()
         .unwrap();
 
-    let fail_config = fail_enabled::Config::get();
-    let fail_client = fail_config.client();
-    fail_client.set_fail_enabled(FailName::StopProcess, true);
+    let mut fail_client = FailSpotName::testing_client();
+    fail_client.set_enabled(FailSpotName::StopProcess, true);
 
     // Write a minidump
     MinidumpWriter::new(pid, pid)
@@ -33,10 +28,9 @@ fn soft_error_stream() {
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
 
-    // Ensure the minidump has a MemoryInfoListStream present and has at least one entry.
+    // Ensure the minidump has a MozSoftErrors present
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-    dump.get_raw_stream(minidump_common::format::MINIDUMP_STREAM_TYPE::MozSoftErrors.into())
-        .expect("missing soft error stream");
+    read_minidump_soft_errors_or_panic(&dump);
 }
 
 #[test]
@@ -73,16 +67,15 @@ fn soft_error_stream_content() {
         .tempfile()
         .unwrap();
 
-    let fail_config = fail_enabled::Config::get();
-    let fail_client = fail_config.client();
+    let mut fail_client = FailSpotName::testing_client();
     for name in [
-        FailName::StopProcess,
-        FailName::FillMissingAuxvInfo,
-        FailName::ThreadName,
-        FailName::SuspendThreads,
-        FailName::CpuInfoFileOpen,
+        FailSpotName::StopProcess,
+        FailSpotName::FillMissingAuxvInfo,
+        FailSpotName::ThreadName,
+        FailSpotName::SuspendThreads,
+        FailSpotName::CpuInfoFileOpen,
     ] {
-        fail_client.set_fail_enabled(name, true);
+        fail_client.set_enabled(name, true);
     }
 
     // Write a minidump
@@ -91,15 +84,9 @@ fn soft_error_stream_content() {
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
 
-    // Ensure the minidump has a MemoryInfoListStream present and has at least one entry.
+    // Ensure the MozSoftErrors stream matches the expected JSON
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-    let contents = std::str::from_utf8(
-        dump.get_raw_stream(minidump_common::format::MINIDUMP_STREAM_TYPE::MozSoftErrors.into())
-            .expect("missing soft error stream"),
-    )
-    .expect("expected utf-8 stream");
-
-    let actual_json: JsonValue = serde_json::from_str(contents).expect("expected json");
+    let actual_json = read_minidump_soft_errors_or_panic(&dump);
 
     if actual_json != expected_json {
         panic!(

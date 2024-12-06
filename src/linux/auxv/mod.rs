@@ -1,8 +1,8 @@
-use crate::error_list::{serializers::*, SoftErrorSublist};
-pub use reader::ProcfsAuxvIter;
-
 use {
-    crate::Pid,
+    self::reader::ProcfsAuxvIter,
+    crate::{serializers::*, Pid},
+    error_graph::WriteErrorList,
+    failspot::failspot,
     std::{fs::File, io::BufReader},
     thiserror::Error,
 };
@@ -84,7 +84,7 @@ impl AuxvDumpInfo {
     pub fn try_filling_missing_info(
         &mut self,
         pid: Pid,
-        mut soft_errors: SoftErrorSublist<'_, AuxvError>,
+        mut soft_errors: impl WriteErrorList<AuxvError>,
     ) -> Result<(), AuxvError> {
         if self.is_complete() {
             return Ok(());
@@ -113,10 +113,7 @@ impl AuxvDumpInfo {
             }
         }
 
-        crate::if_fail_enabled!(
-            FillMissingAuxvInfo,
-            soft_errors.push(AuxvError::InvalidFormat)
-        );
+        failspot!(FillMissingAuxvInfo soft_errors.push(AuxvError::InvalidFormat));
 
         Ok(())
     }

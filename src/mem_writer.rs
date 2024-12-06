@@ -1,7 +1,7 @@
 use {
     crate::{
-        error_list::serializers::*,
         minidump_format::{MDLocationDescriptor, MDRVA},
+        serializers::*,
     },
     scroll::ctx::{SizeWith, TryIntoCtx},
 };

@@ -1,5 +1,3 @@
-pub use error_list::SoftErrorList;
-
 cfg_if::cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
@@ -16,12 +14,19 @@ cfg_if::cfg_if! {
     }
 }
 
+pub mod dir_section;
+pub mod mem_writer;
 pub mod minidump_cpu;
 pub mod minidump_format;
 
-pub mod dir_section;
-pub mod mem_writer;
+mod serializers;
 
-pub mod fail_enabled;
-
-mod error_list;
+failspot::failspot_name! {
+    pub enum FailSpotName {
+        StopProcess,
+        FillMissingAuxvInfo,
+        ThreadName,
+        SuspendThreads,
+        CpuInfoFileOpen,
+    }
+}

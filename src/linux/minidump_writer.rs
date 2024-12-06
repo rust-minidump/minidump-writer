@@ -1,24 +1,26 @@
 pub use crate::linux::auxv::{AuxvType, DirectAuxvDumpInfo};
-use crate::{
-    auxv::AuxvDumpInfo,
-    dir_section::{DirSection, DumpBuf},
-    error_list::SoftErrorList,
-    linux::{
-        app_memory::AppMemoryList,
-        crash_context::CrashContext,
-        dso_debug,
-        errors::WriterError,
-        maps_reader::{MappingInfo, MappingList},
-        ptrace_dumper::PtraceDumper,
-        sections::*,
+use {
+    crate::{
+        auxv::AuxvDumpInfo,
+        dir_section::{DirSection, DumpBuf},
+        linux::{
+            app_memory::AppMemoryList,
+            crash_context::CrashContext,
+            dso_debug,
+            errors::WriterError,
+            maps_reader::{MappingInfo, MappingList},
+            ptrace_dumper::PtraceDumper,
+            sections::*,
+        },
+        mem_writer::{Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError},
+        minidump_format::*,
+        Pid,
     },
-    mem_writer::{Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError},
-    minidump_format::*,
-    Pid,
-};
-use std::{
-    io::{Seek, Write},
-    time::Duration,
+    error_graph::{ErrorList, WriteErrorList},
+    std::{
+        io::{Seek, Write},
+        time::Duration,
+    },
 };
 
 pub enum CrashingThreadContext {
@@ -146,18 +148,18 @@ impl MinidumpWriter {
             .map(AuxvDumpInfo::from)
             .unwrap_or_default();
 
-        let mut soft_errors = SoftErrorList::default();
+        let mut soft_errors = ErrorList::default();
 
         let mut dumper = PtraceDumper::new_report_soft_errors(
             self.process_id,
             self.stop_timeout,
             auxv,
-            soft_errors.map_sublist(WriterError::InitErrors),
+            soft_errors.subwriter(WriterError::InitErrors),
         )?;
 
         let threads_count = dumper.threads.len();
 
-        dumper.suspend_threads(soft_errors.map_sublist(WriterError::SuspendThreadsErrors));
+        dumper.suspend_threads(soft_errors.subwriter(WriterError::SuspendThreadsErrors));
 
         if dumper.threads.is_empty() {
             // TBH I'm not sure this even needs to be a hard error. Is a minidump without any
@@ -181,8 +183,7 @@ impl MinidumpWriter {
         self.generate_dump(&mut buffer, &mut dumper, soft_errors, destination)?;
 
         // TODO - Record these errors? Or maybe we don't care?
-        let mut soft_errors = SoftErrorList::default();
-        dumper.resume_threads(soft_errors.map_sublist(WriterError::ResumeThreadsErrors));
+        dumper.resume_threads(error_graph::strategy::DontCare);
 
         Ok(buffer.into())
     }
@@ -245,7 +246,7 @@ impl MinidumpWriter {
         &mut self,
         buffer: &mut DumpBuf,
         dumper: &mut PtraceDumper,
-        mut soft_errors: SoftErrorList<WriterError>,
+        mut soft_errors: ErrorList<WriterError>,
         destination: &mut (impl Write + Seek),
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
@@ -292,7 +293,7 @@ impl MinidumpWriter {
 
         let dirent = systeminfo_stream::write(
             buffer,
-            soft_errors.map_sublist(WriterError::WriteSystemInfoErrors),
+            soft_errors.subwriter(WriterError::WriteSystemInfoErrors),
         )?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
@@ -452,12 +453,10 @@ impl MinidumpWriter {
 
 fn write_soft_errors(
     buffer: &mut DumpBuf,
-    soft_errors: SoftErrorList<WriterError>,
+    soft_errors: ErrorList<WriterError>,
 ) -> Result<MDLocationDescriptor> {
-    let soft_errors_json = soft_errors
-        .to_json()
-        .map_err(WriterError::ConvertToJsonFailed)?;
-    let soft_errors_json_str = format!("{soft_errors_json:#}");
+    let soft_errors_json_str =
+        serde_json::to_string_pretty(&soft_errors).map_err(WriterError::ConvertToJsonFailed)?;
     let section = MemoryArrayWriter::write_bytes(buffer, soft_errors_json_str.as_bytes());
     Ok(section.location())
 }

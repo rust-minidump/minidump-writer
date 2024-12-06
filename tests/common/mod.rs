@@ -94,3 +94,19 @@ pub fn start_child_and_return(args: &[&str]) -> Child {
         .spawn()
         .expect("failed to execute child")
 }
+
+#[allow(unused)]
+pub fn read_minidump_soft_errors_or_panic<'a, T>(
+    dump: &minidump::Minidump<'a, T>,
+) -> serde_json::Value
+where
+    T: std::ops::Deref<Target = [u8]> + 'a,
+{
+    let contents = std::str::from_utf8(
+        dump.get_raw_stream(minidump_common::format::MINIDUMP_STREAM_TYPE::MozSoftErrors.into())
+            .expect("missing soft error stream"),
+    )
+    .expect("expected utf-8 stream");
+
+    serde_json::from_str(contents).expect("expected json")
+}

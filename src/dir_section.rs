@@ -1,9 +1,11 @@
-use crate::{
-    error_list::serializers::*,
-    mem_writer::{Buffer, MemoryArrayWriter, MemoryWriterError},
-    minidump_format::MDRawDirectory,
+use {
+    crate::{
+        mem_writer::{Buffer, MemoryArrayWriter, MemoryWriterError},
+        minidump_format::MDRawDirectory,
+        serializers::*,
+    },
+    std::io::{Error, Seek, Write},
 };
-use std::io::{Error, Seek, Write};
 
 pub type DumpBuf = Buffer;
 

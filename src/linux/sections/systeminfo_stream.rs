@@ -1,10 +1,11 @@
-use super::*;
-use crate::{error_list::*, linux::dumper_cpu_info as dci};
-use errors::SectionSystemInfoError;
+use {
+    super::*, crate::linux::dumper_cpu_info as dci, error_graph::WriteErrorList,
+    errors::SectionSystemInfoError,
+};
 
 pub fn write(
     buffer: &mut DumpBuf,
-    mut soft_errors: SoftErrorSublist<'_, SectionSystemInfoError>,
+    mut soft_errors: impl WriteErrorList<SectionSystemInfoError>,
 ) -> Result<MDRawDirectory, SectionSystemInfoError> {
     let mut info_section = MemoryWriter::<MDRawSystemInfo>::alloc(buffer)?;
     let dirent = MDRawDirectory {

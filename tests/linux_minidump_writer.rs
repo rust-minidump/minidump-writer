@@ -330,6 +330,14 @@ contextual_test! {
         let status = waitres.signal().expect("Child did not die due to signal");
         assert_eq!(waitres.code(), None);
         assert_eq!(status, Signal::SIGKILL as i32);
+
+        // Ensure the minidump has a MozSoftErrors present
+        let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+        let soft_error_json = read_minidump_soft_errors_or_panic(&dump);
+
+        assert_eq!(soft_error_json, serde_json::json! {
+            ["PrincipalMappingNotReferenced"]
+        });
     }
 }
 

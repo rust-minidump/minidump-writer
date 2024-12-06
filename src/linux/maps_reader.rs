@@ -1,11 +1,17 @@
-use crate::{auxv::AuxvType, errors::MapsReaderError};
-use byteorder::{NativeEndian, ReadBytesExt};
-use goblin::elf;
-use memmap2::{Mmap, MmapOptions};
-use procfs_core::process::{MMPermissions, MMapPath, MemoryMaps};
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::{fs::File, mem::size_of, path::PathBuf};
+use {
+    crate::{auxv::AuxvType, errors::MapsReaderError},
+    byteorder::{NativeEndian, ReadBytesExt},
+    goblin::elf,
+    memmap2::{Mmap, MmapOptions},
+    procfs_core::process::{MMPermissions, MMapPath, MemoryMaps},
+    std::{
+        ffi::{OsStr, OsString},
+        fs::File,
+        mem::size_of,
+        os::unix::ffi::{OsStrExt, OsStringExt},
+        path::PathBuf,
+    },
+};
 
 pub const LINUX_GATE_LIBRARY_NAME: &str = "linux-gate.so";
 pub const DELETED_SUFFIX: &[u8] = b" (deleted)";
@@ -87,7 +93,10 @@ impl MappingInfo {
         self.start_address + self.size
     }
 
-    pub fn aggregate(memory_maps: MemoryMaps, linux_gate_loc: AuxvType) -> Result<Vec<Self>> {
+    pub fn aggregate(
+        memory_maps: MemoryMaps,
+        linux_gate_loc: Option<AuxvType>,
+    ) -> Result<Vec<Self>> {
         let mut infos = Vec::<Self>::new();
 
         for mm in memory_maps {
@@ -111,10 +120,11 @@ impl MappingInfo {
 
             let is_path = is_mapping_a_path(pathname.as_deref());
 
-            if !is_path && linux_gate_loc != 0 && start_address == usize::try_from(linux_gate_loc)?
-            {
-                pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
-                offset = 0;
+            if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap()) {
+                if !is_path && start_address == linux_gate_loc {
+                    pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
+                    offset = 0;
+                }
             }
 
             if let Some(prev_module) = infos.last_mut() {
@@ -451,7 +461,7 @@ mod tests {
     fn get_mappings_for(map: &str, linux_gate_loc: u64) -> Vec<MappingInfo> {
         MappingInfo::aggregate(
             MemoryMaps::from_read(map.as_bytes()).expect("failed to read mapping info"),
-            linux_gate_loc,
+            Some(linux_gate_loc),
         )
         .unwrap_or_default()
     }

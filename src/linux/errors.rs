@@ -1,15 +1,13 @@
-use crate::{
-    dir_section::FileWriterError,
-    error_list::{serializers::*, SoftErrorList},
-    maps_reader::MappingInfo,
-    mem_writer::MemoryWriterError,
-    Pid,
+use {
+    super::ptrace_dumper::InitError,
+    crate::{
+        dir_section::FileWriterError, maps_reader::MappingInfo, mem_writer::MemoryWriterError,
+        serializers::*, Pid,
+    },
+    error_graph::ErrorList,
+    std::ffi::OsString,
+    thiserror::Error,
 };
-use goblin;
-use std::ffi::OsString;
-use thiserror::Error;
-
-use super::ptrace_dumper::InitError;
 
 #[derive(Error, Debug, serde::Serialize)]
 pub enum MapsReaderError {
@@ -348,15 +346,15 @@ pub enum WriterError {
         std::time::SystemTimeError,
     ),
     #[error("Errors occurred while initializing PTraceDumper")]
-    InitErrors(#[source] SoftErrorList<InitError>),
+    InitErrors(#[source] ErrorList<InitError>),
     #[error("Errors occurred while suspending threads")]
-    SuspendThreadsErrors(#[source] SoftErrorList<DumperError>),
+    SuspendThreadsErrors(#[source] ErrorList<DumperError>),
     #[error("Errors occurred while resuming threads")]
-    ResumeThreadsErrors(#[source] SoftErrorList<DumperError>),
+    ResumeThreadsErrors(#[source] ErrorList<DumperError>),
     #[error("Crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
     #[error("Errors occurred while writing system info")]
-    WriteSystemInfoErrors(#[source] SoftErrorList<SectionSystemInfoError>),
+    WriteSystemInfoErrors(#[source] ErrorList<SectionSystemInfoError>),
     #[error("Failed writing cpuinfo")]
     WriteCpuInfoFailed(#[source] MemoryWriterError),
     #[error("Failed writing thread proc status")]
