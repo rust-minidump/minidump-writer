@@ -162,9 +162,7 @@ impl MinidumpWriter {
         dumper.suspend_threads(soft_errors.subwriter(WriterError::SuspendThreadsErrors));
 
         if dumper.threads.is_empty() {
-            // TBH I'm not sure this even needs to be a hard error. Is a minidump without any
-            // thread info still at-least a little useful?
-            return Err(WriterError::SuspendNoThreadsLeft(threads_count));
+            soft_errors.push(WriterError::SuspendNoThreadsLeft(threads_count));
         }
 
         dumper.late_init()?;
@@ -181,9 +179,6 @@ impl MinidumpWriter {
 
         let mut buffer = Buffer::with_capacity(0);
         self.generate_dump(&mut buffer, &mut dumper, soft_errors, destination)?;
-
-        // TODO - Record these errors? Or maybe we don't care?
-        dumper.resume_threads(error_graph::strategy::DontCare);
 
         Ok(buffer.into())
     }
@@ -251,7 +246,7 @@ impl MinidumpWriter {
     ) -> Result<()> {
         // A minidump file contains a number of tagged streams. This is the number
         // of streams which we write.
-        let num_writers = 19u32;
+        let num_writers = 18u32;
 
         let mut header_section = MemoryWriter::<MDRawHeader>::alloc(buffer)?;
 
@@ -424,6 +419,16 @@ impl MinidumpWriter {
             }
         };
         dir_section.write_to_file(buffer, Some(dirent))?;
+
+        // ========================================================================================
+        //
+        // PAST THIS BANNER, THE THREADS ARE RUNNING IN THE TARGET PROCESS AGAIN. IF YOU NEED TO
+        // ADD NEW ENTRIES THAT ACCESS THE TARGET MEMORY, DO IT BEFORE HERE!
+        //
+        // ========================================================================================
+
+        // Collect any last-minute soft errors when trying to restart threads
+        dumper.resume_threads(soft_errors.subwriter(WriterError::ResumeThreadsErrors));
 
         // If this fails, there's really nothing we can do about that (other than ignore it).
         let dirent = write_soft_errors(buffer, soft_errors)
