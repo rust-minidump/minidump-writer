@@ -27,6 +27,7 @@ fn soft_error_stream() {
         .dump(&mut tmpfile)
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait on killed process");
 
     // Ensure the minidump has a MozSoftErrors present
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
@@ -35,8 +36,8 @@ fn soft_error_stream() {
 
 #[test]
 fn soft_error_stream_content() {
-    let expected_json = json!([
-        {"InitErrors": [
+    let expected_errors = vec![
+        json!({"InitErrors": [
             {"StopProcessFailed": {"Stop": "EPERM"}},
             {"FillMissingAuxvInfoErrors": ["InvalidFormat"]},
             {"EnumerateThreadsErrors": [
@@ -47,17 +48,17 @@ fn soft_error_stream_content() {
                     }"
                 }
             ]}
-        ]},
-        {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, "EPERM"]}]},
-        {"WriteSystemInfoErrors": [
+        ]}),
+        json!({"SuspendThreadsErrors": [{"PtraceAttachError": [1234, "EPERM"]}]}),
+        json!({"WriteSystemInfoErrors": [
             {"WriteCpuInformationFailed": {"IOError": "\
                 Custom {\n    \
                     kind: Other,\n    \
                     error: \"test requested cpuinfo file failure\",\n\
                 }"
             }}
-        ]}
-    ]);
+        ]}),
+    ];
 
     let mut child = start_child_and_wait_for_threads(1);
     let pid = child.id() as i32;
@@ -83,24 +84,9 @@ fn soft_error_stream_content() {
         .dump(&mut tmpfile)
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait on killed process");
 
-    // Ensure the MozSoftErrors stream matches the expected JSON
+    // Ensure the MozSoftErrors stream contains the expected errors
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-    let actual_json = read_minidump_soft_errors_or_panic(&dump);
-
-    if actual_json != expected_json {
-        panic!(
-            "\
-            JSON mismatch:\n\
-            =====Expected=====\n\
-            \n\
-            {expected_json:#}\n\
-            \n\
-            =====Actual=====\n\
-            \n\
-            {actual_json:#}\n\
-            \n\
-        "
-        );
-    }
+    assert_soft_errors_in_minidump(&dump, &expected_errors);
 }

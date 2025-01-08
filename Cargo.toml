@@ -17,7 +17,7 @@ error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
 log = "0.4"
 memoffset = "0.9"
-minidump-common = "0.22"
+minidump-common = "0.24"
 scroll = "0.12"
 serde = { version = "1.0.208", features = ["derive"] }
 serde_json = "1.0.116"
@@ -56,14 +56,14 @@ current_platform = "0.2"
 failspot = { version = "0.2.0", features = ["enabled"] }
 # Minidump-processor is async so we need an executor
 futures = { version = "0.3", features = ["executor"] }
-minidump = "0.22"
+minidump = "0.24"
 memmap2 = "0.9"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # We dump symbols for the `test` executable so that we can validate that minidumps
 # created by this crate can be processed by minidump-processor
 dump_syms = { version = "2.2", default-features = false }
-minidump-processor = { version = "0.22", default-features = false }
-minidump-unwind = { version = "0.22", features = ["debuginfo"] }
+minidump-processor = { version = "0.24", default-features = false }
+minidump-unwind = { version = "0.24", features = ["debuginfo"] }
 similar-asserts = "1.5"
 uuid = "1.4"

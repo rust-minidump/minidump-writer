@@ -1,5 +1,5 @@
 use {
-    super::ptrace_dumper::InitError,
+    super::{ptrace_dumper::InitError, serializers::*},
     crate::{
         dir_section::FileWriterError, maps_reader::MappingInfo, mem_writer::MemoryWriterError,
         serializers::*, Pid,
