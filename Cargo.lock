@@ -1360,26 +1360,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minidump-processor"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18a08b6c01056348ec77a4b5aa537ddbbf217c028496319cd54029b812ccf3fb"
-dependencies = [
- "async-trait",
- "breakpad-symbols",
- "debugid",
- "futures-util",
- "minidump",
- "minidump-common",
- "minidump-unwind",
- "scroll 0.12.0",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
 name = "minidump-unwind"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1418,7 +1398,6 @@ dependencies = [
  "memoffset",
  "minidump",
  "minidump-common",
- "minidump-processor",
  "minidump-unwind",
  "nix",
  "procfs-core 0.16.0",
