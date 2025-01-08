@@ -790,6 +790,7 @@ fn memory_info_list_stream() {
         .dump(&mut tmpfile)
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
+    let _ = child.wait();
 
     // Ensure the minidump has a MemoryInfoListStream present and has at least one entry.
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
