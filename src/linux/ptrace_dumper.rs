@@ -313,7 +313,7 @@ impl PtraceDumper {
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
         // actual entry point to find the mapping.
         let entry_point_loc = self.auxv.get_entry_address().unwrap_or_default();
-        let filename = format!("/proc/{}/maps", self.pid);
+        let filename = format!("/proc/{}/smaps", self.pid);
         let errmap = |e| InitError::IOError(filename.clone(), e);
         let maps_path = path::PathBuf::from(&filename);
         let maps_file = std::fs::File::open(maps_path).map_err(errmap)?;
@@ -516,7 +516,8 @@ impl PtraceDumper {
         Ok(())
     }
 
-    // Find the mapping which the given memory address falls in.
+    /// Find the mapping which the given memory address falls in.
+    #[inline]
     pub fn find_mapping(&self, address: usize) -> Option<&MappingInfo> {
         self.mappings
             .iter()

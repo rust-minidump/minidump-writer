@@ -164,6 +164,7 @@ contextual_test! {
                 start_address: mmap_addr,
                 end_address: mmap_addr + memory_size,
             },
+            madvise_dontdump: false,
         };
 
         let identifier = vec![

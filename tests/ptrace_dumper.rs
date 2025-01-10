@@ -383,3 +383,81 @@ fn test_sanitize_stack_copy() {
     assert_eq!(waitres.code(), None);
     assert_eq!(status, Signal::SIGKILL as i32);
 }
+
+/// Tests that the ptrace dumper respect the [`MADV_DONTDUMP`](https://linux.die.net/man/2/madvise) flag by ignoring
+/// regions allocated with that flag set
+#[test]
+fn respects_madvise_dontdump() {
+    let mut child = start_child_and_return(&["spawn_alloc_w_madvise_wait"]);
+    let pid = child.id() as i32;
+
+    let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+
+    let mut buf = String::new();
+    let mut mappings = Vec::new();
+
+    loop {
+        buf.clear();
+        f.read_line(&mut buf).expect("failed to read line");
+        let line = buf.trim();
+
+        if line == "--start--" {
+            assert!(mappings.is_empty());
+        } else if line == "--end--" {
+            break;
+        } else {
+            let (ptr, dd) = line.split_once(' ').unwrap_or((line, ""));
+            match usize::from_str_radix(ptr.trim_start_matches("0x"), 16) {
+                Ok(ptr) => {
+                    mappings.push((ptr, dd == "dd"));
+                }
+                Err(err) => panic!("failed to parse pointer '{ptr}': {err}"),
+            }
+        }
+    }
+
+    let mut dumper = PtraceDumper::new(
+        pid,
+        minidump_writer::minidump_writer::STOP_TIMEOUT,
+        Default::default(),
+    )
+    .expect("Couldn't init dumper");
+
+    dumper.suspend_threads().expect("failed to suspend threads");
+
+    let page_size: usize = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
+        .unwrap()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    for (address, dont_dump) in mappings {
+        let addrs = [
+            address,
+            address + 1,
+            address + (page_size >> 1),
+            address + page_size - 1,
+        ];
+
+        for address in addrs {
+            let Some(mapping) = dumper.find_mapping(address) else {
+                panic!("failed to locate mapping for {address:#0x}");
+            };
+
+            assert_eq!(mapping.madvise_dontdump, dont_dump);
+
+            if dont_dump {
+                assert!(!mapping.is_interesting());
+            }
+        }
+    }
+
+    // Reap child
+    dumper.resume_threads().expect("Failed to resume threads");
+    child.kill().expect("Failed to kill process");
+
+    let waitres = child.wait().expect("Failed to wait for child");
+    let status = waitres.signal().expect("Child did not die due to signal");
+    assert_eq!(waitres.code(), None);
+    assert_eq!(status, Signal::SIGKILL as i32);
+}
