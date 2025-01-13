@@ -40,7 +40,7 @@ nix = { version = "0.29", default-features = false, features = [
 ] }
 # Used for parsing procfs info.
 # default-features is disabled since it pulls in chrono
-procfs-core = { version = "0.16", default-features = false, features = ["serde1"] }
+procfs-core = { version = "0.17", default-features = false, features = ["serde1"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bitflags = "2.4"

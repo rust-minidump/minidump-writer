@@ -228,7 +228,7 @@ mod linux {
             if map
                 .name
                 .as_ref()
-                .map_or(false, |name| name.to_string_lossy().starts_with(&path))
+                .is_some_and(|name| name.to_string_lossy().starts_with(&path))
             {
                 mapping_count += 1;
                 // This mapping should encompass the entire original mapped
