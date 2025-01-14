@@ -13,10 +13,14 @@ bitflags = "2.4"
 byteorder = "1.4"
 cfg-if = "1.0"
 crash-context = "0.6"
+error-graph = { version = "0.1.1", features = ["serde"] }
+failspot = "0.2.0"
 log = "0.4"
 memoffset = "0.9"
 minidump-common = "0.24"
 scroll = "0.12"
+serde = { version = "1.0.208", features = ["derive"] }
+serde_json = "1.0.116"
 tempfile = "3.8"
 thiserror = "1.0"
 
@@ -36,7 +40,7 @@ nix = { version = "0.29", default-features = false, features = [
 ] }
 # Used for parsing procfs info.
 # default-features is disabled since it pulls in chrono
-procfs-core = { version = "0.16", default-features = false }
+procfs-core = { version = "0.17", default-features = false, features = ["serde1"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bitflags = "2.4"
@@ -49,6 +53,7 @@ mach2 = "0.4"
 # We auto-detect what the test binary that is spawned for most tests should be
 # compiled for
 current_platform = "0.2"
+failspot = { version = "0.2.0", features = ["enabled"] }
 # Minidump-processor is async so we need an executor
 futures = { version = "0.3", features = ["executor"] }
 minidump = "0.24"
