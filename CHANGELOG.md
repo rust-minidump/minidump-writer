@@ -8,9 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Added
 - [PR#143](https://github.com/rust-minidump/minidump-writer/pull/143)
   - turn many errors that are currently treated as critical (and thus prevent minidump generation) into non-critical "soft" errors
   - collect non-critical errors and serialize them into a new JSON stream in the minidump
+
+### Changed
+- [PR#145](https://github.com/rust-minidump/minidump-writer/pull/145) updated dependencies.
+
 ## [0.10.1] - 2024-09-20
 ### Fixed
 - [PR#129](https://github.com/rust-minidump/minidump-writer/pull/129) added checking of additions to ensure invalid memory offsets are gracefully handled.
