@@ -130,7 +130,7 @@ impl MinidumpWriter {
                 exception_code,
             };
 
-            Self::dump_crash_context(cc, minidump_type, destination)
+            Self::dump_crash_context(&cc, minidump_type, destination)
         }
     }
 
@@ -149,7 +149,7 @@ impl MinidumpWriter {
     /// is the responsibility of the caller to ensure that the pointer is valid
     /// for the duration of this function call.
     pub fn dump_crash_context(
-        crash_context: crash_context::CrashContext,
+        crash_context: &crash_context::CrashContext,
         minidump_type: Option<MinidumpType>,
         destination: &mut std::fs::File,
     ) -> Result<(), Error> {

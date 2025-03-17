@@ -164,7 +164,7 @@ fn dump_external_process() {
 
     // SAFETY: We keep the process we are dumping alive until the minidump is written
     // and the test process keep the pointers it sent us alive until it is killed
-    MinidumpWriter::dump_crash_context(crash_context, None, tmpfile.as_file_mut())
+    MinidumpWriter::dump_crash_context(&crash_context, None, tmpfile.as_file_mut())
         .expect("failed to write minidump");
 
     child.kill().expect("failed to kill child");
