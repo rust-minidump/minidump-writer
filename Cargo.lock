@@ -4,21 +4,12 @@ version = 4
 
 [[package]]
 name = "addr2line"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b9d03130b08257bc8110b0df827d8b137fdf67a95e2459eaace2e13fecf1d72"
-dependencies = [
- "fallible-iterator 0.3.0",
- "gimli 0.30.0",
-]
-
-[[package]]
-name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfbe277e56a376000877090da837660b4427aad530e3028d44e0bffe4f89a1c1"
 dependencies = [
- "gimli 0.31.1",
+ "fallible-iterator 0.3.0",
+ "gimli",
 ]
 
 [[package]]
@@ -128,7 +119,7 @@ version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d82cb332cdfaed17ae235a638438ac4d4839913cc2af585c3c6746e8f8bee1a"
 dependencies = [
- "addr2line 0.24.2",
+ "addr2line",
  "cfg-if",
  "libc",
  "miniz_oxide",
@@ -175,9 +166,9 @@ dependencies = [
 
 [[package]]
 name = "breakpad-symbols"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05cc04995b4f6f26dc9cc5989e93e42c373def047b4b057aaf8f48400b971d1e"
+checksum = "de505237612bae717be4622b9da34f2f7a2b066a18e8f05a502f2073dab59c92"
 dependencies = [
  "async-trait",
  "cachemap2",
@@ -187,7 +178,7 @@ dependencies = [
  "minidump-common",
  "nom",
  "range-map",
- "thiserror 1.0.69",
+ "thiserror 2.0.10",
  "tracing",
 ]
 
@@ -246,9 +237,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.9.0"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
+checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cab"
@@ -311,9 +302,9 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
-version = "0.9.4"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
+checksum = "b55271e5c8c478ad3f38ad24ef34923091e0548492a266d19b3c0b4d82574c63"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -565,9 +556,9 @@ dependencies = [
 
 [[package]]
 name = "elsa"
-version = "1.10.0"
+version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98e71ae4df57d214182a2e5cb90230c0192c6ddfcaa05c36453d46a54713e10"
+checksum = "9abf33c656a7256451ebb7d0082c5a471820c31269e49d807c538c252352186e"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -652,6 +643,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c936bfdafb507ebbf50b8074c54fa31c5be9a1e7e5f467dd659697041407d07c"
 dependencies = [
  "crc32fast",
+ "libz-rs-sys",
  "miniz_oxide",
 ]
 
@@ -679,8 +671,8 @@ dependencies = [
  "arrayvec",
  "cfg-if",
  "fallible-iterator 0.3.0",
- "gimli 0.31.1",
- "macho-unwind-info 0.5.0",
+ "gimli",
+ "macho-unwind-info",
  "pe-unwind-info",
 ]
 
@@ -690,8 +682,18 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
 dependencies = [
- "rustix",
+ "rustix 0.38.43",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "fs4"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
+dependencies = [
+ "rustix 1.0.3",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -816,16 +818,6 @@ dependencies = [
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
  "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "gimli"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e1d97fbe9722ba9bbd0c97051c2956e726562b61f86a25a4360398a40edfc9"
-dependencies = [
- "fallible-iterator 0.3.0",
- "stable_deref_trait",
 ]
 
 [[package]]
@@ -992,7 +984,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db2fa452206ebee18c4b5c2274dbf1de17008e874b4dc4f0aea9d01ca79e4526"
 dependencies = [
  "displaydoc",
- "yoke",
+ "yoke 0.7.5",
  "zerofrom",
  "zerovec",
 ]
@@ -1087,7 +1079,7 @@ dependencies = [
  "stable_deref_trait",
  "tinystr",
  "writeable",
- "yoke",
+ "yoke 0.7.5",
  "zerofrom",
  "zerovec",
 ]
@@ -1225,6 +1217,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-rs-sys"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "902bc563b5d65ad9bba616b490842ef0651066a1a1dc3ce1087113ffcb873c8d"
+dependencies = [
+ "zlib-rs",
+]
+
+[[package]]
 name = "linear-map"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1232,9 +1233,9 @@ checksum = "bfae20f6b19ad527b550c223fddc3077a547fc70cda94b9b566575423fd303ee"
 
 [[package]]
 name = "linux-perf-data"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cd34317b7ef6e67579faf5021099ff15faa873a082e8b2c46335acbd7147935"
+checksum = "1f85f35725e15ad6c62b9db73f3d62439094e616a2f83500f7bcdc01ae5b84d8"
 dependencies = [
  "byteorder",
  "linear-map",
@@ -1242,7 +1243,7 @@ dependencies = [
  "memchr",
  "prost",
  "prost-derive",
- "thiserror 1.0.69",
+ "thiserror 2.0.10",
 ]
 
 [[package]]
@@ -1262,6 +1263,12 @@ name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe7db12097d22ec582439daf8618b8fdd1a7bef6270e9af3b1ebcd30893cf413"
 
 [[package]]
 name = "litemap"
@@ -1318,17 +1325,6 @@ dependencies = [
 
 [[package]]
 name = "macho-unwind-info"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b6086acc74bc23f56b60e88bb082d505e23849d68d6c0f12bb6a7ad5c60e03e"
-dependencies = [
- "thiserror 1.0.69",
- "zerocopy 0.7.35",
- "zerocopy-derive 0.7.35",
-]
-
-[[package]]
-name = "macho-unwind-info"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb4bdc8b0ce69932332cf76d24af69c3a155242af95c226b2ab6c2e371ed1149"
@@ -1376,9 +1372,9 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minidump"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e03e301d414a75655d4ce80e6e3690fbfe70814b67c496c64c826ba558d18ec9"
+checksum = "f4f54c7ad3f2c6c5c44f3d3cc54d3bced9f652e3b97537fb96d8ddccc55246b2"
 dependencies = [
  "debugid",
  "encoding_rs",
@@ -1388,7 +1384,7 @@ dependencies = [
  "procfs-core",
  "range-map",
  "scroll 0.12.0",
- "thiserror 1.0.69",
+ "thiserror 2.0.10",
  "time",
  "tracing",
  "uuid",
@@ -1396,9 +1392,9 @@ dependencies = [
 
 [[package]]
 name = "minidump-common"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5273687f49325b3977f7d372a1bbe2e528694d18128de8dcac78d134448e83b4"
+checksum = "bf2f8b9bdd2449be3456faf1a2fb16317209564701c7a4f64b1e3e8848a02ccb"
 dependencies = [
  "bitflags 2.8.0",
  "debugid",
@@ -1411,9 +1407,9 @@ dependencies = [
 
 [[package]]
 name = "minidump-unwind"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c30454f5703c77433b4059bf5e196266b800b14223c55793ee636e49c8f9160e"
+checksum = "0f16991f7f19f82e7584317e87654c0f9c8ad441fa8896f8d7985221b8823dd3"
 dependencies = [
  "async-trait",
  "breakpad-symbols",
@@ -1495,6 +1491,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4c25a3bb7d880e8eceab4822f3141ad0700d20f025991c1f03bd3d00219a5fc"
 dependencies = [
  "bitflags 2.8.0",
+]
+
+[[package]]
+name = "msvc-demangler"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbeff6bd154a309b2ada5639b2661ca6ae4599b34e8487dc276d2cd637da2d76"
+dependencies = [
+ "bitflags 2.8.0",
+ "itoa",
 ]
 
 [[package]]
@@ -1765,18 +1771,18 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.12.6"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
 ]
 
 [[package]]
 name = "prost-derive"
-version = "0.12.6"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
  "itertools",
@@ -2065,7 +2071,20 @@ dependencies = [
  "bitflags 2.8.0",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.4.15",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "rustix"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e56a18552996ac8d29ecc3b190b4fdbb2d91ca4ec396de7bbffaf43f3d637e96"
+dependencies = [
+ "bitflags 2.8.0",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.9.3",
  "windows-sys 0.59.0",
 ]
 
@@ -2129,22 +2148,23 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "samply-symbols"
-version = "0.23.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbcdc8625b92ae1b981f37d435599effed5464dd1f37c01f88ccf83c0e90b54d"
+checksum = "97e73d38bb04a373dba1260af91d4b0010e84cecd92d20b8e9949a910d5b9cbb"
 dependencies = [
- "addr2line 0.23.0",
+ "addr2line",
  "bitflags 2.8.0",
  "cpp_demangle",
+ "crc32fast",
  "debugid",
  "elsa",
  "flate2",
- "gimli 0.30.0",
+ "gimli",
  "linux-perf-data",
  "lzma-rs",
- "macho-unwind-info 0.4.0",
+ "macho-unwind-info",
  "memchr",
- "msvc-demangler",
+ "msvc-demangler 0.11.0",
  "nom",
  "object",
  "pdb-addr2line 0.11.1",
@@ -2152,12 +2172,12 @@ dependencies = [
  "rustc-demangle",
  "scala-native-demangle",
  "srcsrv",
- "thiserror 1.0.69",
+ "thiserror 2.0.10",
  "uuid",
- "yoke",
- "yoke-derive",
- "zerocopy 0.7.35",
- "zerocopy-derive 0.7.35",
+ "yoke 0.8.0",
+ "yoke-derive 0.8.0",
+ "zerocopy 0.8.14",
+ "zerocopy-derive 0.8.14",
 ]
 
 [[package]]
@@ -2427,7 +2447,7 @@ dependencies = [
  "elsa",
  "fallible-iterator 0.3.0",
  "flate2",
- "gimli 0.31.1",
+ "gimli",
  "goblin 0.8.2",
  "lazy_static",
  "nom",
@@ -2456,7 +2476,7 @@ checksum = "89e51191290147f071777e37fe111800bb82a9059f9c95b19d2dd41bfeddf477"
 dependencies = [
  "cc",
  "cpp_demangle",
- "msvc-demangler",
+ "msvc-demangler 0.10.1",
  "rustc-demangle",
  "symbolic-common",
 ]
@@ -2486,7 +2506,7 @@ dependencies = [
  "async-compression",
  "cab",
  "dirs",
- "fs4",
+ "fs4 0.12.0",
  "futures-util",
  "http",
  "reqwest",
@@ -2536,7 +2556,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.1",
  "once_cell",
- "rustix",
+ "rustix 0.38.43",
  "windows-sys 0.59.0",
 ]
 
@@ -2967,24 +2987,30 @@ dependencies = [
 
 [[package]]
 name = "wholesym"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9d822684c5f5eb54218ff1d70fa8d436f194b3459fb619af23ddaf40aa7edc"
+checksum = "7ea291707798a4b15f75d46418b6f7c5a044cce8d55e2f18584ccebcdb8b4354"
 dependencies = [
+ "async-compression",
  "bytes",
  "core-foundation",
  "core-foundation-sys",
  "debugid",
+ "flate2",
+ "fs4 0.13.1",
  "futures-util",
+ "http",
  "libc",
  "memmap2",
  "reqwest",
  "samply-symbols",
+ "scopeguard",
  "symsrv",
+ "thiserror 2.0.10",
  "tokio",
  "uuid",
- "yoke",
- "yoke-derive",
+ "yoke 0.8.0",
+ "yoke-derive 0.8.0",
 ]
 
 [[package]]
@@ -3194,7 +3220,18 @@ checksum = "120e6aef9aa629e3d4f52dc8cc43a015c7724194c97dfaf45180d2daf2b77f40"
 dependencies = [
  "serde",
  "stable_deref_trait",
- "yoke-derive",
+ "yoke-derive 0.7.5",
+ "zerofrom",
+]
+
+[[package]]
+name = "yoke"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f41bb01b8226ef4bfd589436a297c53d118f65921786300e427be8d487695cc"
+dependencies = [
+ "serde",
+ "stable_deref_trait",
  "zerofrom",
 ]
 
@@ -3203,6 +3240,18 @@ name = "yoke-derive"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2380878cad4ac9aac1e2435f3eb4020e8374b5f13c296cb75b4620ff8e229154"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "synstructure",
+]
+
+[[package]]
+name = "yoke-derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38da3c9736e16c5d3c8c597a9aaa5d1fa565d0532ae05e27c24aa62fb32c0ab6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3284,7 +3333,7 @@ version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa2b893d79df23bfb12d5461018d408ea19dfafe76c2c7ef6d4eba614f8ff079"
 dependencies = [
- "yoke",
+ "yoke 0.7.5",
  "zerofrom",
  "zerovec-derive",
 ]
@@ -3316,6 +3365,12 @@ dependencies = [
  "thiserror 2.0.10",
  "zopfli",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b20717f0917c908dc63de2e44e97f1e6b126ca58d0e391cee86d504eb8fbd05"
 
 [[package]]
 name = "zopfli"
