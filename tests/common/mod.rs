@@ -9,6 +9,12 @@ type Error = Box<dyn error::Error + std::marker::Send + std::marker::Sync>;
 pub type Result<T> = result::Result<T, Error>;
 
 fn build_command() -> Command {
+    // Anything that needs to spawn a child will need to give it permission to
+    // ptrace itself, as Yama LSM will normally only allow a parent to debug
+    // a child, not the other way around.
+    let rc = unsafe { libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY) };
+    assert_eq!(rc, 0);
+
     let mut cmd;
     if let Some(binary) = std::env::var_os("TEST_HELPER") {
         cmd = Command::new(binary);
