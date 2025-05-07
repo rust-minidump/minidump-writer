@@ -8,7 +8,7 @@ use {
         linux::{
             auxv::AuxvDumpInfo,
             errors::{DumperError, ThreadInfoError},
-            maps_reader::MappingInfo,
+            maps_reader::{FromDebuggerRendezvousError, MappingInfo},
             module_reader,
             thread_info::ThreadInfo,
             Pid,
@@ -126,6 +126,16 @@ pub enum InitError {
     AggregateMappingsFailed(#[source] MapsReaderError),
     #[error("Failed to enumerate process mappings")]
     EnumerateMappingsFailed(#[source] Box<InitError>),
+    #[error("Failed to read module list through Debugger Rendez-Vous: {0}")]
+    ReadModuleViaRendezVousFailed(String),
+    #[error("no program header table address in auxiliary vector")]
+    MissingProgramHeaderTableAddress,
+    #[error("no program header count in auxiliary vector")]
+    MissingProgramHeaderCount,
+    #[error("failed to suspend main thread")]
+    SuspendMainThreadFailed(DumperError),
+    #[error("failed to obtain mappings from debugger rendez-vous")]
+    MappingsFromDebuggerRendezvousFailed(FromDebuggerRendezvousError),
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
@@ -221,7 +231,7 @@ impl PtraceDumper {
         }
 
         // Same with mappings -- Some information is still better than no information!
-        if let Err(e) = self.enumerate_mappings() {
+        if let Err(e) = self.enumerate_mappings(&mut soft_errors) {
             soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
         }
 
@@ -433,23 +443,14 @@ impl PtraceDumper {
         Ok(())
     }
 
-    fn enumerate_mappings(&mut self) -> Result<(), InitError> {
-        // linux_gate_loc is the beginning of the kernel's mapping of
-        // linux-gate.so in the process.  It doesn't actually show up in the
-        // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
-        // aux vector entry, which gives the information necessary to special
-        // case its entry when creating the list of mappings.
-        // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
-        // information.
-        let maps_path = format!("/proc/{}/maps", self.pid);
-        let maps_file =
-            std::fs::File::open(&maps_path).map_err(|e| InitError::IOError(maps_path, e))?;
-
-        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
-            .map_err(InitError::ReadProcessMapFileFailed)?;
-
-        self.mappings = MappingInfo::aggregate(maps, self.auxv.get_linux_gate_address())
-            .map_err(InitError::AggregateMappingsFailed)?;
+    fn enumerate_mappings(
+        &mut self,
+        mut soft_errors: impl WriteErrorList<InitError>,
+    ) -> Result<(), InitError> {
+        let mut mappings = self.enumerate_mappings_via_proc_maps().or_else(|e| {
+            soft_errors.push(e);
+            self.enumerate_mappings_via_debugger_rendezvous()
+        })?;
 
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
@@ -464,14 +465,75 @@ impl PtraceDumper {
             // format assumes the first module is the one that corresponds to the main
             // executable (as codified in
             // processor/minidump.cc:MinidumpModuleList::GetMainModule()).
-            if let Some(entry_mapping_idx) = self.mappings.iter().position(|mapping| {
+            if let Some(entry_mapping_idx) = mappings.iter().position(|mapping| {
                 (mapping.start_address..mapping.start_address + mapping.size)
                     .contains(&entry_point_loc)
             }) {
-                self.mappings.swap(0, entry_mapping_idx);
+                mappings.swap(0, entry_mapping_idx);
             }
         }
+
+        self.mappings = mappings;
+
         Ok(())
+    }
+
+    fn enumerate_mappings_via_debugger_rendezvous(
+        &mut self,
+    ) -> Result<Vec<MappingInfo>, InitError> {
+        let Some(program_header_table_address) = self
+            .auxv
+            .get_program_header_address()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderTableAddress);
+        };
+
+        let Some(program_header_count) = self
+            .auxv
+            .get_program_header_count()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderCount);
+        };
+
+        Self::suspend_thread(self.pid).map_err(InitError::SuspendMainThreadFailed)?;
+
+        let mappings = MappingInfo::from_debugger_rendezvous(
+            self.pid,
+            program_header_table_address,
+            program_header_count,
+        )
+        .map_err(InitError::MappingsFromDebuggerRendezvousFailed)?;
+
+        let _ = Self::resume_thread(self.pid);
+
+        Ok(mappings)
+    }
+
+    fn enumerate_mappings_via_proc_maps(&mut self) -> Result<Vec<MappingInfo>, InitError> {
+        // linux_gate_loc is the beginning of the kernel's mapping of
+        // linux-gate.so in the process.  It doesn't actually show up in the
+        // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
+        // aux vector entry, which gives the information necessary to special
+        // case its entry when creating the list of mappings.
+        // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
+        // information.
+        let maps_path = format!("/proc/{}/maps", self.pid);
+        let maps_file = failspot!(if EnumerateMappingsFromProc {
+            Err(std::io::Error::other("fake I/O error reading maps file"))
+        } else {
+            std::fs::File::open(&maps_path)
+        })
+        .map_err(|e| InitError::IOError(maps_path, e))?;
+
+        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
+            .map_err(InitError::ReadProcessMapFileFailed)?;
+
+        let mappings = MappingInfo::aggregate(maps, self.auxv.get_linux_gate_address())
+            .map_err(InitError::AggregateMappingsFailed)?;
+
+        Ok(mappings)
     }
 
     /// Read thread info from /proc/$pid/status.
