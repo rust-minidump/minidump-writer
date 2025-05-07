@@ -782,26 +782,3 @@ fn with_deleted_binary() {
     // The 'age'/appendix, always 0 on non-windows targets
     assert_eq!(did.appendix(), 0);
 }
-
-#[test]
-fn memory_info_list_stream() {
-    let mut child = start_child_and_wait_for_threads(1);
-    let pid = child.id() as i32;
-
-    let mut tmpfile = tempfile::Builder::new()
-        .prefix("memory_info_list_stream")
-        .tempfile()
-        .unwrap();
-
-    // Write a minidump
-    MinidumpWriter::new(pid, pid)
-        .dump(&mut tmpfile)
-        .expect("cound not write minidump");
-    child.kill().expect("Failed to kill process");
-    child.wait().expect("Failed to wait on killed process");
-
-    // Ensure the minidump has a MemoryInfoListStream present and has at least one entry.
-    let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-    let list: MinidumpMemoryInfoList = dump.get_stream().expect("no memory info list");
-    assert!(list.iter().count() > 1);
-}

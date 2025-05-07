@@ -28,5 +28,6 @@ failspot::failspot_name! {
         ThreadName,
         SuspendThreads,
         CpuInfoFileOpen,
+        EnumerateMappingsFromProc,
     }
 }
