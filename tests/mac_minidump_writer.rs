@@ -30,6 +30,7 @@ fn get_crash_reason<'a, T: std::ops::Deref<Target = [u8]> + 'a>(
 struct Captured<'md> {
     #[allow(dead_code)]
     task: u32,
+    #[allow(dead_code)]
     thread: u32,
     minidump: Minidump<'md, memmap2::Mmap>,
 }

@@ -340,10 +340,6 @@ impl TaskDumper {
     /// The syscall to retrieve the location of the loaded images fails, or
     /// the syscall to read the loaded images from the process memory fails
     pub fn read_images(&self) -> Result<(AllImagesInfo, Vec<ImageInfo>), TaskDumpError> {
-        impl mach::TaskInfo for mach::task_info::task_dyld_info {
-            const FLAVOR: u32 = mach::task_info::TASK_DYLD_INFO;
-        }
-
         // Retrieve the address at which the list of loaded images is located
         // within the task
         let all_images_addr = {
@@ -459,4 +455,8 @@ impl TaskDumper {
         mach_call!(mach::pid_for_task(self.task, &mut pid))?;
         Ok(pid)
     }
+}
+
+impl mach::TaskInfo for mach::task_info::task_dyld_info {
+    const FLAVOR: u32 = mach::task_info::TASK_DYLD_INFO;
 }
