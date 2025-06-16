@@ -1,6 +1,4 @@
-use crate::mac::mach;
-use mach2::mach_types as mt;
-use thiserror::Error;
+use {super::mach, mach2::mach_types as mt, thiserror::Error};
 
 #[derive(Error, Debug)]
 pub enum TaskDumpError {

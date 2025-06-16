@@ -1,17 +1,21 @@
 #![allow(unsafe_code)]
 
-use crate::windows::errors::Error;
-use crate::windows::ffi::{
-    capture_context, CloseHandle, GetCurrentProcess, GetCurrentThreadId, GetThreadContext,
-    MiniDumpWriteDump, MinidumpType, OpenProcess, OpenThread, ResumeThread, SuspendThread,
-    EXCEPTION_POINTERS, EXCEPTION_RECORD, FALSE, HANDLE, MINIDUMP_EXCEPTION_INFORMATION,
-    MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION, PROCESS_ALL_ACCESS,
-    STATUS_NONCONTINUABLE_EXCEPTION, THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION,
-    THREAD_SUSPEND_RESUME,
+use {
+    super::{
+        errors::Error,
+        ffi::{
+            capture_context, CloseHandle, GetCurrentProcess, GetCurrentThreadId, GetThreadContext,
+            MiniDumpWriteDump, MinidumpType, OpenProcess, OpenThread, ResumeThread, SuspendThread,
+            EXCEPTION_POINTERS, EXCEPTION_RECORD, FALSE, HANDLE, MINIDUMP_EXCEPTION_INFORMATION,
+            MINIDUMP_USER_STREAM, MINIDUMP_USER_STREAM_INFORMATION, PROCESS_ALL_ACCESS,
+            STATUS_NONCONTINUABLE_EXCEPTION, THREAD_GET_CONTEXT, THREAD_QUERY_INFORMATION,
+            THREAD_SUSPEND_RESUME,
+        },
+    },
+    minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE},
+    scroll::Pwrite,
+    std::os::windows::io::AsRawHandle,
 };
-use minidump_common::format::{BreakpadInfoValid, MINIDUMP_BREAKPAD_INFO, MINIDUMP_STREAM_TYPE};
-use scroll::Pwrite;
-use std::os::windows::io::AsRawHandle;
 
 pub struct MinidumpWriter {
     /// Optional exception information

@@ -1,5 +1,6 @@
 use {
-    crate::{errors::CpuInfoError, minidump_format::*},
+    super::CpuInfoError,
+    crate::minidump_format::*,
     failspot::failspot,
     std::{
         io::{BufRead, BufReader},

@@ -1,12 +1,15 @@
 #![cfg(all(target_os = "windows", target_arch = "x86_64"))]
 
-use minidump::{
-    CrashReason, Minidump, MinidumpBreakpadInfo, MinidumpMemoryList, MinidumpSystemInfo,
-    MinidumpThreadList,
+use {
+    common::start_child_and_return,
+    minidump::{
+        CrashReason, Minidump, MinidumpBreakpadInfo, MinidumpMemoryList, MinidumpSystemInfo,
+        MinidumpThreadList,
+    },
+    minidump_writer::minidump_writer::MinidumpWriter,
 };
-use minidump_writer::minidump_writer::MinidumpWriter;
+
 mod common;
-use common::start_child_and_return;
 
 const EXCEPTION_ILLEGAL_INSTRUCTION: i32 = -1073741795;
 const STATUS_INVALID_PARAMETER: i32 = -1073741811;

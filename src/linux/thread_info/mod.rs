@@ -1,11 +1,42 @@
-use crate::{errors::ThreadInfoError, Pid};
-use nix::{errno::Errno, sys::ptrace, unistd};
-use std::{
-    io::{self, BufRead},
-    path,
+use {
+    super::{serializers::*, Pid},
+    crate::serializers::*,
+    nix::{errno::Errno, sys::ptrace},
+    std::{
+        io::{self, BufRead},
+        path,
+    },
 };
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
+
+#[derive(thiserror::Error, Debug, serde::Serialize)]
+pub enum ThreadInfoError {
+    #[error("Index out of bounds: Got {0}, only have {1}")]
+    IndexOutOfBounds(usize, usize),
+    #[error("Either ppid ({1}) or tgid ({2}) not found in {0}")]
+    InvalidPid(String, Pid, Pid),
+    #[error("IO error")]
+    IOError(
+        #[from]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
+    #[error("Couldn't parse address")]
+    UnparsableInteger(
+        #[from]
+        #[serde(skip)]
+        std::num::ParseIntError,
+    ),
+    #[error("nix::ptrace() error")]
+    PtraceError(
+        #[from]
+        #[serde(serialize_with = "serialize_nix_error")]
+        nix::Error,
+    ),
+    #[error("Invalid line in /proc/{0}/status: {1}")]
+    InvalidProcStatusFile(Pid, String),
+}
 
 cfg_if::cfg_if! {
     if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
@@ -35,6 +66,7 @@ enum NT_Elf {
     NT_ARM_VFP = 0x400, // ARM VFP/NEON registers
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline]
 pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
     // SAFETY: We are copying a block of memory from ptrace as u32s to the u128
@@ -54,7 +86,7 @@ trait CommonThreadInfo {
         let mut ppid = -1;
         let mut tgid = -1;
 
-        let status_path = path::PathBuf::from(format!("/proc/{}/status", tid));
+        let status_path = path::PathBuf::from(format!("/proc/{tid}/status"));
         let status_file = std::fs::File::open(status_path)?;
         for line in io::BufReader::new(status_file).lines() {
             let l = line?;
@@ -79,7 +111,7 @@ trait CommonThreadInfo {
         }
         if ppid == -1 || tgid == -1 {
             return Err(ThreadInfoError::InvalidPid(
-                format!("/proc/{}/status", tid),
+                format!("/proc/{tid}/status"),
                 ppid,
                 tgid,
             ));
@@ -138,9 +170,10 @@ trait CommonThreadInfo {
     }
 
     /// COPY FROM CRATE nix BECAUSE ITS NOT PUBLIC
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn ptrace_peek(
         request: ptrace::RequestType,
-        pid: unistd::Pid,
+        pid: nix::unistd::Pid,
         addr: ptrace::AddressType,
         data: *mut libc::c_void,
     ) -> nix::Result<libc::c_long> {

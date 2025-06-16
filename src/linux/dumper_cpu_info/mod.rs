@@ -1,3 +1,8 @@
+use {
+    crate::{minidump_format::PlatformId, serializers::*},
+    nix::sys::utsname::uname,
+};
+
 cfg_if::cfg_if! {
     if #[cfg(any(
         target_arch = "x86_64",
@@ -20,8 +25,25 @@ cfg_if::cfg_if! {
 
 pub use imp::write_cpu_information;
 
-use crate::minidump_format::PlatformId;
-use nix::sys::utsname::uname;
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum CpuInfoError {
+    #[error("IO error for file /proc/cpuinfo")]
+    IOError(
+        #[from]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
+    #[error("Not all entries of /proc/cpuinfo found!")]
+    NotAllProcEntriesFound,
+    #[error("Couldn't parse core from file")]
+    UnparsableInteger(
+        #[from]
+        #[serde(skip)]
+        std::num::ParseIntError,
+    ),
+    #[error("Couldn't parse cores: {0}")]
+    UnparsableCores(String),
+}
 
 /// Retrieves the [`MDOSPlatform`] and synthesized version information
 pub fn os_information() -> (PlatformId, String) {
