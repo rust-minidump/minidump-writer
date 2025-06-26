@@ -114,10 +114,10 @@ pub enum AndroidError {
 }
 
 #[derive(Debug, Error, serde::Serialize)]
-#[error("Copy from process {child} failed (source {src}, offset: {offset}, length: {length})")]
+#[error("Copy from process {child} failed (address {address}, offset: {offset}, length: {length})")]
 pub struct CopyFromProcessError {
     pub child: Pid,
-    pub src: usize,
+    pub address: usize,
     pub offset: usize,
     pub length: usize,
     #[serde(serialize_with = "serialize_nix_error")]
