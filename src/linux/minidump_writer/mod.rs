@@ -771,6 +771,12 @@ impl MinidumpWriter {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
+        if failspot!(EnumerateMappingsFromProc) {
+            return Err(InitError::AggregateMappingsFailed(
+                std::io::Error::other("fake I/O error reading maps file").into(),
+            ));
+        }
+
         let mappings = MappingInfo::for_pid(
             &self.process_inspector,
             self.process_id,
