@@ -280,11 +280,6 @@ impl MinidumpWriter {
             soft_errors.push(InitError::EnumerateThreadsFailed(Box::new(e)));
         }
 
-        // Same with mappings -- Some information is still better than no information!
-        if let Err(e) = self.enumerate_mappings() {
-            soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
-        }
-
         self.page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap() };
         assert!(
             self.page_size > 0,
@@ -297,6 +292,11 @@ impl MinidumpWriter {
 
         if self.threads.is_empty() {
             soft_errors.push(InitError::SuspendNoThreadsLeft(threads_count));
+        }
+
+        // Same with mappings -- Some information is still better than no information!
+        if let Err(e) = self.enumerate_mappings() {
+            soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
         }
 
         #[cfg(target_os = "android")]
