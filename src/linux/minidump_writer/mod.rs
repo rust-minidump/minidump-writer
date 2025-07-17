@@ -52,7 +52,13 @@ pub mod thread_names_stream;
 
 /// The default timeout after a `SIGSTOP` after which minidump writing proceeds
 /// regardless of the process state
-pub const STOP_TIMEOUT: Duration = Duration::from_millis(100);
+pub const STOP_TIMEOUT: Duration = if cfg!(target_os = "android") {
+    // For whatever reason, Android can be terribly slow for stopping processes
+    // This often leads to our tests failing intermittently
+    Duration::from_secs(5)
+} else {
+    Duration::from_millis(100)
+};
 
 #[cfg(target_pointer_width = "32")]
 pub const AT_SYSINFO_EHDR: u32 = 33;
