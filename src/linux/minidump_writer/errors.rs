@@ -2,7 +2,7 @@ use {
     super::super::{
         auxv::AuxvError,
         dso_debug::SectionDsoDebugError,
-        maps_reader::MapsReaderError,
+        maps_reader::{FromDebuggerRendezvousError, MapsReaderError},
         minidump_writer::{
             app_memory::SectionAppMemoryError, exception_stream::SectionExceptionStreamError,
             handle_data_stream::SectionHandleDataStreamError, mappings::SectionMappingsError,
@@ -216,6 +216,16 @@ pub enum InitError {
     SuspendNoThreadsLeft(usize),
     #[error("Crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
+    #[error("Failed to read module list through Debugger Rendez-Vous: {0}")]
+    ReadModuleViaRendezVousFailed(String),
+    #[error("no program header table address in auxiliary vector")]
+    MissingProgramHeaderTableAddress,
+    #[error("no program header count in auxiliary vector")]
+    MissingProgramHeaderCount,
+    #[error("failed to suspend main thread")]
+    SuspendMainThreadFailed(Box<WriterError>),
+    #[error("failed to obtain mappings from debugger rendez-vous")]
+    MappingsFromDebuggerRendezvousFailed(FromDebuggerRendezvousError),
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]

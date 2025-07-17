@@ -1,3 +1,8 @@
+// Because of the nature of this crate, there are lots of times we cast aliased types to `u64`
+// Often, on 64-bit platforms, it's already that, so Clippy gets upset at the u64-to-u64
+// conversion.
+#![allow(clippy::useless_conversion)]
+
 cfg_if::cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
@@ -28,5 +33,6 @@ failspot::failspot_name! {
         ThreadName,
         SuspendThreads,
         CpuInfoFileOpen,
+        EnumerateMappingsFromProc,
     }
 }
