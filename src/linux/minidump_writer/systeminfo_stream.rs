@@ -1,7 +1,17 @@
 use {
-    super::*, crate::linux::dumper_cpu_info as dci, error_graph::WriteErrorList,
-    errors::SectionSystemInfoError,
+    super::{super::dumper_cpu_info as dci, *},
+    error_graph::WriteErrorList,
 };
+
+#[derive(Debug, Error, serde::Serialize)]
+pub enum SectionSystemInfoError {
+    #[error("Failed to write to memory")]
+    MemoryWriterError(#[from] MemoryWriterError),
+    #[error("Failed to get CPU Info")]
+    CpuInfoError(#[from] CpuInfoError),
+    #[error("Failed trying to write CPU information")]
+    WriteCpuInformationFailed(#[source] CpuInfoError),
+}
 
 pub fn write(
     buffer: &mut DumpBuf,

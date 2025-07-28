@@ -1,6 +1,6 @@
 //! Functionality for reading a remote process's memory
 
-use crate::{errors::CopyFromProcessError, ptrace_dumper::PtraceDumper, Pid};
+use super::{minidump_writer::MinidumpWriter, serializers::*, Pid};
 
 enum Style {
     /// Uses [`process_vm_readv`](https://linux.die.net/man/2/process_vm_readv)
@@ -26,6 +26,17 @@ enum Style {
         file: nix::Error,
         ptrace: nix::Error,
     },
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+#[error("Copy from process {child} failed (source {src}, offset: {offset}, length: {length})")]
+pub struct CopyFromProcessError {
+    pub child: Pid,
+    pub src: usize,
+    pub offset: usize,
+    pub length: usize,
+    #[serde(serialize_with = "serialize_nix_error")]
+    pub source: nix::Error,
 }
 
 pub struct MemReader {
@@ -215,7 +226,7 @@ impl MemReader {
     }
 }
 
-impl PtraceDumper {
+impl MinidumpWriter {
     /// Copies a block of bytes from the target process, returning the heap
     /// allocated copy
     #[inline]
@@ -223,21 +234,19 @@ impl PtraceDumper {
         pid: Pid,
         src: usize,
         length: usize,
-    ) -> Result<Vec<u8>, crate::errors::DumperError> {
-        let length = std::num::NonZeroUsize::new(length).ok_or(
-            crate::errors::DumperError::CopyFromProcessError(CopyFromProcessError {
-                src,
-                child: pid,
-                offset: 0,
-                length,
-                // TODO: We should make copy_from_process also take a NonZero,
-                // as EINVAL could also come from the syscalls that actually read
-                // memory as well which could be confusing
-                source: nix::errno::Errno::EINVAL,
-            }),
-        )?;
+    ) -> Result<Vec<u8>, CopyFromProcessError> {
+        let length = std::num::NonZeroUsize::new(length).ok_or(CopyFromProcessError {
+            src,
+            child: pid,
+            offset: 0,
+            length,
+            // TODO: We should make copy_from_process also take a NonZero,
+            // as EINVAL could also come from the syscalls that actually read
+            // memory as well which could be confusing
+            source: nix::errno::Errno::EINVAL,
+        })?;
 
         let mut mem = MemReader::new(pid);
-        Ok(mem.read_to_vec(src, length)?)
+        mem.read_to_vec(src, length)
     }
 }

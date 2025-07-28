@@ -6,6 +6,16 @@ pub struct CrashContext {
     pub inner: crash_context::CrashContext,
 }
 
+impl std::fmt::Debug for CrashContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CrashContext")
+            .field("siginfo", &self.inner.siginfo)
+            .field("pid", &self.inner.pid)
+            .field("tid", &self.inner.tid)
+            .finish_non_exhaustive()
+    }
+}
+
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
         mod x86_64;
