@@ -1,9 +1,17 @@
 use {
-    super::{auxv::AuxvType, module_reader::ModuleReaderError, serializers::*},
+    super::{
+        auxv::AuxvType, mem_reader::MemReader, module_reader::ModuleReaderError, serializers::*,
+        Pid,
+    },
     crate::serializers::*,
     byteorder::{NativeEndian, ReadBytesExt},
-    goblin::elf,
+    elf::{
+        dynamic::{Dyn, DT_DEBUG},
+        header::Header as ElfHeader,
+        program_header::{ProgramHeader, PF_R, PF_W, PF_X, PT_DYNAMIC, PT_LOAD, PT_PHDR},
+    },
     memmap2::{Mmap, MmapOptions},
+    plain::Plain,
     procfs_core::process::{MMPermissions, MMapPath, MemoryMaps},
     std::{
         ffi::{OsStr, OsString},
@@ -13,6 +21,11 @@ use {
         path::PathBuf,
     },
 };
+
+#[cfg(not(target_pointer_width = "64"))]
+use goblin::elf32 as elf;
+#[cfg(target_pointer_width = "64")]
+use goblin::elf64 as elf;
 
 pub const LINUX_GATE_LIBRARY_NAME: &str = "linux-gate.so";
 pub const DELETED_SUFFIX: &[u8] = b" (deleted)";
@@ -98,6 +111,93 @@ pub enum MapsReaderError {
     SymlinkError(std::path::PathBuf, std::path::PathBuf),
 }
 
+/// Shared object loading information for the debugger
+///
+/// The Linux dynamic linker fills this info in the Dynamic section of the ELF headers at
+/// runtime. It is known as the "debugger rendez-vous" point and is a legacy structure to assist
+/// debuggers in locating loaded shared modules.
+///
+/// (But we're going to use it for minidump generation purposes.)
+///
+/// https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/link.h;h=b645760402514c4839686aaeade20dd5bb7725dd;hb=HEAD#l40
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Debug)]
+struct r_debug {
+    /// Version number of the protocol
+    r_version: std::ffi::c_int,
+    /// Address of the first link_map structure
+    r_map: usize,
+    /// Address of callback function for module map/unmap
+    r_brk: usize,
+    /// Argument to r_brk on whether mapping is being added, subtracted, or is done
+    r_state: u8,
+    /// Base address the linker is loaded at
+    r_ldbase: usize,
+}
+
+/// Information for a single dynamically loaded module
+///
+/// This structure contains important information about a dynamically-loaded module, like its
+/// name and virtual address. It is also a node in a doubly-linked list of such modules.
+///
+/// https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/link.h;h=b645760402514c4839686aaeade20dd5bb7725dd;hb=HEAD#l101
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Debug)]
+struct link_map {
+    /// Base address module was loaded at
+    l_addr: usize,
+    /// Name of file for module
+    l_name: usize,
+    /// Address of the Dynamic section
+    l_ld: usize,
+    /// Address of next node in list
+    l_next: usize,
+    /// Address of previous node in list
+    l_prev: usize,
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum FromDebuggerRendezvousError {
+    #[error("failed to read program header table")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadProgramHeaderTableFailed(#[source] std::io::Error),
+    #[error("program header table missing self-pointer")]
+    ProgramHeaderTableNoSelf,
+    #[error("program header table missing dynamic section")]
+    ProgramHeaderTableNoDynamic,
+    #[error("failed to read ELF header")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadElfHeaderFailed(#[source] std::io::Error),
+    #[error("ELF header had invalid identifer bytes: `{0:?}`")]
+    InvalidElfSignature([u8; 4]),
+    #[error("unexpected size for dynamic section `{0}`")]
+    InvalidDynamicSectionSize(usize),
+    #[error("dynamic section missing NULL entry")]
+    DynamicSectionMissingTerminator,
+    #[error("failed to read dynamic section")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadDynamicSectionFailed(#[source] std::io::Error),
+    #[error("failed to find DT_DEBUG entry in dynamic section")]
+    MissingDebugEntry,
+    #[error("failed to read debugger rendezvous address")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadDebuggerRendezvousAddressFailed(#[source] std::io::Error),
+    #[error("unexpected debugger rendezvous version '{0}'")]
+    UnexpectedDebuggerRendezvousVersion(i32),
+    #[error("an error occurred iterating the link_map linked list")]
+    IterateLinkMapFailed(#[source] Box<FromDebuggerRendezvousError>),
+    #[error("failed reading link_map entry")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadLinkMapEntryFailed(#[source] std::io::Error),
+    #[error("invalid link entry")]
+    InvalidLinkEntry,
+    #[error("failed reading module name")]
+    #[serde(serialize_with = "serialize_io_error")]
+    ReadModuleNameFailed(#[source] std::io::Error),
+}
+
 fn is_mapping_a_path(pathname: Option<&OsStr>) -> bool {
     match pathname {
         Some(x) => x.as_bytes().contains(&b'/'),
@@ -128,6 +228,270 @@ impl MappingInfo {
 
     pub fn end_address(&self) -> usize {
         self.start_address + self.size
+    }
+
+    pub fn from_debugger_rendezvous(
+        pid: Pid,
+        program_header_table_address: usize,
+        program_header_count: usize,
+    ) -> std::result::Result<Vec<Self>, FromDebuggerRendezvousError> {
+        let mut memory_reader = MemReader::new(pid);
+
+        let program_headers = Self::read_program_headers(
+            &mut memory_reader,
+            program_header_table_address,
+            program_header_count,
+        )?;
+
+        let program_header_table_virtual_address =
+            Self::find_segment_in_program_headers(&program_headers, PT_PHDR)?.0;
+
+        let elf_header_address =
+            program_header_table_address - program_header_table_virtual_address;
+
+        // Let's make sure we can locate and parse the ELF header to ensure we didn't somehow read garbage.
+        Self::read_elf_header(&mut memory_reader, elf_header_address)?;
+
+        let (dynamic_segment_virtual_address, dynamic_segment_size) =
+            Self::find_segment_in_program_headers(&program_headers, PT_DYNAMIC)?;
+        let dynamic_segment_address = elf_header_address + dynamic_segment_virtual_address;
+
+        let dynamic_section = Self::read_dynamic_section(
+            &mut memory_reader,
+            dynamic_segment_address,
+            dynamic_segment_size,
+        )?;
+
+        let debugger_rendezvous_address = Self::get_rendezvous_address(&dynamic_section)?;
+        let debugger_rendezvous =
+            Self::read_debugger_rendezvous(&mut memory_reader, debugger_rendezvous_address)?;
+
+        Self::read_link_map(&mut memory_reader, debugger_rendezvous.r_map)
+            .map_err(|e| FromDebuggerRendezvousError::IterateLinkMapFailed(Box::new(e)))
+    }
+
+    fn read_program_headers(
+        memory_reader: &mut MemReader,
+        program_header_table_address: usize,
+        program_header_count: usize,
+    ) -> std::result::Result<Vec<ProgramHeader>, FromDebuggerRendezvousError> {
+        memory_reader
+            .read_pod_vec(program_header_table_address, program_header_count)
+            .map_err(FromDebuggerRendezvousError::ReadProgramHeaderTableFailed)
+    }
+
+    fn find_segment_in_program_headers(
+        program_headers: &[ProgramHeader],
+        segment_type: u32,
+    ) -> std::result::Result<(usize, usize), FromDebuggerRendezvousError> {
+        program_headers
+            .iter()
+            .find_map(|hdr| (hdr.p_type == segment_type).then_some((hdr.p_vaddr, hdr.p_memsz)))
+            .map(|(a, b)| (usize::try_from(a).unwrap(), usize::try_from(b).unwrap()))
+            .ok_or(FromDebuggerRendezvousError::ProgramHeaderTableNoDynamic)
+    }
+
+    fn read_elf_header(
+        memory_reader: &mut MemReader,
+        elf_header_address: usize,
+    ) -> std::result::Result<ElfHeader, FromDebuggerRendezvousError> {
+        let elf_header: ElfHeader = memory_reader
+            .read_pod(elf_header_address)
+            .map_err(FromDebuggerRendezvousError::ReadElfHeaderFailed)?;
+
+        validate_elf_signature(&elf_header)?;
+
+        Ok(elf_header)
+    }
+
+    fn read_dynamic_section(
+        memory_reader: &mut MemReader,
+        dynamic_segment_address: usize,
+        dynamic_segment_size: usize,
+    ) -> std::result::Result<Vec<Dyn>, FromDebuggerRendezvousError> {
+        // Check that the dynamic section size is a multiple of the size of a dynamic entry
+        if dynamic_segment_size % std::mem::size_of::<Dyn>() != 0 {
+            return Err(FromDebuggerRendezvousError::InvalidDynamicSectionSize(
+                dynamic_segment_size,
+            ));
+        }
+
+        let dynamic_section = memory_reader
+            .read_pod_vec(
+                dynamic_segment_address,
+                dynamic_segment_size / std::mem::size_of::<Dyn>(),
+            )
+            .map_err(FromDebuggerRendezvousError::ReadDynamicSectionFailed)?;
+
+        if dynamic_section.last() != Some(&Dyn::default()) {
+            return Err(FromDebuggerRendezvousError::DynamicSectionMissingTerminator);
+        }
+
+        Ok(dynamic_section)
+    }
+
+    fn get_rendezvous_address(
+        dynamic_section: &[Dyn],
+    ) -> std::result::Result<usize, FromDebuggerRendezvousError> {
+        dynamic_section
+            .iter()
+            .find_map(|d| (u64::from(d.d_tag) == DT_DEBUG).then_some(d.d_val))
+            .map(|a| usize::try_from(a).unwrap())
+            .ok_or(FromDebuggerRendezvousError::MissingDebugEntry)
+    }
+
+    fn read_debugger_rendezvous(
+        memory_reader: &mut MemReader,
+        debugger_rendezvous_address: usize,
+    ) -> std::result::Result<r_debug, FromDebuggerRendezvousError> {
+        let debugger_rendezvous: r_debug = memory_reader
+            .read_pod(debugger_rendezvous_address)
+            .map_err(FromDebuggerRendezvousError::ReadDebuggerRendezvousAddressFailed)?;
+        if debugger_rendezvous.r_version != 1 {
+            return Err(
+                FromDebuggerRendezvousError::UnexpectedDebuggerRendezvousVersion(
+                    debugger_rendezvous.r_version,
+                ),
+            );
+        }
+        Ok(debugger_rendezvous)
+    }
+
+    fn read_c_string(
+        memory_reader: &mut MemReader,
+        address: usize,
+    ) -> std::result::Result<String, FromDebuggerRendezvousError> {
+        let mut buf = Vec::new();
+        memory_reader
+            .read_until(address, 0, &mut buf)
+            .map_err(FromDebuggerRendezvousError::ReadModuleNameFailed)?;
+        buf.pop();
+        Ok(String::from_utf8(buf).unwrap())
+    }
+
+    fn read_link_map(
+        memory_reader: &mut MemReader,
+        link_map_address: usize,
+    ) -> std::result::Result<Vec<MappingInfo>, FromDebuggerRendezvousError> {
+        let mut link_maps = LinkMaps::new(link_map_address);
+
+        let mut result: Vec<MappingInfo> = Vec::new();
+
+        while let Some(link) = link_maps.next(memory_reader)? {
+            let name = OsString::from(Self::read_c_string(memory_reader, link.l_name)?);
+
+            let module_elf_header_address = link.l_addr;
+            let module_elf_header =
+                Self::read_elf_header(memory_reader, module_elf_header_address)?;
+
+            let module_program_header_virtual_address =
+                usize::try_from(module_elf_header.e_phoff).unwrap();
+            let module_program_header_address =
+                module_elf_header_address + module_program_header_virtual_address;
+            let module_program_header_len = usize::from(module_elf_header.e_phnum);
+
+            let module_program_headers = Self::read_program_headers(
+                memory_reader,
+                module_program_header_address,
+                module_program_header_len,
+            )?;
+
+            for module_program_header in module_program_headers
+                .iter()
+                .filter(|x| x.p_type == PT_LOAD)
+            {
+                let mapping_info = Self::calculate_mapping_info(
+                    module_program_header,
+                    &name,
+                    module_elf_header_address,
+                );
+
+                if let Some(prev_mapping) = result.last_mut() {
+                    if prev_mapping.end_address() == mapping_info.start_address
+                        && prev_mapping.name.is_some()
+                        && prev_mapping.name == mapping_info.name
+                    {
+                        prev_mapping.system_mapping_info.end_address =
+                            mapping_info.system_mapping_info.end_address;
+                        prev_mapping.size = prev_mapping.system_mapping_info.end_address
+                            - prev_mapping.start_address;
+                        prev_mapping.permissions |= mapping_info.permissions;
+                        continue;
+                    }
+                }
+
+                result.push(mapping_info);
+            }
+        }
+        Ok(result)
+    }
+
+    fn calculate_mapping_info(
+        module_program_header: &ProgramHeader,
+        name: &OsString,
+        module_elf_header_address: usize,
+    ) -> MappingInfo {
+        let segment_virtual_address = usize::try_from(module_program_header.p_vaddr).unwrap();
+        let segment_address = module_elf_header_address + segment_virtual_address;
+        let segment_len = usize::try_from(module_program_header.p_memsz).unwrap();
+        let segment_end_address = segment_address + segment_len;
+        let segment_offset = usize::try_from(module_program_header.p_offset).unwrap();
+
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        assert!(page_size > 0);
+        let page_size = usize::try_from(page_size).unwrap();
+
+        // Round each of these down or up to the nearest page
+        let segment_address = Self::align_down(segment_address, page_size);
+        let segment_offset = Self::align_down(segment_offset, page_size);
+        let segment_end_address = Self::align_up(segment_end_address, page_size);
+        let segment_len = segment_end_address - segment_address;
+
+        let permissions =
+            Self::permissions_from_program_header_flags(module_program_header.p_flags);
+
+        MappingInfo {
+            start_address: segment_address,
+            size: segment_len,
+            // When Android relocation packing causes |start_addr| and |size| to
+            // be modified with a load bias, we need to remember the unbiased
+            // address range. The following structure holds the original mapping
+            // address range as reported by the operating system.
+            system_mapping_info: SystemMappingInfo {
+                start_address: segment_address,
+                end_address: segment_end_address,
+            },
+            offset: segment_offset,
+            permissions,
+            name: Some(name.clone()),
+        }
+    }
+
+    fn permissions_from_program_header_flags(flags: u32) -> MMPermissions {
+        let mut permissions = MMPermissions::empty();
+        if flags & PF_R != 0 {
+            permissions.insert(MMPermissions::READ);
+        }
+        if flags & PF_W != 0 {
+            permissions.insert(MMPermissions::WRITE);
+        }
+        if flags & PF_X != 0 {
+            permissions.insert(MMPermissions::EXECUTE);
+        }
+        permissions
+    }
+
+    fn align_down(val: usize, align: usize) -> usize {
+        val / align * align
+    }
+
+    fn align_up(val: usize, align: usize) -> usize {
+        let result = val / align * align;
+        if val % align != 0 {
+            result + align
+        } else {
+            result
+        }
     }
 
     pub fn aggregate(
@@ -248,7 +612,7 @@ impl MappingInfo {
                 .map(&File::open(filename)?)?
         };
 
-        if mapped_file.is_empty() || mapped_file.len() < elf::header::SELFMAG {
+        if mapped_file.is_empty() || mapped_file.len() < goblin::elf::header::SELFMAG {
             return Err(MapsReaderError::MmapSanityCheckFailed);
         }
         Ok(mapped_file)
@@ -482,10 +846,62 @@ impl SoVersion {
     }
 }
 
+#[derive(Debug)]
+struct LinkMaps {
+    address: usize,
+    first_node: bool,
+}
+
+impl LinkMaps {
+    fn new(first_address: usize) -> LinkMaps {
+        LinkMaps {
+            address: first_address,
+            first_node: true,
+        }
+    }
+    fn next(
+        &mut self,
+        memory_reader: &mut MemReader,
+    ) -> std::result::Result<Option<link_map>, FromDebuggerRendezvousError> {
+        if self.address == 0 {
+            return Ok(None);
+        }
+
+        let link: link_map = memory_reader
+            .read_pod(self.address)
+            .map_err(FromDebuggerRendezvousError::ReadLinkMapEntryFailed)?;
+        if self.first_node {
+            if link.l_prev != 0 {
+                return Err(FromDebuggerRendezvousError::InvalidLinkEntry);
+            }
+            self.first_node = false;
+        }
+
+        self.address = link.l_next;
+
+        Ok(Some(link))
+    }
+}
+
 #[cfg(test)]
 impl PartialEq<(u32, u32, u32, u32)> for SoVersion {
     fn eq(&self, o: &(u32, u32, u32, u32)) -> bool {
         self.major == o.0 && self.minor == o.1 && self.patch == o.2 && self.prerelease == o.3
+    }
+}
+
+unsafe impl Plain for link_map {}
+unsafe impl Plain for r_debug {}
+
+fn validate_elf_signature(
+    elf_header: &ElfHeader,
+) -> std::result::Result<(), FromDebuggerRendezvousError> {
+    if elf_header.e_ident[0..4] == [0x7f, 0x45, 0x4c, 0x46] {
+        Ok(())
+    } else {
+        Err(FromDebuggerRendezvousError::InvalidElfSignature(
+            elf_header.e_ident[0..4].try_into().unwrap(),
+        ))
     }
 }
 
