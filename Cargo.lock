@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "minidump-writer"
-version = "0.10.2"
+version = "0.11.0"
 dependencies = [
  "bitflags 2.9.4",
  "byteorder",
