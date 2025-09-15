@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#146](https://github.com/rust-minidump/minidump-writer/pull/146) changed `windows::MinidumpWriter::dump_crash_context` to take crash_context by reference.
+- [PR#155](https://github.com/rust-minidump/minidump-writer/pull/155) refactored a large portion of the code.
+
+### Fixed
+- [PR#150](https://github.com/rust-minidump/minidump-writer/pull/150) fixed undefined behavior in the Linux crash dump writing.
+
 ## [0.10.2] - 2025-02-03
 ### Added
 - [PR#143](https://github.com/rust-minidump/minidump-writer/pull/143)
