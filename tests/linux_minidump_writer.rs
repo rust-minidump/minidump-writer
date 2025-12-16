@@ -127,7 +127,7 @@ contextual_test! {
 }
 
 contextual_test! {
-    //#[ignore]
+    #[ignore]
     fn write_and_read_dump_from_parent(context: Context) {
         let mut child = start_child_and_return(&["spawn_mmap_wait"]);
         let pid = child.id() as i32;
