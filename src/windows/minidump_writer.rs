@@ -119,13 +119,12 @@ impl MinidumpWriter {
             };
 
             let mut exception_record: EXCEPTION_RECORD = std::mem::zeroed();
+            exception_record.ExceptionCode = exception_code;
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
                 ContextRecord: &mut exception_context,
             };
-
-            exception_record.ExceptionCode = exception_code;
 
             let cc = crash_context::CrashContext {
                 exception_pointers: (&exception_ptrs as *const EXCEPTION_POINTERS).cast(),

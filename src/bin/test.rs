@@ -443,13 +443,12 @@ mod windows {
             GetThreadContext(GetCurrentThread(), exception_context.as_mut_ptr());
 
             let mut exception_context = exception_context.assume_init();
+            exception_record.ExceptionCode = exception_code as _;
 
             let exception_ptrs = crash_context::EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
                 ContextRecord: &mut exception_context,
             };
-
-            exception_record.ExceptionCode = exception_code as _;
 
             let exc_ptr_addr = &exception_ptrs as *const _ as usize;
 
