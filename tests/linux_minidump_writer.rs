@@ -127,7 +127,7 @@ contextual_test! {
 }
 
 contextual_test! {
-    #[ignore]
+    //#[ignore]
     fn write_and_read_dump_from_parent(context: Context) {
         let mut child = start_child_and_return(&["spawn_mmap_wait"]);
         let pid = child.id() as i32;
@@ -208,30 +208,32 @@ contextual_test! {
         let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
         let _: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
         let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
-        let _ = dump
-            .get_raw_stream(LinuxCpuInfo as u32)
-            .expect("Couldn't find LinuxCpuInfo");
-        let _ = dump
-            .get_raw_stream(LinuxProcStatus as u32)
-            .expect("Couldn't find LinuxProcStatus");
-        let _ = dump
-            .get_raw_stream(LinuxCmdLine as u32)
-            .expect("Couldn't find LinuxCmdLine");
-        let _ = dump
-            .get_raw_stream(LinuxEnviron as u32)
-            .expect("Couldn't find LinuxEnviron");
-        let _ = dump
-            .get_raw_stream(LinuxAuxv as u32)
-            .expect("Couldn't find LinuxAuxv");
-        let _ = dump
-            .get_raw_stream(LinuxMaps as u32)
-            .expect("Couldn't find LinuxMaps");
-        let _ = dump
-            .get_raw_stream(LinuxDsoDebug as u32)
-            .expect("Couldn't find LinuxDsoDebug");
-        let _ = dump
-            .get_raw_stream(MozLinuxLimits as u32)
-            .expect("Couldn't find MozLinuxLimits");
+
+        macro_rules! raw {
+            (get $kind:ident) => {{
+                dump
+                    .get_raw_stream($kind as u32)
+                    .expect(concat!("Couldn't find ", stringify!($kind)))
+            }};
+            ($kind:ident) => {
+                let _ = dump
+                    .get_raw_stream($kind as u32)
+                    .expect(concat!("Couldn't find ", stringify!($kind)));
+            };
+        }
+
+        raw!(LinuxCpuInfo);
+        raw!(LinuxProcStatus);
+        raw!(LinuxLsbRelease);
+
+        let cmd_line = raw!(get LinuxCmdLine);
+        assert!(std::str::from_utf8(cmd_line).expect("cmd line was not utf8").ends_with("\0spawn_mmap_wait\0"));
+
+        raw!(LinuxEnviron);
+        raw!(LinuxAuxv);
+        raw!(LinuxMaps);
+        raw!(LinuxDsoDebug);
+        raw!(MozLinuxLimits);
     }
 }
 

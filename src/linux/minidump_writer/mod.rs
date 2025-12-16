@@ -369,91 +369,60 @@ impl MinidumpWriter {
         let dirent = self.write_memory_info_list_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, "/proc/cpuinfo") {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCpuInfo as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteCpuInfoFailed(e));
-                Default::default()
-            }
+        let mut proc_root = {
+            let mut pr = String::with_capacity(24);
+            use std::fmt::Write;
+            write!(&mut pr, "/proc/{}/", self.blamed_thread).unwrap(); // infallbile barring OOM
+            pr
         };
-        dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/status", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxProcStatus as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteThreadProcStatusFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        macro_rules! file_entry {
+            (res $write:expr, $kind:ident, $err:ident) => {
+                let dirent = match $write {
+                    Ok(location) => MDRawDirectory {
+                        stream_type: MDStreamType::$kind as u32,
+                        location,
+                    },
+                    Err(e) => {
+                        soft_errors.push(WriterError::$err(e));
+                        Default::default()
+                    }
+                };
+                dir_section.write_to_file(buffer, Some(dirent))?;
+            };
+            ($fname:literal, $kind:ident, $err:ident) => {
+                let trunc = proc_root.len();
+                proc_root.push_str($fname);
 
-        let dirent = match write_file(buffer, "/etc/lsb-release")
-            .or_else(|_| write_file(buffer, "/etc/os-release"))
+                file_entry!(res write_file(buffer, &proc_root), $kind, $err);
+
+                proc_root.truncate(trunc);
+            };
+        }
+
+        file_entry!(
+            res write_file(buffer, "/proc/cpuinfo"),
+            LinuxCpuInfo,
+            WriteCpuInfoFailed
+        );
+        file_entry!("status", LinuxProcStatus, WriteThreadProcStatusFailed);
+
+        // Unfortunately neither of these files exist on Android, and there doesn't seem
+        // to be a way to read equivalent information from elsewhere on the file system
+        #[cfg(not(target_os = "android"))]
         {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxLsbRelease as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteOsReleaseInfoFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+            file_entry!(
+                res write_file(buffer, "/etc/lsb-release")
+                    .or_else(|_| write_file(buffer, "/etc/os-release")),
+                LinuxLsbRelease,
+                WriteOsReleaseInfoFailed
+            );
+        }
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/cmdline", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxCmdLine as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteCommandLineFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/environ", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxEnviron as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteEnvironmentFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/auxv", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxAuxv as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteAuxvFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
-
-        let dirent = match write_file(buffer, &format!("/proc/{}/maps", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::LinuxMaps as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteMapsFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        file_entry!("cmdline", LinuxCmdLine, WriteCommandLineFailed);
+        file_entry!("environ", LinuxEnviron, WriteEnvironmentFailed);
+        file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
+        file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
         let dirent = match dso_debug::write_dso_debug_stream(buffer, self.process_id, &self.auxv) {
             Ok(dirent) => dirent,
@@ -464,17 +433,7 @@ impl MinidumpWriter {
         };
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = match write_file(buffer, &format!("/proc/{}/limits", self.blamed_thread)) {
-            Ok(location) => MDRawDirectory {
-                stream_type: MDStreamType::MozLinuxLimits as u32,
-                location,
-            },
-            Err(e) => {
-                soft_errors.push(WriterError::WriteLimitsFailed(e));
-                Default::default()
-            }
-        };
-        dir_section.write_to_file(buffer, Some(dirent))?;
+        file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
 
         let dirent = self.write_thread_names_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
