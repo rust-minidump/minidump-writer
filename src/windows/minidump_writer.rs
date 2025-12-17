@@ -118,8 +118,10 @@ impl MinidumpWriter {
                 ec.assume_init()
             };
 
-            let mut exception_record: EXCEPTION_RECORD = std::mem::zeroed();
-            exception_record.ExceptionCode = exception_code;
+            let mut exception_record = EXCEPTION_RECORD {
+                ExceptionCode: exception_code,
+                ..std::mem::zeroed()
+            };
 
             let exception_ptrs = EXCEPTION_POINTERS {
                 ExceptionRecord: &mut exception_record,
