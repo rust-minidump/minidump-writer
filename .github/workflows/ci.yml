@@ -135,8 +135,8 @@ jobs:
             adb root
             # Copy test helper binary over as a side-effect of running it.
             cargo run --target x86_64-linux-android --bin test -- nop
-            # Build and run tests, limited to 1 at a time due to the Android emulator being terrible
-            cargo test --target x86_64-linux-android -j 1
+            # Build and run tests
+            cargo test --target x86_64-linux-android
 
   deny-check:
     runs-on: ubuntu-24.04
