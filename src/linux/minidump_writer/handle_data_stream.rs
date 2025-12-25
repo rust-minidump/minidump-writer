@@ -2,31 +2,22 @@ use {
     super::*,
     crate::mem_writer::MemoryWriter,
     std::{
-        ffi::{CString, OsString},
-        fs::{self, DirEntry},
+        ffi::OsString,
         mem::{self},
-        os::unix::prelude::OsStrExt,
-        path::{Path, PathBuf},
+        path::Path,
     },
 };
 
-fn file_stat(path: &Path) -> Option<libc::stat> {
-    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
-    let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-    let result = unsafe { libc::stat(c_path.as_ptr(), &mut stat) };
-
-    if result == 0 {
-        Some(stat)
-    } else {
-        None
-    }
-}
-
-fn direntry_to_descriptor(buffer: &mut DumpBuf, entry: &DirEntry) -> Option<MDRawHandleDescriptor> {
-    let handle = filename_to_fd(&entry.file_name())?;
-    let realpath = fs::read_link(entry.path()).ok()?;
+fn direntry_to_descriptor(
+    process_inspector: &mut dyn ProcessInspector,
+    buffer: &mut DumpBuf,
+    filename: &OsString,
+) -> Option<MDRawHandleDescriptor> {
+    let handle = filename_to_fd(filename)?;
+    let subpath = Path::new("fd").join(filename);
+    let realpath = process_inspector.resolve_proc_symlink(&subpath).ok()?;
     let path_rva = write_string_to_location(buffer, realpath.to_string_lossy().as_ref()).ok()?;
-    let stat = file_stat(&entry.path())?;
+    let stat = process_inspector.stat_proc_path(&subpath).ok()?;
 
     // TODO: We store the contents of `st_mode` into the `attributes` field, but
     // we could also store a human-readable string of the file type inside
@@ -51,6 +42,8 @@ fn filename_to_fd(filename: &OsString) -> Option<u64> {
 
 #[derive(Debug, Error, serde::Serialize)]
 pub enum SectionHandleDataStreamError {
+    #[error("failed reading /proc/<pid>/fd")]
+    ReadDir(#[source] process_inspection::Error),
     #[error("Failed to access file")]
     IOError(
         #[from]
@@ -72,11 +65,15 @@ impl MinidumpWriter {
         &mut self,
         buffer: &mut DumpBuf,
     ) -> Result<MDRawDirectory, SectionHandleDataStreamError> {
-        let proc_fd_path = PathBuf::from(format!("/proc/{}/fd", self.process_id));
-        let proc_fd_iter = fs::read_dir(proc_fd_path)?;
+        let proc_fd_iter = self
+            .process_inspector
+            .read_proc_dir("fd".as_ref())
+            .map_err(SectionHandleDataStreamError::ReadDir)?;
         let descriptors: Vec<_> = proc_fd_iter
             .filter_map(|entry| entry.ok())
-            .filter_map(|entry| direntry_to_descriptor(buffer, &entry))
+            .filter_map(|entry| {
+                direntry_to_descriptor(self.process_inspector.as_mut(), buffer, &entry)
+            })
             .collect();
         let number_of_descriptors = descriptors.len() as u32;
 

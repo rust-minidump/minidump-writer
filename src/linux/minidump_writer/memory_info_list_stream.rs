@@ -6,6 +6,8 @@ use {
 
 #[derive(Debug, Error, serde::Serialize)]
 pub enum SectionMemInfoListError {
+    #[error("failed to read maps file")]
+    ReadMaps(#[source] process_inspection::Error),
     #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
     #[error("Failed to read from procfs")]
@@ -22,10 +24,12 @@ impl MinidumpWriter {
         &mut self,
         buffer: &mut DumpBuf,
     ) -> Result<MDRawDirectory, SectionMemInfoListError> {
-        let maps = procfs_core::process::MemoryMaps::from_file(std::path::PathBuf::from(format!(
-            "/proc/{}/maps",
-            self.blamed_thread
-        )))?;
+        let maps_file = self
+            .process_inspector
+            .read_proc_path("maps".as_ref())
+            .map_err(SectionMemInfoListError::ReadMaps)?;
+
+        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)?;
 
         let list_header = MemoryWriter::alloc_with_val(
             buffer,

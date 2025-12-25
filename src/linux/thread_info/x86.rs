@@ -97,8 +97,6 @@ const NUM_DEBUG_REGISTERS: usize = 8;
 
 pub struct ThreadInfoX86 {
     pub stack_pointer: usize,
-    pub tgid: Pid, // thread group id
-    pub ppid: Pid, // parent process
     pub regs: user_regs_struct,
     pub fpregs: user_fpregs_struct,
     #[cfg(target_arch = "x86_64")]
@@ -167,8 +165,7 @@ impl ThreadInfoX86 {
         )
     }
 
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create_impl(tid: Pid) -> Result<Self> {
         let regs = Self::getregset(tid).or_else(|_| Self::getregs(tid))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
         #[cfg(target_arch = "x86")]
@@ -211,8 +208,6 @@ impl ThreadInfoX86 {
 
         Ok(Self {
             stack_pointer,
-            tgid,
-            ppid,
             regs,
             fpregs,
             dregs,

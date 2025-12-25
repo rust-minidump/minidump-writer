@@ -11,7 +11,9 @@ mod linux {
         error_graph::ErrorList,
         minidump_writer::{
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
-            module_reader, LINUX_GATE_LIBRARY_NAME,
+            module_reader,
+            process_inspection::{DirectInspector, ProcessInspector},
+            LINUX_GATE_LIBRARY_NAME,
         },
         nix::{
             sys::mman::{mmap_anonymous, MapFlags, ProtFlags},
@@ -76,8 +78,6 @@ mod linux {
     }
 
     fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
-        use minidump_writer::mem_reader::MemReader;
-
         let ppid = getppid().as_raw();
         let dumper = fail_on_soft_error!(
             soft_errors,
@@ -90,13 +90,13 @@ mod linux {
         let expected_stack = 0x11223344usize.to_ne_bytes();
         let expected_heap = 0x55667788usize.to_ne_bytes();
 
-        let validate = |reader: &mut MemReader| -> Result<()> {
+        let validate = |reader: &mut dyn ProcessInspector| -> Result<()> {
             let mut val = [0u8; std::mem::size_of::<usize>()];
-            let read = reader.read(stack_var, &mut val)?;
+            let read = reader.read_memory(stack_var, &mut val)?;
             assert_eq!(read, val.len());
             test!(val == expected_stack, "stack var not correct");
 
-            let read = reader.read(heap_var, &mut val)?;
+            let read = reader.read_memory(heap_var, &mut val)?;
             assert_eq!(read, val.len());
             test!(val == expected_heap, "heap var not correct");
 
@@ -105,14 +105,14 @@ mod linux {
 
         // virtual mem
         {
-            let mut mr = MemReader::for_virtual_mem(ppid);
+            let mut mr = DirectInspector::for_virtual_mem(ppid);
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
         }
 
         // file
         {
-            let mut mr = MemReader::for_file(ppid)
+            let mut mr = DirectInspector::for_file(ppid)
                 .map_err(|err| format!("failed to open `/proc/{ppid}/mem`: {err}"))?;
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
@@ -120,18 +120,20 @@ mod linux {
 
         // ptrace
         {
-            let mut mr = MemReader::for_ptrace(ppid);
+            let mut mr = DirectInspector::for_ptrace(ppid);
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
         }
 
+        let process_inspector = DirectInspector::new(ppid);
+
         let stack_res =
-            MinidumpWriter::copy_from_process(ppid, stack_var, std::mem::size_of::<usize>())?;
+            process_inspector.read_memory_to_vec(stack_var, std::mem::size_of::<usize>())?;
 
         test!(stack_res == expected_stack, "stack var not correct");
 
         let heap_res =
-            MinidumpWriter::copy_from_process(ppid, heap_var, std::mem::size_of::<usize>())?;
+            process_inspector.read_memory_to_vec(heap_var, std::mem::size_of::<usize>())?;
 
         test!(heap_res == expected_heap, "heap var not correct");
 
@@ -215,7 +217,7 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid().as_raw();
-        let dumper = fail_on_soft_error!(
+        let mut dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
@@ -224,8 +226,10 @@ mod linux {
             if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
                 found_linux_gate = true;
 
-                let module_reader::BuildId(id) =
-                    MinidumpWriter::from_process_memory_for_mapping(&mapping, ppid)?;
+                let module_reader::BuildId(id) = MinidumpWriter::from_process_memory_for_mapping(
+                    dumper.process_inspector.as_mut(),
+                    &mapping,
+                )?;
                 test!(!id.is_empty(), "id-vec is empty");
                 test!(id.iter().any(|&x| x > 0), "all id elements are 0");
                 drop(dumper);

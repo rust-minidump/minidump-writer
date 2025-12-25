@@ -1,6 +1,7 @@
 use {
     super::{
-        auxv::AuxvDumpInfo, mem_reader::CopyFromProcessError, minidump_writer::MinidumpWriter,
+        auxv::AuxvDumpInfo,
+        process_inspection::{self, ProcessInspector},
         serializers::*,
     },
     crate::{
@@ -40,7 +41,7 @@ pub enum SectionDsoDebugError {
     #[error("Could not find: {0}")]
     CouldNotFind(&'static str),
     #[error("Failed to copy memory from process")]
-    CopyFromProcessError(#[from] CopyFromProcessError),
+    CopyFromProcessError(#[from] process_inspection::Error),
     #[error("Failed to copy memory from process")]
     FromUTF8Error(
         #[from]
@@ -97,8 +98,8 @@ pub struct RDebug {
 }
 
 pub fn write_dso_debug_stream(
+    process_inspector: &mut dyn ProcessInspector,
     buffer: &mut Buffer,
-    blamed_thread: i32,
     auxv: &AuxvDumpInfo,
 ) -> Result<MDRawDirectory> {
     let phnum_max =
@@ -108,7 +109,8 @@ pub fn write_dso_debug_stream(
         .get_program_header_address()
         .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;
 
-    let ph = MinidumpWriter::copy_from_process(blamed_thread, phdr, SIZEOF_PHDR * phnum_max)?;
+    let ph = process_inspector.read_memory_to_vec(phdr, SIZEOF_PHDR * phnum_max)?;
+
     let program_headers;
     #[cfg(target_pointer_width = "64")]
     {
@@ -154,11 +156,8 @@ pub fn write_dso_debug_stream(
     // DSOs loaded into the program. If this information is indeed available,
     // dump it to a MD_LINUX_DSO_DEBUG stream.
     loop {
-        let dyn_data = MinidumpWriter::copy_from_process(
-            blamed_thread,
-            dyn_addr as usize + dynamic_length,
-            dyn_size,
-        )?;
+        let dyn_data =
+            process_inspector.read_memory_to_vec(dyn_addr as usize + dynamic_length, dyn_size)?;
         dynamic_length += dyn_size;
 
         // goblin::elf::Dyn doesn't have padding bytes
@@ -183,7 +182,7 @@ pub fn write_dso_debug_stream(
     // loader communicates with debuggers.
 
     let debug_entry_data =
-        MinidumpWriter::copy_from_process(blamed_thread, r_debug, std::mem::size_of::<RDebug>())?;
+        process_inspector.read_memory_to_vec(r_debug, std::mem::size_of::<RDebug>())?;
 
     // goblin::elf::Dyn doesn't have padding bytes
     let (head, body, _tail) = unsafe { debug_entry_data.align_to::<RDebug>() };
@@ -194,11 +193,8 @@ pub fn write_dso_debug_stream(
     let mut dso_vec = Vec::new();
     let mut curr_map = debug_entry.r_map;
     while curr_map != 0 {
-        let link_map_data = MinidumpWriter::copy_from_process(
-            blamed_thread,
-            curr_map,
-            std::mem::size_of::<LinkMap>(),
-        )?;
+        let link_map_data =
+            process_inspector.read_memory_to_vec(curr_map, std::mem::size_of::<LinkMap>())?;
 
         // LinkMap is repr(C) and doesn't have padding bytes, so this should be safe
         let (head, body, _tail) = unsafe { link_map_data.align_to::<LinkMap>() };
@@ -220,8 +216,7 @@ pub fn write_dso_debug_stream(
         for (idx, map) in dso_vec.iter().enumerate() {
             let mut filename = String::new();
             if map.l_name > 0 {
-                let filename_data =
-                    MinidumpWriter::copy_from_process(blamed_thread, map.l_name, 256)?;
+                let filename_data = process_inspector.read_memory_to_vec(map.l_name, 256)?;
 
                 // C - string is NULL-terminated
                 if let Some(name) = filename_data.splitn(2, |x| *x == b'\0').next() {
@@ -256,8 +251,7 @@ pub fn write_dso_debug_stream(
     };
 
     dirent.location.data_size += dynamic_length as u32;
-    let dso_debug_data =
-        MinidumpWriter::copy_from_process(blamed_thread, dyn_addr as usize, dynamic_length)?;
+    let dso_debug_data = process_inspector.read_memory_to_vec(dyn_addr as usize, dynamic_length)?;
     MemoryArrayWriter::write_bytes(buffer, &dso_debug_data);
 
     Ok(dirent)

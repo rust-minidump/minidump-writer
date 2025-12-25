@@ -19,8 +19,6 @@ type Result<T> = std::result::Result<T, ThreadInfoError>;
 #[derive(Debug)]
 pub struct ThreadInfoAarch64 {
     pub stack_pointer: usize,
-    pub tgid: Pid, // thread group id
-    pub ppid: Pid, // parent process
     pub regs: libc::user_regs_struct,
     pub fpregs: user_fpsimd_struct,
 }
@@ -85,8 +83,7 @@ impl ThreadInfoAarch64 {
         out.float_regs[..FP_REG_COUNT].copy_from_slice(&self.fpregs.vregs[..FP_REG_COUNT]);
     }
 
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create_impl(tid: Pid) -> Result<Self> {
         let regs = Self::getregset(tid).or_else(|_| Self::getregs(tid))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
 
@@ -94,8 +91,6 @@ impl ThreadInfoAarch64 {
 
         Ok(Self {
             stack_pointer,
-            tgid,
-            ppid,
             regs,
             fpregs,
         })
