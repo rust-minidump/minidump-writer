@@ -38,7 +38,7 @@ fn soft_error_stream() {
 fn soft_error_stream_content() {
     let expected_errors = vec![
         json!({"InitErrors": [
-            {"StopProcessFailed": {"Stop": "EPERM"}},
+            {"StopProcessFailed": {"Stop": {"SigStop": "EPERM"}}},
             {"FillMissingAuxvInfoErrors": ["InvalidFormat"]},
             {"EnumerateThreadsErrors": [
                 {"ReadThreadNameFailed": "\
@@ -48,7 +48,7 @@ fn soft_error_stream_content() {
                     }"
                 }
             ]},
-            {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, "EPERM"]}]}
+            {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, "PtraceUnexpectedStatus"]}]}
         ]}),
         json!({"WriteSystemInfoErrors": [
             {"WriteCpuInformationFailed": {"IOError": "\

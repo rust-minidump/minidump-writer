@@ -1,5 +1,5 @@
 use {
-    super::{mem_reader::MemReader, serializers::*},
+    super::{process_inspection::ProcessInspector, serializers::*},
     crate::{minidump_format::GUID, serializers::*},
     goblin::{
         container::{Container, Ctx, Endian},
@@ -13,8 +13,8 @@ type Error = ModuleReaderError;
 
 const NOTE_SECTION_NAME: &[u8] = b".note.gnu.build-id\0";
 
-pub struct ProcessReader {
-    inner: MemReader,
+pub struct ProcessReader<'a> {
+    process_inspector: &'a mut dyn ProcessInspector,
     start_address: u64,
 }
 
@@ -84,28 +84,28 @@ pub enum ModuleReaderError {
     },
 }
 
-impl ProcessReader {
-    pub fn new(pid: i32, start_address: usize) -> Self {
+impl<'a> ProcessReader<'a> {
+    pub fn new(process_inspector: &'a mut dyn ProcessInspector, start_address: usize) -> Self {
         Self {
-            inner: MemReader::new(pid),
+            process_inspector,
             start_address: start_address as u64,
         }
     }
 }
 
-pub enum ProcessMemory<'buf> {
-    Slice(&'buf [u8]),
-    Process(ProcessReader),
+pub enum ProcessMemory<'a> {
+    Slice(&'a [u8]),
+    Process(ProcessReader<'a>),
 }
 
-impl<'buf> From<&'buf [u8]> for ProcessMemory<'buf> {
-    fn from(value: &'buf [u8]) -> Self {
+impl<'a> From<&'a [u8]> for ProcessMemory<'a> {
+    fn from(value: &'a [u8]) -> Self {
         Self::Slice(value)
     }
 }
 
-impl From<ProcessReader> for ProcessMemory<'_> {
-    fn from(value: ProcessReader) -> Self {
+impl<'a> From<ProcessReader<'a>> for ProcessMemory<'a> {
+    fn from(value: ProcessReader<'a>) -> Self {
         Self::Process(value)
     }
 }
@@ -129,10 +129,10 @@ impl<'buf> ProcessMemory<'buf> {
                     .start_address
                     .checked_add(offset)
                     .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
-                pr.inner
-                    .read_to_vec(proc_offset as _, len)
+                pr.process_inspector
+                    .read_memory_to_vec(proc_offset as _, len.into())
                     .map(Cow::Owned)
-                    .map_err(|err| error(err.source))
+                    .map_err(|_| error(nix::Error::EPERM))
             }
             Self::Slice(s) => {
                 let error = |e| error(None, e);

@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, Error, serde::Serialize)]
 pub enum SectionAppMemoryError {
     #[error("Failed to copy memory from process")]
-    CopyFromProcessError(#[from] CopyFromProcessError),
+    CopyFromProcessError(#[from] process_inspection::Error),
     #[error("Failed to write to memory")]
     MemoryWriterError(#[from] MemoryWriterError),
 }
@@ -11,10 +11,10 @@ pub enum SectionAppMemoryError {
 impl MinidumpWriter {
     /// Write application-provided memory regions.
     pub fn write_app_memory(&mut self, buffer: &mut DumpBuf) -> Result<(), SectionAppMemoryError> {
-        let blamed_thread = self.blamed_thread;
         for app_memory in &self.app_memory {
-            let data_copy =
-                Self::copy_from_process(blamed_thread, app_memory.ptr, app_memory.length)?;
+            let data_copy = self
+                .process_inspector
+                .read_memory_to_vec(app_memory.ptr, app_memory.length)?;
 
             let section = MemoryArrayWriter::write_bytes(buffer, &data_copy);
             let desc = MDMemoryDescriptor {

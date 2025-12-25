@@ -2,10 +2,6 @@ use {
     super::{serializers::*, Pid},
     crate::serializers::*,
     nix::{errno::Errno, sys::ptrace},
-    std::{
-        io::{self, BufRead},
-        path,
-    },
 };
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
@@ -14,8 +10,6 @@ type Result<T> = std::result::Result<T, ThreadInfoError>;
 pub enum ThreadInfoError {
     #[error("Index out of bounds: Got {0}, only have {1}")]
     IndexOutOfBounds(usize, usize),
-    #[error("Either ppid ({1}) or tgid ({2}) not found in {0}")]
-    InvalidPid(String, Pid, Pid),
     #[error("IO error")]
     IOError(
         #[from]
@@ -81,44 +75,11 @@ pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
     }
 }
 
+// TODO - Does this ptrace(PTRACE_GETREGS) and ptrace(PTRACE_GETFPREGS) stuff need to be
+// abstracted too? Breakpad doesn't do it, but it seems like the type of thing that
+// should be stopped by Isolated Processes...
+
 trait CommonThreadInfo {
-    fn get_ppid_and_tgid(tid: Pid) -> Result<(Pid, Pid)> {
-        let mut ppid = -1;
-        let mut tgid = -1;
-
-        let status_path = path::PathBuf::from(format!("/proc/{tid}/status"));
-        let status_file = std::fs::File::open(status_path)?;
-        for line in io::BufReader::new(status_file).lines() {
-            let l = line?;
-            let start = l
-                .get(0..6)
-                .ok_or_else(|| ThreadInfoError::InvalidProcStatusFile(tid, l.clone()))?;
-            match start {
-                "Tgid:\t" => {
-                    tgid = l
-                        .get(6..)
-                        .ok_or_else(|| ThreadInfoError::InvalidProcStatusFile(tid, l.clone()))?
-                        .parse::<Pid>()?;
-                }
-                "PPid:\t" => {
-                    ppid = l
-                        .get(6..)
-                        .ok_or_else(|| ThreadInfoError::InvalidProcStatusFile(tid, l.clone()))?
-                        .parse::<Pid>()?;
-                }
-                _ => continue,
-            }
-        }
-        if ppid == -1 || tgid == -1 {
-            return Err(ThreadInfoError::InvalidPid(
-                format!("/proc/{tid}/status"),
-                ppid,
-                tgid,
-            ));
-        }
-        Ok((ppid, tgid))
-    }
-
     /// SLIGHTLY MODIFIED COPY FROM CRATE nix
     /// Function for ptrace requests that return values from the data field.
     /// Some ptrace get requests populate structs or larger elements than `c_long`
@@ -188,7 +149,7 @@ trait CommonThreadInfo {
     }
 }
 impl ThreadInfo {
-    pub fn create(pid: Pid, tid: Pid) -> std::result::Result<Self, ThreadInfoError> {
-        Self::create_impl(pid, tid)
+    pub fn create(tid: Pid) -> std::result::Result<Self, ThreadInfoError> {
+        Self::create_impl(tid)
     }
 }

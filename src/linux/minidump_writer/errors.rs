@@ -15,9 +15,11 @@ use {
         serializers::*,
         Pid,
     },
-    crate::{dir_section::FileWriterError, mem_writer::MemoryWriterError, serializers::*},
+    crate::{
+        dir_section::FileWriterError, linux::process_inspection, mem_writer::MemoryWriterError,
+        serializers::*,
+    },
     error_graph::ErrorList,
-    nix::errno::Errno,
     procfs_core::ProcError,
     std::ffi::OsString,
     thiserror::Error,
@@ -69,21 +71,41 @@ pub enum WriterError {
     #[error("Failed writing cpuinfo")]
     WriteCpuInfoFailed(#[source] MemoryWriterError),
     #[error("Failed writing thread proc status")]
-    WriteThreadProcStatusFailed(#[source] MemoryWriterError),
+    WriteThreadProcStatusFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed writing OS Release Information")]
     WriteOsReleaseInfoFailed(#[source] MemoryWriterError),
     #[error("Failed writing process command line")]
-    WriteCommandLineFailed(#[source] MemoryWriterError),
+    WriteCommandLineFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Writing process environment failed")]
-    WriteEnvironmentFailed(#[source] MemoryWriterError),
+    WriteEnvironmentFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed to write auxv file")]
     WriteAuxvFailed(#[source] MemoryWriterError),
     #[error("Failed to write maps file")]
-    WriteMapsFailed(#[source] MemoryWriterError),
+    WriteMapsFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed writing DSO Debug Stream")]
     WriteDSODebugStreamFailed(#[source] SectionDsoDebugError),
     #[error("Failed writing limits file")]
-    WriteLimitsFailed(#[source] MemoryWriterError),
+    WriteLimitsFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed writing handle data stream")]
     WriteHandleDataStreamFailed(#[source] SectionHandleDataStreamError),
     #[error("Failed writing handle data stream direction entry")]
@@ -95,19 +117,9 @@ pub enum WriterError {
         serde_json::Error,
     ),
     #[error("nix::ptrace::attach(Pid={0}) failed")]
-    PtraceAttachError(
-        Pid,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
+    PtraceAttachError(Pid, #[source] process_inspection::Error),
     #[error("nix::ptrace::detach(Pid={0}) failed")]
-    PtraceDetachError(
-        Pid,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
+    PtraceDetachError(Pid, #[source] process_inspection::Error),
     #[error("wait::waitpid(Pid={0}) failed")]
     WaitPidError(
         Pid,
@@ -157,12 +169,7 @@ pub enum InitError {
     #[error("failed to read auxv")]
     ReadAuxvFailed(#[source] super::super::auxv::AuxvError),
     #[error("IO error for file {0}")]
-    IOError(
-        String,
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
+    IOError(String, #[source] process_inspection::Error),
     #[cfg(target_os = "android")]
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
@@ -181,11 +188,7 @@ pub enum InitError {
     #[error("Failed filling missing Auxv info")]
     FillMissingAuxvInfoFailed(#[source] AuxvError),
     #[error("Failed reading proc/pid/task entry for process")]
-    ReadProcessThreadEntryFailed(
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
+    ReadProcessThreadEntryFailed(#[source] process_inspection::Error),
     #[error("Process task entry `{0:?}` could not be parsed as a TID")]
     ProcessTaskEntryNotTid(OsString),
     #[error("Failed to read thread name")]
@@ -221,14 +224,12 @@ pub enum InitError {
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum StopProcessError {
     #[error("Failed to stop the process")]
-    Stop(
-        #[from]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
+    Stop(#[source] process_inspection::Error),
+    #[error("Failed to read /proc/<pid>/stat file")]
+    ReadProcFailed(#[source] process_inspection::Error),
     #[error("Failed to get the process state")]
     State(
-        #[from]
+        #[source]
         #[serde(serialize_with = "serialize_proc_error")]
         ProcError,
     ),
@@ -239,5 +240,5 @@ pub enum StopProcessError {
 #[derive(Debug, thiserror::Error)]
 pub enum ContinueProcessError {
     #[error("Failed to continue the process")]
-    Continue(#[from] Errno),
+    Continue(#[from] process_inspection::Error),
 }

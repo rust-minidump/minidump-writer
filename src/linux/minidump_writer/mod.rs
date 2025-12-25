@@ -1,3 +1,5 @@
+use crate::linux::process_inspection;
+
 use {
     super::{
         app_memory::AppMemoryList,
@@ -6,8 +8,8 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
-        mem_reader::CopyFromProcessError,
         module_reader,
+        process_inspection::{DirectInspector, ProcessInspector},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
         Pid,
@@ -23,17 +25,12 @@ use {
     error_graph::{ErrorList, WriteErrorList},
     errors::{ContinueProcessError, InitError, StopProcessError, WriterError},
     failspot::failspot,
-    nix::{
-        errno::Errno,
-        sys::{ptrace, signal, wait},
-    },
     procfs_core::{
         process::{MMPermissions, ProcState, Stat},
         FromRead,
     },
     std::{
         io::{Seek, Write},
-        path,
         time::{Duration, Instant},
     },
     thiserror::Error,
@@ -41,8 +38,6 @@ use {
 
 #[cfg(target_os = "android")]
 use super::android::late_process_mappings;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use super::thread_info;
 
 pub use super::auxv::{AuxvType, DirectAuxvDumpInfo};
 
@@ -104,6 +99,7 @@ pub struct MinidumpWriter {
     pub crash_context: Option<CrashContext>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
+    pub process_inspector: Box<dyn ProcessInspector>,
 }
 
 #[derive(Debug, Clone)]
@@ -243,6 +239,7 @@ impl MinidumpWriterConfig {
             crash_context: self.crash_context,
             app_memory: self.app_memory,
             memory_blocks: self.memory_blocks,
+            process_inspector: Box::new(DirectInspector::new(self.process_id)),
         }
     }
 }
@@ -262,7 +259,7 @@ impl MinidumpWriter {
         // Even if we completely fail to fill in any additional Auxv info, we can still press
         // forward.
         if let Err(e) = self.auxv.try_filling_missing_info(
-            self.process_id,
+            self.process_inspector.as_mut(),
             soft_errors.subwriter(InitError::FillMissingAuxvInfoErrors),
         ) {
             soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
@@ -295,7 +292,7 @@ impl MinidumpWriter {
 
         #[cfg(target_os = "android")]
         {
-            late_process_mappings(self.process_id, &mut self.mappings)?;
+            late_process_mappings(self.process_inspector.as_mut(), &mut self.mappings)?;
         }
 
         if self.skip_stacks_if_mapping_unreferenced {
@@ -369,13 +366,6 @@ impl MinidumpWriter {
         let dirent = self.write_memory_info_list_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let mut proc_root = {
-            let mut pr = String::with_capacity(24);
-            use std::fmt::Write;
-            write!(&mut pr, "/proc/{}/", self.blamed_thread).unwrap(); // infallbile barring OOM
-            pr
-        };
-
         macro_rules! file_entry {
             (res $write:expr, $kind:ident, $err:ident) => {
                 let dirent = match $write {
@@ -390,14 +380,19 @@ impl MinidumpWriter {
                 };
                 dir_section.write_to_file(buffer, Some(dirent))?;
             };
-            ($fname:literal, $kind:ident, $err:ident) => {
-                let trunc = proc_root.len();
-                proc_root.push_str($fname);
+        }
 
-                file_entry!(res write_file(buffer, &proc_root), $kind, $err);
-
-                proc_root.truncate(trunc);
-            };
+        macro_rules! proc_file_entry {
+            ($path: literal, $kind: ident, $err: ident) => {{
+                let dirent = match self.write_proc_path($path, MDStreamType::$kind, buffer) {
+                    Ok(dirent) => dirent,
+                    Err(e) => {
+                        soft_errors.push(WriterError::$err(e));
+                        Default::default()
+                    }
+                };
+                dir_section.write_to_file(buffer, Some(dirent))?;
+            }};
         }
 
         file_entry!(
@@ -405,7 +400,8 @@ impl MinidumpWriter {
             LinuxCpuInfo,
             WriteCpuInfoFailed
         );
-        file_entry!("status", LinuxProcStatus, WriteThreadProcStatusFailed);
+
+        proc_file_entry!("status", LinuxProcStatus, WriteThreadProcStatusFailed);
 
         // Unfortunately neither of these files exist on Android, and there doesn't seem
         // to be a way to read equivalent information from elsewhere on the file system
@@ -419,12 +415,16 @@ impl MinidumpWriter {
             );
         }
 
-        file_entry!("cmdline", LinuxCmdLine, WriteCommandLineFailed);
-        file_entry!("environ", LinuxEnviron, WriteEnvironmentFailed);
-        file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
-        file_entry!("maps", LinuxMaps, WriteMapsFailed);
+        proc_file_entry!("cmdline", LinuxCmdLine, WriteCommandLineFailed);
+        proc_file_entry!("environ", LinuxEnviron, WriteEnvironmentFailed);
+        proc_file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
+        proc_file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
-        let dirent = match dso_debug::write_dso_debug_stream(buffer, self.process_id, &self.auxv) {
+        let dirent = match dso_debug::write_dso_debug_stream(
+            self.process_inspector.as_mut(),
+            buffer,
+            &self.auxv,
+        ) {
             Ok(dirent) => dirent,
             Err(e) => {
                 soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
@@ -433,7 +433,7 @@ impl MinidumpWriter {
         };
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
+        proc_file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
 
         let dirent = self.write_thread_names_stream(buffer)?;
         dir_section.write_to_file(buffer, Some(dirent))?;
@@ -496,11 +496,10 @@ impl MinidumpWriter {
             }
         };
 
-        let stack_copy = match MinidumpWriter::copy_from_process(
-            self.blamed_thread,
-            valid_stack_pointer,
-            stack_len,
-        ) {
+        let stack_copy = match self
+            .process_inspector
+            .read_memory_to_vec(valid_stack_pointer, stack_len)
+        {
             Ok(x) => x,
             Err(_) => {
                 return false;
@@ -514,104 +513,33 @@ impl MinidumpWriter {
             .stack_has_pointer_to_mapping(&stack_copy, sp_offset)
     }
 
-    /// Suspends a thread by attaching to it.
-    fn suspend_thread(child: Pid) -> Result<(), WriterError> {
-        use WriterError::PtraceAttachError as AttachErr;
-
-        let pid = nix::unistd::Pid::from_raw(child);
-        // This may fail if the thread has just died or debugged.
-        ptrace::attach(pid).map_err(|e| AttachErr(child, e))?;
-        loop {
-            match wait::waitpid(pid, Some(wait::WaitPidFlag::__WALL)) {
-                Ok(status) => {
-                    let wait::WaitStatus::Stopped(_, status) = status else {
-                        return Err(WriterError::WaitPidError(
-                            child,
-                            nix::errno::Errno::UnknownErrno,
-                        ));
-                    };
-
-                    // Any signal will stop the thread, make sure it is SIGSTOP. Otherwise, this
-                    // signal will be delivered after PTRACE_DETACH, and the thread will enter
-                    // the "T (stopped)" state.
-                    if status == nix::sys::signal::SIGSTOP {
-                        break;
-                    }
-
-                    // Signals other than SIGSTOP that are received need to be reinjected,
-                    // or they will otherwise get lost.
-                    if let Err(err) = ptrace::cont(pid, status) {
-                        return Err(WriterError::WaitPidError(child, err));
-                    }
-                }
-                Err(Errno::EINTR) => continue,
-                Err(e) => {
-                    ptrace_detach(child)?;
-                    return Err(WriterError::WaitPidError(child, e));
-                }
-            }
-        }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            // On x86, the stack pointer is NULL or -1, when executing trusted code in
-            // the seccomp sandbox. Not only does this cause difficulties down the line
-            // when trying to dump the thread's stack, it also results in the minidumps
-            // containing information about the trusted threads. This information is
-            // generally completely meaningless and just pollutes the minidumps.
-            // We thus test the stack pointer and exclude any threads that are part of
-            // the seccomp sandbox's trusted code.
-            let skip_thread;
-            let regs = thread_info::ThreadInfo::getregs(pid.into());
-            if let Ok(regs) = regs {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    skip_thread = regs.rsp == 0;
-                }
-                #[cfg(target_arch = "x86")]
-                {
-                    skip_thread = regs.esp == 0;
-                }
-            } else {
-                skip_thread = true;
-            }
-            if skip_thread {
-                ptrace_detach(child)?;
-                return Err(WriterError::DetachSkippedThread(child));
-            }
-        }
-        Ok(())
-    }
-
-    /// Resumes a thread by detaching from it.
-    fn resume_thread(child: Pid) -> Result<(), WriterError> {
-        ptrace_detach(child)
-    }
-
     fn suspend_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
         // Iterate over all threads and try to suspend them.
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(|x| match Self::suspend_thread(x.tid) {
-            Ok(()) => true,
-            Err(e) => {
-                soft_errors.push(e);
-                false
-            }
-        });
+
+        self.threads
+            .retain(|x| match self.process_inspector.attach_to_thread(x.tid) {
+                Ok(()) => true,
+                Err(e) => {
+                    soft_errors.push(WriterError::PtraceAttachError(x.tid, e));
+                    false
+                }
+            });
 
         self.threads_suspended = true;
 
-        failspot::failspot!(<crate::FailSpotName>::SuspendThreads soft_errors.push(WriterError::PtraceAttachError(1234, nix::Error::EPERM)))
+        failspot::failspot!(<crate::FailSpotName>::SuspendThreads soft_errors.push(WriterError::PtraceAttachError(1234, process_inspection::Error::PtraceUnexpectedStatus)))
     }
 
     fn resume_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
         if self.threads_suspended {
             for thread in &self.threads {
-                match Self::resume_thread(thread.tid) {
+                match self.process_inspector.detach_from_thread(thread.tid) {
                     Ok(()) => (),
                     Err(e) => {
-                        soft_errors.push(e);
+                        soft_errors.push(WriterError::PtraceDetachError(thread.tid, e));
                     }
                 }
             }
@@ -623,21 +551,24 @@ impl MinidumpWriter {
     ///
     /// This will block waiting for the process to stop until `timeout` has passed.
     fn stop_process(&mut self, timeout: Duration) -> Result<(), StopProcessError> {
-        failspot!(StopProcess bail(nix::Error::EPERM));
-
-        signal::kill(
-            nix::unistd::Pid::from_raw(self.process_id),
-            Some(signal::SIGSTOP),
-        )?;
+        self.process_inspector
+            .stop_process()
+            .map_err(StopProcessError::Stop)?;
 
         // Something like waitpid for non-child processes would be better, but we have no such
         // tool, so we poll the status.
         const POLL_INTERVAL: Duration = Duration::from_millis(1);
-        let proc_file = format!("/proc/{}/stat", self.process_id);
         let end = Instant::now() + timeout;
 
         loop {
-            if let Ok(ProcState::Stopped) = Stat::from_file(&proc_file)?.state() {
+            let stat_reader = self
+                .process_inspector
+                .read_proc_path("stat".as_ref())
+                .map_err(StopProcessError::ReadProcFailed)?;
+            if let Ok(ProcState::Stopped) = Stat::from_read(stat_reader)
+                .map_err(StopProcessError::State)?
+                .state()
+            {
                 return Ok(());
             }
 
@@ -652,10 +583,7 @@ impl MinidumpWriter {
     ///
     /// Unlike `stop_process`, this function does not wait for the process to continue.
     fn continue_process(&mut self) -> Result<(), ContinueProcessError> {
-        signal::kill(
-            nix::unistd::Pid::from_raw(self.process_id),
-            Some(signal::SIGCONT),
-        )?;
+        self.process_inspector.continue_process()?;
         Ok(())
     }
 
@@ -665,22 +593,13 @@ impl MinidumpWriter {
         &mut self,
         mut soft_errors: impl WriteErrorList<InitError>,
     ) -> Result<(), InitError> {
-        let pid = self.process_id;
-        let filename = format!("/proc/{pid}/task");
-        let task_path = path::PathBuf::from(&filename);
-        if !task_path.is_dir() {
-            return Err(InitError::ProcPidTaskNotDirectory(filename));
-        }
+        for file_name in self
+            .process_inspector
+            .read_proc_dir("task".as_ref())
+            .map_err(InitError::ReadProcessThreadEntryFailed)?
+        {
+            let file_name = file_name.map_err(InitError::ReadProcessThreadEntryFailed)?;
 
-        for entry in std::fs::read_dir(task_path).map_err(|e| InitError::IOError(filename, e))? {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(e) => {
-                    soft_errors.push(InitError::ReadProcessThreadEntryFailed(e));
-                    continue;
-                }
-            };
-            let file_name = entry.file_name();
             let tid = match file_name.to_str().and_then(|name| name.parse::<Pid>().ok()) {
                 Some(tid) => tid,
                 None => {
@@ -695,7 +614,19 @@ impl MinidumpWriter {
                     "testing requested failure reading thread name",
                 ))
             } else {
-                std::fs::read_to_string(format!("/proc/{pid}/task/{tid}/comm"))
+                let subpath = format!("task/{tid}/comm");
+                self.process_inspector
+                    .read_proc_path(subpath.as_ref())
+                    .map_err(std::io::Error::other)
+                    .and_then(|mut r| {
+                        let mut buffer = Vec::new();
+                        r.read_to_end(&mut buffer)?;
+                        Ok(buffer)
+                    })
+                    .and_then(|v| {
+                        String::from_utf8(v)
+                            .map_err(|_| std::io::Error::other("thread name not string"))
+                    })
             });
 
             let name = match name_result {
@@ -720,11 +651,13 @@ impl MinidumpWriter {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        let maps_path = format!("/proc/{}/maps", self.process_id);
-        let maps_file =
-            std::fs::File::open(&maps_path).map_err(|e| InitError::IOError(maps_path, e))?;
 
-        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
+        let maps_reader = self
+            .process_inspector
+            .read_proc_path("maps".as_ref())
+            .map_err(|e| InitError::IOError("maps".to_string(), e))?;
+
+        let maps = procfs_core::process::MemoryMaps::from_read(maps_reader)
             .map_err(InitError::ReadProcessMapFileFailed)?;
 
         self.mappings = MappingInfo::aggregate(maps, self.auxv.get_linux_gate_address())
@@ -762,7 +695,7 @@ impl MinidumpWriter {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        ThreadInfo::create(self.process_id, self.threads[index].tid)
+        ThreadInfo::create(self.threads[index].tid)
     }
 
     // Returns a valid stack pointer and the mapping that contains the stack.
@@ -946,16 +879,36 @@ impl MinidumpWriter {
     ) -> Result<T, WriterError> {
         assert!(idx < self.mappings.len());
 
-        Self::from_process_memory_for_mapping(&self.mappings[idx], self.process_id)
+        Self::from_process_memory_for_mapping(self.process_inspector.as_mut(), &self.mappings[idx])
     }
 
     pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
+        process_inspector: &mut dyn ProcessInspector,
         mapping: &MappingInfo,
-        pid: Pid,
     ) -> Result<T, WriterError> {
         Ok(T::read_from_module(
-            module_reader::ProcessReader::new(pid, mapping.start_address).into(),
+            module_reader::ProcessReader::new(process_inspector, mapping.start_address).into(),
         )?)
+    }
+    fn write_proc_path(
+        &self,
+        subpath: &str,
+        stream_type: MDStreamType,
+        buffer: &mut Buffer,
+    ) -> std::io::Result<MDRawDirectory> {
+        let mut reader = self
+            .process_inspector
+            .read_proc_path(subpath.as_ref())
+            .map_err(std::io::Error::other)?;
+
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+
+        let section = MemoryArrayWriter::write_bytes(buffer, &buf);
+        Ok(MDRawDirectory {
+            stream_type: stream_type as u32,
+            location: section.location(),
+        })
     }
 }
 
@@ -966,22 +919,6 @@ impl Drop for MinidumpWriter {
         // Always allow the process to continue.
         let _ = self.continue_process();
     }
-}
-
-/// PTRACE_DETACH the given pid.
-///
-/// This handles special errno cases (ESRCH) which we won't consider errors.
-fn ptrace_detach(child: Pid) -> Result<(), WriterError> {
-    let pid = nix::unistd::Pid::from_raw(child);
-    ptrace::detach(pid, None).or_else(|e| {
-        // errno is set to ESRCH if the pid no longer exists, but we don't want to error in that
-        // case.
-        if e == nix::Error::ESRCH {
-            Ok(())
-        } else {
-            Err(WriterError::PtraceDetachError(child, e))
-        }
-    })
 }
 
 fn write_file(

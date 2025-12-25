@@ -15,6 +15,7 @@ pub struct user_fpregs_struct {
     pub fpscr: u32,
 }
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Default)]
 pub struct user_regs_struct {
@@ -24,8 +25,6 @@ pub struct user_regs_struct {
 #[derive(Debug)]
 pub struct ThreadInfoArm {
     pub stack_pointer: usize,
-    pub tgid: Pid, // thread group id
-    pub ppid: Pid, // parent process
     pub regs: user_regs_struct,
     pub fpregs: user_fpregs_struct,
 }
@@ -65,8 +64,7 @@ impl ThreadInfoArm {
         out.float_save.regs = self.fpregs.fpregs;
     }
 
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create_impl(tid: Pid) -> Result<Self> {
         let regs = Self::getregs(tid)?;
         let fpregs = Self::getfpregs(tid).unwrap_or(Default::default());
 
@@ -74,8 +72,6 @@ impl ThreadInfoArm {
 
         Ok(ThreadInfoArm {
             stack_pointer,
-            tgid,
-            ppid,
             regs,
             fpregs,
         })
