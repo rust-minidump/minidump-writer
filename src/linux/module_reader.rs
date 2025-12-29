@@ -13,11 +13,6 @@ type Error = ModuleReaderError;
 
 const NOTE_SECTION_NAME: &[u8] = b".note.gnu.build-id\0";
 
-pub struct ProcessReader {
-    inner: MemReader,
-    start_address: u64,
-}
-
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum ModuleReaderError {
     #[error("failed to read module file ({path}): {error}")]
@@ -84,35 +79,30 @@ pub enum ModuleReaderError {
     },
 }
 
-impl ProcessReader {
-    pub fn new(pid: i32, start_address: usize) -> Self {
-        Self {
-            inner: MemReader::new(pid),
-            start_address: start_address as u64,
-        }
-    }
+pub enum ModuleMemory<'a> {
+    Slice(&'a [u8]),
+    Process {
+        reader: &'a MemReader,
+        start_address: u64,
+    },
 }
 
-pub enum ProcessMemory<'buf> {
-    Slice(&'buf [u8]),
-    Process(ProcessReader),
-}
-
-impl<'buf> From<&'buf [u8]> for ProcessMemory<'buf> {
+impl<'buf> From<&'buf [u8]> for ModuleMemory<'buf> {
     fn from(value: &'buf [u8]) -> Self {
         Self::Slice(value)
     }
 }
 
-impl From<ProcessReader> for ProcessMemory<'_> {
-    fn from(value: ProcessReader) -> Self {
-        Self::Process(value)
+impl<'a> ModuleMemory<'a> {
+    pub fn from_process(reader: &'a MemReader, start_address: usize) -> Self {
+        Self::Process {
+            reader,
+            start_address: start_address as u64,
+        }
     }
-}
 
-impl<'buf> ProcessMemory<'buf> {
     #[inline]
-    fn read(&mut self, offset: u64, length: u64) -> Result<Buf<'buf>, Error> {
+    fn read(&mut self, offset: u64, length: u64) -> Result<Buf<'a>, Error> {
         let error = move |start_address, error| Error::ReadModuleMemory {
             start_address,
             offset,
@@ -121,15 +111,17 @@ impl<'buf> ProcessMemory<'buf> {
         };
 
         match self {
-            Self::Process(pr) => {
-                let error = |e| error(Some(pr.start_address), e);
+            Self::Process {
+                reader,
+                start_address,
+            } => {
+                let error = |e| error(Some(*start_address), e);
                 let len = std::num::NonZeroUsize::new(length as usize)
                     .ok_or_else(|| error(nix::Error::EINVAL))?;
-                let proc_offset = pr
-                    .start_address
+                let proc_offset = start_address
                     .checked_add(offset)
                     .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
-                pr.inner
+                reader
                     .read_to_vec(proc_offset as _, len)
                     .map(Cow::Owned)
                     .map_err(|err| error(err.source))
@@ -149,15 +141,15 @@ impl<'buf> ProcessMemory<'buf> {
     /// Calculates the absolute address of the specified relative address
     #[inline]
     fn absolute(&self, addr: u64) -> u64 {
-        let Self::Process(pr) = self else {
+        let Self::Process { start_address, .. } = self else {
             return addr;
         };
-        addr.checked_sub(pr.start_address).unwrap_or(addr)
+        addr.checked_sub(*start_address).unwrap_or(addr)
     }
 
     #[inline]
     fn is_process_memory(&self) -> bool {
-        matches!(self, Self::Process(_))
+        matches!(self, Self::Process { .. })
     }
 }
 
@@ -192,7 +184,7 @@ fn section_header_with_name<'sc>(
     section_headers: &'sc elf::SectionHeaders,
     strtab_index: usize,
     name: &[u8],
-    module_memory: &mut ProcessMemory<'_>,
+    module_memory: &mut ModuleMemory<'_>,
 ) -> Result<Option<&'sc elf::SectionHeader>, Error> {
     let strtab_section_header = section_headers
         .get(strtab_index)
@@ -217,9 +209,9 @@ fn section_header_with_name<'sc>(
     Ok(None)
 }
 
-/// Types which can be read from ProcessMemory.
+/// Types which can be read from ModuleMemory.
 pub trait ReadFromModule: Sized {
-    fn read_from_module(module_memory: ProcessMemory<'_>) -> Result<Self, Error>;
+    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error>;
 
     fn read_from_file(path: &std::path::Path) -> Result<Self, Error> {
         let map = std::fs::File::open(path)
@@ -229,7 +221,7 @@ pub trait ReadFromModule: Sized {
                 path: path.to_owned(),
                 error,
             })?;
-        Self::read_from_module(ProcessMemory::Slice(&map))
+        Self::read_from_module(ModuleMemory::Slice(&map))
     }
 }
 
@@ -237,7 +229,7 @@ pub trait ReadFromModule: Sized {
 pub struct BuildId(pub Vec<u8>);
 
 impl ReadFromModule for BuildId {
-    fn read_from_module(module_memory: ProcessMemory<'_>) -> Result<Self, Error> {
+    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
         let mut reader = ModuleReader::new(module_memory)?;
         let program_headers = match reader.build_id_from_program_headers() {
             Ok(v) => return Ok(BuildId(v)),
@@ -297,7 +289,7 @@ impl Iterator for DynIter<'_> {
 pub struct SoName(pub String);
 
 impl ReadFromModule for SoName {
-    fn read_from_module(module_memory: ProcessMemory<'_>) -> Result<Self, Error> {
+    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
         let mut reader = ModuleReader::new(module_memory)?;
         let program_headers = match reader.soname_from_program_headers() {
             Ok(v) => return Ok(SoName(v)),
@@ -315,13 +307,13 @@ impl ReadFromModule for SoName {
 }
 
 pub struct ModuleReader<'buf> {
-    module_memory: ProcessMemory<'buf>,
+    module_memory: ModuleMemory<'buf>,
     header: elf::Header,
     context: Ctx,
 }
 
 impl<'buf> ModuleReader<'buf> {
-    pub fn new(mut module_memory: ProcessMemory<'buf>) -> Result<Self, Error> {
+    pub fn new(mut module_memory: ModuleMemory<'buf>) -> Result<Self, Error> {
         // We could use `Ctx::default()` (which defaults to the native system), however to be extra
         // permissive we'll just use a 64-bit ("Big") context which would result in the largest
         // possible header size.

@@ -7,7 +7,7 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
-        mem_reader::CopyFromProcessError,
+        mem_reader::{CopyFromProcessError, MemReader},
         module_reader,
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
@@ -953,8 +953,9 @@ impl MinidumpWriter {
         mapping: &MappingInfo,
         pid: Pid,
     ) -> Result<T, WriterError> {
+        let mem_reader = MemReader::new(pid);
         Ok(T::read_from_module(
-            module_reader::ProcessReader::new(pid, mapping.start_address).into(),
+            module_reader::ModuleMemory::from_process(&mem_reader, mapping.start_address),
         )?)
     }
 }
