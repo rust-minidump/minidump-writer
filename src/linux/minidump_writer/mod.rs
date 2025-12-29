@@ -7,8 +7,7 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
-        mem_reader::{CopyFromProcessError, MemReader},
-        module_reader,
+        process_reader::{CopyFromProcessError, ProcessReader},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
     },
@@ -18,6 +17,7 @@ use {
             Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError, write_string_to_location,
         },
         minidump_format::*,
+        module_reader,
         serializers::*,
     },
     error_graph::{ErrorList, WriteErrorList},
@@ -720,14 +720,7 @@ impl MinidumpWriter {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        let maps_path = format!("/proc/{}/maps", self.process_id);
-        let maps_file =
-            std::fs::File::open(&maps_path).map_err(|e| InitError::IOError(maps_path, e))?;
-
-        let maps = procfs_core::process::MemoryMaps::from_read(maps_file)
-            .map_err(InitError::ReadProcessMapFileFailed)?;
-
-        self.mappings = MappingInfo::aggregate(maps, self.auxv.get_linux_gate_address())
+        self.mappings = MappingInfo::for_pid(self.process_id, self.auxv.get_linux_gate_address())
             .map_err(InitError::AggregateMappingsFailed)?;
 
         // Although the initial executable is usually the first mapping, it's not
@@ -953,10 +946,33 @@ impl MinidumpWriter {
         mapping: &MappingInfo,
         pid: Pid,
     ) -> Result<T, WriterError> {
-        let mem_reader = MemReader::new(pid);
+        let reader = ProcessReader::new(pid);
         Ok(T::read_from_module(
-            module_reader::ModuleMemory::from_process(&mem_reader, mapping.start_address),
+            module_reader::ModuleMemory::from_process(&reader, mapping.start_address),
         )?)
+    }
+
+    /// Copies a block of bytes from the target process, returning the heap
+    /// allocated copy
+    #[inline]
+    pub fn copy_from_process(
+        pid: Pid,
+        src: usize,
+        length: usize,
+    ) -> Result<Vec<u8>, CopyFromProcessError> {
+        let length = std::num::NonZeroUsize::new(length).ok_or(CopyFromProcessError {
+            src,
+            child: pid,
+            offset: 0,
+            length,
+            // TODO: We should make copy_from_process also take a NonZero,
+            // as EINVAL could also come from the syscalls that actually read
+            // memory as well which could be confusing
+            source: nix::errno::Errno::EINVAL,
+        })?;
+
+        let mem = ProcessReader::new(pid);
+        mem.read_to_vec(src, length)
     }
 }
 

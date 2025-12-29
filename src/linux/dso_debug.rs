@@ -1,6 +1,6 @@
 use {
     super::{
-        auxv::AuxvDumpInfo, mem_reader::CopyFromProcessError, minidump_writer::MinidumpWriter,
+        auxv::AuxvDumpInfo, minidump_writer::MinidumpWriter, process_reader::CopyFromProcessError,
         serializers::*,
     },
     crate::{

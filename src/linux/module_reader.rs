@@ -1,5 +1,6 @@
 use {
-    super::{mem_reader::MemReader, serializers::*},
+    super::serializers::*,
+    crate::module_reader::{ModuleMemory, ModuleMemoryReadError},
     crate::{minidump_format::GUID, serializers::*},
     goblin::{
         container::{Container, Ctx, Endian},
@@ -8,7 +9,6 @@ use {
     std::{borrow::Cow, ffi::CStr},
 };
 
-type Buf<'buf> = Cow<'buf, [u8]>;
 type Error = ModuleReaderError;
 
 const NOTE_SECTION_NAME: &[u8] = b".note.gnu.build-id\0";
@@ -22,15 +22,8 @@ pub enum ModuleReaderError {
         #[serde(serialize_with = "serialize_io_error")]
         error: std::io::Error,
     },
-    #[error("failed to read module memory: {length} bytes at {offset}{}: {error}", .start_address.map(|addr| format!(" (start address: {addr})")).unwrap_or_default())]
-    ReadModuleMemory {
-        offset: u64,
-        length: u64,
-        start_address: Option<u64>,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        error: nix::Error,
-    },
+    #[error(transparent)]
+    ReadModuleMemory(#[from] ModuleMemoryReadError),
     #[error("failed to parse ELF memory: {0}")]
     Parsing(
         #[from]
@@ -79,77 +72,9 @@ pub enum ModuleReaderError {
     },
 }
 
-pub enum ModuleMemory<'a> {
-    Slice(&'a [u8]),
-    Process {
-        reader: &'a MemReader,
-        start_address: u64,
-    },
-}
-
-impl<'buf> From<&'buf [u8]> for ModuleMemory<'buf> {
-    fn from(value: &'buf [u8]) -> Self {
-        Self::Slice(value)
-    }
-}
-
-impl<'a> ModuleMemory<'a> {
-    pub fn from_process(reader: &'a MemReader, start_address: usize) -> Self {
-        Self::Process {
-            reader,
-            start_address: start_address as u64,
-        }
-    }
-
-    #[inline]
-    fn read(&mut self, offset: u64, length: u64) -> Result<Buf<'a>, Error> {
-        let error = move |start_address, error| Error::ReadModuleMemory {
-            start_address,
-            offset,
-            length,
-            error,
-        };
-
-        match self {
-            Self::Process {
-                reader,
-                start_address,
-            } => {
-                let error = |e| error(Some(*start_address), e);
-                let len = std::num::NonZeroUsize::new(length as usize)
-                    .ok_or_else(|| error(nix::Error::EINVAL))?;
-                let proc_offset = start_address
-                    .checked_add(offset)
-                    .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
-                reader
-                    .read_to_vec(proc_offset as _, len)
-                    .map(Cow::Owned)
-                    .map_err(|err| error(err.source))
-            }
-            Self::Slice(s) => {
-                let error = |e| error(None, e);
-                let end = offset
-                    .checked_add(length)
-                    .ok_or_else(|| error(nix::Error::EOVERFLOW))?;
-                s.get(offset as usize..end as usize)
-                    .map(Cow::Borrowed)
-                    .ok_or_else(|| error(nix::Error::EACCES))
-            }
-        }
-    }
-
-    /// Calculates the absolute address of the specified relative address
-    #[inline]
-    fn absolute(&self, addr: u64) -> u64 {
-        let Self::Process { start_address, .. } = self else {
-            return addr;
-        };
-        addr.checked_sub(*start_address).unwrap_or(addr)
-    }
-
-    #[inline]
-    fn is_process_memory(&self) -> bool {
-        matches!(self, Self::Process { .. })
+impl crate::module_reader::ModuleMemory<'_> {
+    pub fn read_from_module<T: ReadFromModule>(self) -> Result<T, Error> {
+        T::read_from_module(self)
     }
 }
 
@@ -184,7 +109,7 @@ fn section_header_with_name<'sc>(
     section_headers: &'sc elf::SectionHeaders,
     strtab_index: usize,
     name: &[u8],
-    module_memory: &mut ModuleMemory<'_>,
+    module_memory: &ModuleMemory<'_>,
 ) -> Result<Option<&'sc elf::SectionHeader>, Error> {
     let strtab_section_header = section_headers
         .get(strtab_index)
@@ -230,7 +155,7 @@ pub struct BuildId(pub Vec<u8>);
 
 impl ReadFromModule for BuildId {
     fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
-        let mut reader = ModuleReader::new(module_memory)?;
+        let reader = ModuleReader::new(module_memory)?;
         let program_headers = match reader.build_id_from_program_headers() {
             Ok(v) => return Ok(BuildId(v)),
             Err(e) => Box::new(e),
@@ -290,7 +215,7 @@ pub struct SoName(pub String);
 
 impl ReadFromModule for SoName {
     fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
-        let mut reader = ModuleReader::new(module_memory)?;
+        let reader = ModuleReader::new(module_memory)?;
         let program_headers = match reader.soname_from_program_headers() {
             Ok(v) => return Ok(SoName(v)),
             Err(e) => Box::new(e),
@@ -313,7 +238,7 @@ pub struct ModuleReader<'buf> {
 }
 
 impl<'buf> ModuleReader<'buf> {
-    pub fn new(mut module_memory: ModuleMemory<'buf>) -> Result<Self, Error> {
+    pub fn new(module_memory: ModuleMemory<'buf>) -> Result<Self, Error> {
         // We could use `Ctx::default()` (which defaults to the native system), however to be extra
         // permissive we'll just use a 64-bit ("Big") context which would result in the largest
         // possible header size.
@@ -329,8 +254,38 @@ impl<'buf> ModuleReader<'buf> {
         })
     }
 
+    /// Find a note referenced by the program headers.
+    pub fn find_program_note(
+        &self,
+        note_type: u32,
+        note_size: usize,
+        note_name: &str,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        let program_headers = self.read_program_headers()?;
+        for header in program_headers {
+            if header.p_type != elf::program_header::PT_NOTE
+                || (header.p_flags & elf::program_header::PF_R) == 0
+                || (header.p_memsz as usize) < note_size
+            {
+                continue;
+            }
+
+            if let Some(data) = self.find_note(
+                header.p_offset,
+                header.p_filesz,
+                header.p_align,
+                note_type,
+                note_size,
+                note_name,
+            )? {
+                return Ok(Some(data));
+            }
+        }
+        Ok(None)
+    }
+
     /// Read the SONAME using program headers to locate dynamic library information.
-    pub fn soname_from_program_headers(&mut self) -> Result<String, Error> {
+    pub fn soname_from_program_headers(&self) -> Result<String, Error> {
         let program_headers = self.read_program_headers()?;
 
         let dynamic_segment_header = program_headers
@@ -359,7 +314,13 @@ impl<'buf> ModuleReader<'buf> {
             (Some(addr), Some(size), Some(offset)) => {
                 // If loaded in memory, the address will be altered to be absolute.
                 if offset < size {
-                    self.read_name_from_strtab(self.module_memory.absolute(addr), size, offset)
+                    self.read_name_from_strtab(
+                        self.module_memory
+                            .absolute_to_relative(addr)
+                            .unwrap_or(addr),
+                        size,
+                        offset,
+                    )
                 } else {
                     log::warn!("soname strtab offset ({offset}) exceeds strtab size ({size})");
                     Err(Error::NoSoNameEntry)
@@ -369,7 +330,7 @@ impl<'buf> ModuleReader<'buf> {
     }
 
     /// Read the SONAME using section headers to locate dynamic library information.
-    pub fn soname_from_sections(&mut self) -> Result<String, Error> {
+    pub fn soname_from_sections(&self) -> Result<String, Error> {
         let section_headers = self.read_section_headers()?;
 
         let dynamic_section_header = section_headers
@@ -384,7 +345,7 @@ impl<'buf> ModuleReader<'buf> {
                     &section_headers,
                     self.header.e_shstrndx as usize,
                     b".dynstr\0",
-                    &mut self.module_memory,
+                    &self.module_memory,
                 )?
                 .ok_or(Error::NoDynStrSection)?,
             };
@@ -417,7 +378,7 @@ impl<'buf> ModuleReader<'buf> {
     }
 
     /// Read the build id from a program header note.
-    pub fn build_id_from_program_headers(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_from_program_headers(&self) -> Result<Vec<u8>, Error> {
         let program_headers = self.read_program_headers()?;
         for header in program_headers {
             if header.p_type != elf::program_header::PT_NOTE {
@@ -433,14 +394,14 @@ impl<'buf> ModuleReader<'buf> {
     }
 
     /// Read the build id from a notes section.
-    pub fn build_id_from_section(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_from_section(&self) -> Result<Vec<u8>, Error> {
         let section_headers = self.read_section_headers()?;
 
         let header = section_header_with_name(
             &section_headers,
             self.header.e_shstrndx as usize,
             NOTE_SECTION_NAME,
-            &mut self.module_memory,
+            &self.module_memory,
         )?
         .ok_or(Error::NoSectionNote)?;
 
@@ -452,7 +413,7 @@ impl<'buf> ModuleReader<'buf> {
     }
 
     /// Generate a build id by hashing the first page of the text section.
-    pub fn build_id_generate_from_text(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn build_id_generate_from_text(&self) -> Result<Vec<u8>, Error> {
         let Some(text_header) = self
             .read_section_headers()?
             .into_iter()
@@ -467,18 +428,18 @@ impl<'buf> ModuleReader<'buf> {
         Ok(build_id_from_bytes(&text_data))
     }
 
-    fn read_segment(&mut self, header: &elf::ProgramHeader) -> Result<Buf<'buf>, Error> {
+    fn read_segment(&self, header: &elf::ProgramHeader) -> Result<Cow<'buf, [u8]>, Error> {
         let (offset, size) = if self.module_memory.is_process_memory() {
             (header.p_vaddr, header.p_memsz)
         } else {
             (header.p_offset, header.p_filesz)
         };
 
-        self.module_memory.read(offset, size)
+        self.module_memory.read(offset, size).map_err(|e| e.into())
     }
 
     fn read_name_from_strtab(
-        &mut self,
+        &self,
         strtab_offset: u64,
         strtab_size: u64,
         name_offset: u64,
@@ -500,7 +461,7 @@ impl<'buf> ModuleReader<'buf> {
         }
     }
 
-    fn read_program_headers(&mut self) -> Result<elf::ProgramHeaders, Error> {
+    fn read_program_headers(&self) -> Result<elf::ProgramHeaders, Error> {
         if self.header.e_phoff == 0 {
             return Err(Error::NoProgramHeaders);
         }
@@ -517,7 +478,7 @@ impl<'buf> ModuleReader<'buf> {
         Ok(program_headers)
     }
 
-    fn read_section_headers(&mut self) -> Result<elf::SectionHeaders, Error> {
+    fn read_section_headers(&self) -> Result<elf::SectionHeaders, Error> {
         if self.header.e_shoff == 0 {
             return Err(Error::NoSections);
         }
@@ -537,10 +498,29 @@ impl<'buf> ModuleReader<'buf> {
     }
 
     fn find_build_id_note(
-        &mut self,
+        &self,
         offset: u64,
         size: u64,
         alignment: u64,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        self.find_note(
+            offset,
+            size,
+            alignment,
+            elf::note::NT_GNU_BUILD_ID,
+            0,
+            "GNU",
+        )
+    }
+
+    fn find_note(
+        &self,
+        offset: u64,
+        size: u64,
+        alignment: u64,
+        note_type: u32,
+        note_min_size: usize,
+        note_name: &str,
     ) -> Result<Option<Vec<u8>>, Error> {
         let notes = self.module_memory.read(offset, size)?;
         for note in (elf::note::NoteDataIterator {
@@ -552,10 +532,136 @@ impl<'buf> ModuleReader<'buf> {
             ctx: (alignment as usize, self.context),
         }) {
             let Ok(note) = note else { break };
-            if note.name == "GNU" && note.n_type == elf::note::NT_GNU_BUILD_ID {
+            if note.name == note_name
+                && note.n_type == note_type
+                && note.desc.len() >= note_min_size
+            {
                 return Ok(Some(note.desc.to_owned()));
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// This is a small (but valid) 64-bit little-endian elf executable with the following layout:
+    /// * ELF header
+    /// * program header: text segment
+    /// * program header: note
+    /// * program header: dynamic
+    /// * section header: null
+    /// * section header: .text
+    /// * section header: .note.gnu.build-id
+    /// * section header: .shstrtab
+    /// * section header: .dynamic
+    /// * section header: .dynstr
+    /// * note header (build id note)
+    /// * shstrtab
+    /// * dynamic (SONAME/STRTAB/STRSZ)
+    /// * dynstr (SONAME string = libfoo.so.1)
+    /// * program (calls exit(0))
+    const TINY_ELF: &[u8] = &[
+        0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x03, 0x40, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe8, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x38, 0x00, 0x03, 0x00, 0x40, 0x00,
+        0x06, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x0a, 0x03, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x03, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x68, 0x02, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xbd, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xbd, 0x02, 0x40,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x03, 0x40,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x68, 0x02, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x02, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x02, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x02,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x35, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00,
+        0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xbd, 0x02, 0x40, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0xbd, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2d, 0x00, 0x00,
+        0x00, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfd, 0x02,
+        0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfd, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0d,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x47, 0x4e,
+        0x55, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+        0x0e, 0x0f, 0x10, 0x00, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00, 0x2e, 0x6e, 0x6f, 0x74, 0x65,
+        0x2e, 0x67, 0x6e, 0x75, 0x2e, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x2d, 0x69, 0x64, 0x00, 0x2e,
+        0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00, 0x2e, 0x64, 0x79, 0x6e, 0x61, 0x6d,
+        0x69, 0x63, 0x00, 0x2e, 0x64, 0x79, 0x6e, 0x73, 0x74, 0x72, 0x00, 0x0e, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0xfd, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x6c, 0x69, 0x62, 0x66, 0x6f, 0x6f, 0x2e, 0x73, 0x6f, 0x2e, 0x31, 0x00, 0x6a, 0x3c,
+        0x58, 0x31, 0xff, 0x0f, 0x05,
+    ];
+
+    #[test]
+    fn build_id_program_headers() {
+        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let id = reader.build_id_from_program_headers().unwrap();
+        assert_eq!(
+            id,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        );
+    }
+
+    #[test]
+    fn build_id_section() {
+        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let id = reader.build_id_from_section().unwrap();
+        assert_eq!(
+            id,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        );
+    }
+
+    #[test]
+    fn build_id_text_hash() {
+        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let id = reader.build_id_generate_from_text().unwrap();
+        assert_eq!(
+            id,
+            vec![
+                0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn soname_program_headers() {
+        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let soname = reader.soname_from_program_headers().unwrap();
+        assert_eq!(soname, "libfoo.so.1");
+    }
+
+    #[test]
+    fn soname_section() {
+        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let soname = reader.soname_from_sections().unwrap();
+        assert_eq!(soname, "libfoo.so.1");
     }
 }

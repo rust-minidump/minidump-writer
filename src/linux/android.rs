@@ -1,7 +1,7 @@
 use {
     super::{
-        Pid, maps_reader::MappingInfo, mem_reader::CopyFromProcessError,
-        minidump_writer::MinidumpWriter,
+        Pid, maps_reader::MappingInfo, minidump_writer::MinidumpWriter,
+        process_reader::CopyFromProcessError,
     },
     goblin::elf,
 };
