@@ -14,10 +14,7 @@ bitflags = "2.10"
 byteorder = "1.4"
 cfg-if = "1.0"
 crash-context = "0.6"
-error-graph = { version = "0.1.1", features = ["serde"] }
-failspot = "0.2.0"
 log = "0.4"
-memoffset = "0.9"
 # Type definitions and utilities for working with the Minidump format
 minidump-common = "0.26"
 # Reading and writing to memory. Keep aligned with version used by minidump-common and goblin

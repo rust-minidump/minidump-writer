@@ -187,7 +187,7 @@ impl ThreadInfoX86 {
         #[cfg(target_arch = "x86")]
         let mut dregs: [libc::c_int; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
 
-        let debug_offset = memoffset::offset_of!(user, u_debugreg);
+        let debug_offset = std::mem::offset_of!(user, u_debugreg);
         let elem_offset = size_of_val(&dregs[0]);
         for (idx, dreg) in dregs.iter_mut().enumerate() {
             let chunk = Self::peek_user(
