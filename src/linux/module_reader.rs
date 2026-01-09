@@ -670,7 +670,9 @@ mod test {
         let id = reader.build_id_generate_from_text().unwrap();
         assert_eq!(
             id,
-            vec![0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            vec![
+                0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
         );
     }
 

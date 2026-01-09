@@ -15,11 +15,7 @@ fn file_stat(path: &Path) -> Option<libc::stat> {
     let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
     let result = unsafe { libc::stat(c_path.as_ptr(), &mut stat) };
 
-    if result == 0 {
-        Some(stat)
-    } else {
-        None
-    }
+    if result == 0 { Some(stat) } else { None }
 }
 
 fn direntry_to_descriptor(buffer: &mut DumpBuf, entry: &DirEntry) -> Option<MDRawHandleDescriptor> {

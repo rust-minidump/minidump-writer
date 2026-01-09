@@ -1,5 +1,6 @@
 use {
     super::{
+        Pid,
         app_memory::AppMemoryList,
         auxv::AuxvDumpInfo,
         crash_context::CrashContext,
@@ -10,12 +11,11 @@ use {
         module_reader,
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
-        Pid,
     },
     crate::{
         dir_section::{DirSection, DumpBuf},
         mem_writer::{
-            write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError,
+            Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError, write_string_to_location,
         },
         minidump_format::*,
         serializers::*,
@@ -28,8 +28,8 @@ use {
         sys::{ptrace, signal, wait},
     },
     procfs_core::{
-        process::{MMPermissions, ProcState, Stat},
         FromRead,
+        process::{MMPermissions, ProcState, Stat},
     },
     std::{
         io::{Seek, Write},

@@ -10,11 +10,12 @@ mod linux {
         super::*,
         error_graph::ErrorList,
         minidump_writer::{
+            LINUX_GATE_LIBRARY_NAME,
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
-            module_reader, LINUX_GATE_LIBRARY_NAME,
+            module_reader,
         },
         nix::{
-            sys::mman::{mmap_anonymous, MapFlags, ProtFlags},
+            sys::mman::{MapFlags, ProtFlags, mmap_anonymous},
             unistd::getppid,
         },
     };

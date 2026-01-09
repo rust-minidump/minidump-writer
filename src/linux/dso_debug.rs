@@ -5,7 +5,7 @@ use {
     },
     crate::{
         mem_writer::{
-            write_string_to_location, Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError,
+            Buffer, MemoryArrayWriter, MemoryWriter, MemoryWriterError, write_string_to_location,
         },
         minidump_format::*,
     },

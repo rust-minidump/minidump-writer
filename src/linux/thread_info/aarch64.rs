@@ -1,6 +1,6 @@
 use {
     super::{CommonThreadInfo, NT_Elf, Pid, ThreadInfoError},
-    crate::minidump_cpu::{RawContextCPU, FP_REG_COUNT, GP_REG_COUNT},
+    crate::minidump_cpu::{FP_REG_COUNT, GP_REG_COUNT, RawContextCPU},
     nix::sys::ptrace,
 };
 

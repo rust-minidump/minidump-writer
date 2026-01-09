@@ -1,7 +1,7 @@
 use {
     super::*,
     minidump_common::format::{MemoryProtection, MemoryState, MemoryType},
-    procfs_core::{process::MMPermissions, FromRead},
+    procfs_core::{FromRead, process::MMPermissions},
 };
 
 #[derive(Debug, Error, serde::Serialize)]

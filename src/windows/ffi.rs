@@ -14,7 +14,7 @@
     clippy::upper_case_acronyms
 )]
 
-pub use crash_context::{capture_context, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD};
+pub use crash_context::{CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD, capture_context};
 
 pub type HANDLE = isize;
 pub type BOOL = i32;
