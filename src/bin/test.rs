@@ -421,7 +421,7 @@ mod windows {
     use std::mem;
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         pub fn GetCurrentProcessId() -> u32;
         pub fn GetCurrentThreadId() -> u32;
         pub fn GetCurrentThread() -> isize;
