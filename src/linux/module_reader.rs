@@ -648,20 +648,14 @@ mod test {
     fn build_id_program_headers() {
         let mut reader = ModuleReader::new(TINY_ELF.into()).unwrap();
         let id = reader.build_id_from_program_headers().unwrap();
-        assert_eq!(
-            id,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        );
+        assert_eq!(id, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     }
 
     #[test]
     fn build_id_section() {
         let mut reader = ModuleReader::new(TINY_ELF.into()).unwrap();
         let id = reader.build_id_from_section().unwrap();
-        assert_eq!(
-            id,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        );
+        assert_eq!(id, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     }
 
     #[test]
@@ -670,7 +664,7 @@ mod test {
         let id = reader.build_id_generate_from_text().unwrap();
         assert_eq!(
             id,
-            vec![
+            &[
                 0x6a, 0x3c, 0x58, 0x31, 0xff, 0x0f, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0
             ]
         );
