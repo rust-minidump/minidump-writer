@@ -660,7 +660,7 @@ pub fn sysctl_string(name: &[u8]) -> String {
     String::from_utf8(string_buf).unwrap_or_default()
 }
 
-extern "C" {
+unsafe extern "C" {
     /// From <usr/include/mach/mach_traps.h>, this retrieves the normal PID for
     /// the specified task as the syscalls from BSD use PIDs, not mach ports.
     ///
