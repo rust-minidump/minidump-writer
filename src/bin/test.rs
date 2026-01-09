@@ -340,14 +340,33 @@ mod linux {
     }
 
     fn create_files_wait(num: usize) -> Result<()> {
-        let mut file_array = Vec::<tempfile::NamedTempFile>::with_capacity(num);
+        use std::{fmt::Write, io::Read};
+
+        let mut file_array = Vec::<std::fs::File>::with_capacity(num);
+
+        let mut rand = std::fs::File::open("/dev/urandom").expect("failed to open /dev/urandom");
+        const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        let mut root = std::env::current_dir().expect("failed to get current directory");
+        root.push("target/tmp");
+
+        let mut rand_indices = [0u8; 6];
+
         for id in 0..num {
-            let file = tempfile::Builder::new()
-                .prefix("test_file")
-                .suffix::<str>(id.to_string().as_ref())
-                .tempfile()
-                .unwrap();
-            file_array.push(file);
+            let mut name = String::new();
+            name.push_str("test_file");
+
+            rand.read_exact(&mut rand_indices)
+                .expect("failed to read /dev/urandom");
+
+            for index in rand_indices {
+                name.push(CHARS[index as usize % CHARS.len()] as char);
+            }
+
+            write!(&mut name, "{id}").unwrap();
+
+            let path = root.join(name);
+            file_array.push(std::fs::File::create(&path).expect("failed to create path"));
             println!("1");
         }
         println!("1");
