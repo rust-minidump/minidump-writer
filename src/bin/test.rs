@@ -350,10 +350,8 @@ mod linux {
         let mut root = std::env::current_dir().expect("failed to get current directory");
         root.push("target/tmp");
 
-        if cfg!(target_os = "android") {
-            if !root.exists() {
-                std::fs::create_dir_all(&root).expect("failed to create target/tmp dir")
-            }
+        if cfg!(target_os = "android") && !root.exists() {
+            std::fs::create_dir_all(&root).expect("failed to create target/tmp dir")
         }
 
         let mut rand_indices = [0u8; 6];
