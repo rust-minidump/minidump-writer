@@ -347,11 +347,11 @@ mod linux {
         let mut rand = std::fs::File::open("/dev/urandom").expect("failed to open /dev/urandom");
         const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-        let mut root = std::env::current_dir().expect("failed to get current directory");
-        root.push("target/tmp");
+        let mut root = std::env::temp_dir();
+        root.push("minidump-writer");
 
-        if cfg!(target_os = "android") && !root.exists() {
-            std::fs::create_dir_all(&root).expect("failed to create target/tmp dir")
+        if !root.exists() {
+            std::fs::create_dir_all(&root).expect("failed to create $TMP/minidump-writer dir")
         }
 
         let mut rand_indices = [0u8; 6];
