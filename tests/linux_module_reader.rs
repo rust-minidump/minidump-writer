@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+
 use minidump_writer::module_reader::*;
 
 /// This is a small (but valid) 64-bit little-endian elf executable with the following layout:
