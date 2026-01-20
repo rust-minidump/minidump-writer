@@ -1,4 +1,4 @@
-use super::{errors::ThreadInfoError, Pid};
+use super::{Pid, errors::ThreadInfoError};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 

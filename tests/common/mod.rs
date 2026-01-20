@@ -135,9 +135,10 @@ pub fn assert_soft_errors_in_minidump<'a, 'b, T, I>(
 
     // Ensure that every error we expect is in the actual list somewhere
     for expected_error in expected_errors {
-        assert!(actual_errors
-            .iter()
-            .any(|actual_error| actual_error == expected_error),
+        assert!(
+            actual_errors
+                .iter()
+                .any(|actual_error| actual_error == expected_error),
             "soft error list missing expected error `{expected_error:#?}`\nError_list: {actual_errors:#?}"
         );
     }

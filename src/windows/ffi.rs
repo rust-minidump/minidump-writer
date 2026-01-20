@@ -14,7 +14,7 @@
     clippy::upper_case_acronyms
 )]
 
-pub use crash_context::{capture_context, CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD};
+pub use crash_context::{CONTEXT, EXCEPTION_POINTERS, EXCEPTION_RECORD, capture_context};
 
 pub type HANDLE = isize;
 pub type BOOL = i32;
@@ -416,7 +416,7 @@ pub struct MINIDUMP_CALLBACK_INFORMATION {
 }
 
 #[link(name = "kernel32")]
-extern "system" {
+unsafe extern "system" {
     pub fn CloseHandle(handle: HANDLE) -> BOOL;
     pub fn GetCurrentProcess() -> HANDLE;
     pub fn GetCurrentThreadId() -> u32;
@@ -436,7 +436,7 @@ extern "system" {
 }
 
 #[link(name = "dbghelp")]
-extern "system" {
+unsafe extern "system" {
     pub fn MiniDumpWriteDump(
         process: HANDLE,
         process_id: u32,

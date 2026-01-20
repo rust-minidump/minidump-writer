@@ -6,7 +6,7 @@ use {
     error_graph::ErrorList,
     minidump_writer::minidump_writer::MinidumpWriterConfig,
     nix::{
-        sys::mman::{mmap, MapFlags, ProtFlags},
+        sys::mman::{MapFlags, ProtFlags, mmap},
         sys::signal::Signal,
     },
     std::{

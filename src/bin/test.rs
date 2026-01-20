@@ -10,11 +10,12 @@ mod linux {
         super::*,
         error_graph::ErrorList,
         minidump_writer::{
+            LINUX_GATE_LIBRARY_NAME,
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
-            module_reader, LINUX_GATE_LIBRARY_NAME,
+            module_reader,
         },
         nix::{
-            sys::mman::{mmap_anonymous, MapFlags, ProtFlags},
+            sys::mman::{MapFlags, ProtFlags, mmap_anonymous},
             unistd::getppid,
         },
     };
@@ -339,14 +340,37 @@ mod linux {
     }
 
     fn create_files_wait(num: usize) -> Result<()> {
-        let mut file_array = Vec::<tempfile::NamedTempFile>::with_capacity(num);
+        use std::{fmt::Write, io::Read};
+
+        let mut file_array = Vec::<std::fs::File>::with_capacity(num);
+
+        let mut rand = std::fs::File::open("/dev/urandom").expect("failed to open /dev/urandom");
+        const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        let mut root = std::env::temp_dir();
+        root.push("minidump-writer");
+
+        if !root.exists() {
+            std::fs::create_dir_all(&root).expect("failed to create $TMP/minidump-writer dir")
+        }
+
+        let mut rand_indices = [0u8; 6];
+
         for id in 0..num {
-            let file = tempfile::Builder::new()
-                .prefix("test_file")
-                .suffix::<str>(id.to_string().as_ref())
-                .tempfile()
-                .unwrap();
-            file_array.push(file);
+            let mut name = String::new();
+            name.push_str("test_file");
+
+            rand.read_exact(&mut rand_indices)
+                .expect("failed to read /dev/urandom");
+
+            for index in rand_indices {
+                name.push(CHARS[index as usize % CHARS.len()] as char);
+            }
+
+            write!(&mut name, "{id}").unwrap();
+
+            let path = root.join(name);
+            file_array.push(std::fs::File::create(&path).expect("failed to create path"));
             println!("1");
         }
         println!("1");
@@ -420,7 +444,7 @@ mod windows {
     use std::mem;
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         pub fn GetCurrentProcessId() -> u32;
         pub fn GetCurrentThreadId() -> u32;
         pub fn GetCurrentThread() -> isize;

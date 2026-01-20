@@ -739,7 +739,12 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
             .get_mapping_effective_path_name_and_version(None)
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
-        assert_eq!(file_path, PathBuf::from("/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"));
+        assert_eq!(
+            file_path,
+            PathBuf::from(
+                "/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"
+            )
+        );
     }
 
     #[test]

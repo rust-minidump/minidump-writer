@@ -1,7 +1,7 @@
 //! Functionality for reading a remote process's memory
 
 use {
-    super::{minidump_writer::MinidumpWriter, serializers::*, Pid},
+    super::{Pid, minidump_writer::MinidumpWriter, serializers::*},
     std::sync::OnceLock,
 };
 

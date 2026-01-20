@@ -1,5 +1,5 @@
 use {
-    super::{serializers::*, Pid},
+    super::{Pid, serializers::*},
     crate::serializers::*,
     nix::{errno::Errno, sys::ptrace},
     std::{
