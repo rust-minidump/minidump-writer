@@ -82,7 +82,7 @@ fn thread_list_from_child() {
         }
 
         act.sa_flags = libc::SA_SIGINFO;
-        act.sa_sigaction = on_sig as usize;
+        act.sa_sigaction = on_sig as *const () as _;
 
         // Register the action with the signal handler
         if libc::sigaction(libc::SIGHUP, &act, std::ptr::null_mut()) != 0 {

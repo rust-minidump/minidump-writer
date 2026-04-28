@@ -96,8 +96,9 @@ impl MinidumpWriter {
             // we used the actual state of the thread we would find it running in the
             // signal handler with the alternative stack, which would be deeply
             // unhelpful.
-            if self.crash_context.is_some() && thread.thread_id == self.blamed_thread as u32 {
-                let crash_context = self.crash_context.as_ref().unwrap();
+            if let Some(crash_context) = &self.crash_context
+                && thread.thread_id == self.blamed_thread as u32
+            {
                 let instruction_ptr = crash_context.get_instruction_pointer();
                 let stack_pointer = crash_context.get_stack_pointer();
                 self.fill_thread_stack(

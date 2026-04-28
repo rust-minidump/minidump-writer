@@ -13,6 +13,10 @@ license = "MIT"
 bitflags = "2.10"
 cfg-if = "1.0"
 crash-context = "0.6"
+error-graph = { version = "0.1.1", features = ["serde"] }
+failspot = "0.2.0"
+# goblin >= 0.10 uses scroll 0.13
+goblin = "0.9.2"
 log = "0.4"
 # Type definitions and utilities for working with the Minidump format
 minidump-common = "0.26"
@@ -24,8 +28,6 @@ thiserror = "2.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-# goblin >= 0.10 uses scroll 0.13
-goblin = "0.9"
 memmap2 = "0.9"
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
@@ -46,6 +48,11 @@ procfs-core = { version = "0.18", default-features = false, features = ["serde1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bitflags = "2.4"
+windows-sys = { version = ">=0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_ProcessStatus",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Binds some additional mac specifics not in libc, note that other dependents

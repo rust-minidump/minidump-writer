@@ -77,7 +77,7 @@ mod linux {
     }
 
     fn test_copy_from_process(stack_var: usize, heap_var: usize) -> Result<()> {
-        use minidump_writer::mem_reader::MemReader;
+        use minidump_writer::process_reader::ProcessReader;
 
         let ppid = getppid().as_raw();
         let dumper = fail_on_soft_error!(
@@ -91,7 +91,7 @@ mod linux {
         let expected_stack = 0x11223344usize.to_ne_bytes();
         let expected_heap = 0x55667788usize.to_ne_bytes();
 
-        let validate = |reader: &mut MemReader| -> Result<()> {
+        let validate = |reader: &mut ProcessReader| -> Result<()> {
             let mut val = [0u8; std::mem::size_of::<usize>()];
             let read = reader.read(stack_var, &mut val)?;
             assert_eq!(read, val.len());
@@ -106,14 +106,14 @@ mod linux {
 
         // virtual mem
         {
-            let mut mr = MemReader::for_virtual_mem(ppid);
+            let mut mr = ProcessReader::for_virtual_mem(ppid);
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
         }
 
         // file
         {
-            let mut mr = MemReader::for_file(ppid)
+            let mut mr = ProcessReader::for_file(ppid)
                 .map_err(|err| format!("failed to open `/proc/{ppid}/mem`: {err}"))?;
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
@@ -121,7 +121,7 @@ mod linux {
 
         // ptrace
         {
-            let mut mr = MemReader::for_ptrace(ppid);
+            let mut mr = ProcessReader::for_ptrace(ppid);
             validate(&mut mr)
                 .map_err(|err| format!("failed to validate memory for {mr:?}: {err}"))?;
         }
