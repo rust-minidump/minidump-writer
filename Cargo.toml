@@ -48,11 +48,6 @@ procfs-core = { version = "0.18", default-features = false, features = ["serde1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 bitflags = "2.4"
-windows-sys = { version = ">=0.52", features = [
-    "Win32_Foundation",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_ProcessStatus",
-] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Binds some additional mac specifics not in libc, note that other dependents
