@@ -6,7 +6,7 @@ description = "Rust rewrite of Breakpad's minidump_writer"
 repository = "https://github.com/rust-minidump/minidump-writer"
 homepage = "https://github.com/rust-minidump/minidump-writer"
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 license = "MIT"
 
 [dependencies]
