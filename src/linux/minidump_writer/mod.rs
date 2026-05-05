@@ -886,25 +886,24 @@ impl MinidumpWriter {
                 continue;
             }
 
-            if let Some(stack_map) = stack_mapping {
-                if stack_map.contains_address(addr) {
-                    continue;
-                }
+            if let Some(stack_map) = stack_mapping
+                && stack_map.contains_address(addr)
+            {
+                continue;
             }
-            if let Some(last_hit) = last_hit_mapping {
-                if last_hit.contains_address(addr) {
-                    continue;
-                }
+            if let Some(last_hit) = last_hit_mapping
+                && last_hit.contains_address(addr)
+            {
+                continue;
             }
 
             let test = addr >> shift;
-            if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
-                if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
-                    if hit_mapping.is_executable() {
-                        last_hit_mapping = Some(hit_mapping);
-                        continue;
-                    }
-                }
+            if (could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0)
+                && let Some(hit_mapping) = self.find_mapping_no_bias(addr)
+                && hit_mapping.is_executable()
+            {
+                last_hit_mapping = Some(hit_mapping);
+                continue;
             }
             sp.copy_from_slice(&defaced);
         }

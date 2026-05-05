@@ -182,11 +182,11 @@ impl MappingInfo {
 
             let is_path = is_mapping_a_path(pathname.as_deref());
 
-            if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap()) {
-                if !is_path && start_address == linux_gate_loc {
-                    pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
-                    offset = 0;
-                }
+            if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap())
+                && (!is_path && (start_address == linux_gate_loc))
+            {
+                pathname = Some(LINUX_GATE_LIBRARY_NAME.into());
+                offset = 0;
             }
 
             if let Some(prev_module) = infos.last_mut() {
@@ -317,10 +317,10 @@ impl MappingInfo {
         // because the semantics of the open may be driver-specific so we'd risk
         // hanging the crash dumper. And a file in /dev/ almost certainly has no
         // ELF file identifier anyways.
-        if let Some(name) = name {
-            if name.as_bytes().starts_with(b"/dev/") {
-                return false;
-            }
+        if let Some(name) = name
+            && name.as_bytes().starts_with(b"/dev/")
+        {
+            return false;
         }
         true
     }
@@ -491,11 +491,11 @@ impl SoVersion {
                     if i >= comps.len() - 1 {
                         break;
                     }
-                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit()) {
-                        if let Ok(pre) = comp[pre + 1..].parse() {
-                            *comps[i + 1] = pre;
-                            break;
-                        }
+                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit())
+                        && let Ok(pre) = comp[pre + 1..].parse()
+                    {
+                        *comps[i + 1] = pre;
+                        break;
                     }
                 } else {
                     *comps[i] = comp.parse().unwrap_or_default();
