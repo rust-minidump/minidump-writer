@@ -1,23 +1,15 @@
 use {
-    crate::{module_reader::ModuleMemory, serializers::*},
+    super::ffi::{self, HMODULE},
+    crate::{module_reader::ModuleMemory, serializers::serialize_io_error},
     std::{
         convert::TryInto,
         ffi::OsString,
         mem::{MaybeUninit, size_of},
         os::windows::ffi::OsStringExt,
     },
-    windows_sys::Win32::{
-        Foundation::{FALSE, HMODULE, MAX_PATH},
-        System::{
-            Diagnostics::Debug::ReadProcessMemory,
-            ProcessStatus::{
-                K32EnumProcessModules, K32GetModuleBaseNameW, K32GetModuleInformation, MODULEINFO,
-            },
-        },
-    },
 };
 
-pub type ProcessHandle = windows_sys::Win32::Foundation::HANDLE;
+pub type ProcessHandle = ffi::HANDLE;
 
 pub struct ProcessReader {
     process: ProcessHandle,
@@ -51,7 +43,7 @@ impl ProcessReader {
     pub fn read(&self, src: usize, dst: &mut [u8]) -> Result<usize, CopyFromProcessError> {
         let mut size: usize = 0;
         let res = unsafe {
-            ReadProcessMemory(
+            ffi::ReadProcessMemory(
                 self.process,
                 src as _,
                 dst.as_mut_ptr() as _,
@@ -60,7 +52,7 @@ impl ProcessReader {
             )
         };
 
-        if res != FALSE {
+        if res != ffi::FALSE {
             Ok(size)
         } else {
             Err(CopyFromProcessError {
@@ -81,7 +73,7 @@ impl ProcessReader {
             // sufficient for our use-cases.
             if name.is_some_and(|name| name.eq_ignore_ascii_case(module_name)) {
                 self.get_module_info(module)
-                    .map(|module| module.lpBaseOfDll as usize)
+                    .map(|module| module.base_of_dll as usize)
             } else {
                 None
             }
@@ -102,7 +94,7 @@ impl ProcessReader {
                 .try_into()
                 .map_err(|_| FindModuleError::ModuleListTooLarge)?;
             let res = unsafe {
-                K32EnumProcessModules(
+                ffi::K32EnumProcessModules(
                     self.process,
                     module_array.as_mut_ptr() as *mut _,
                     buffer_size,
@@ -130,9 +122,12 @@ impl ProcessReader {
     }
 
     fn get_module_name(&self, module: HMODULE) -> Option<String> {
+        use ffi::MAX_PATH;
+
         let mut path: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
-        let res =
-            unsafe { K32GetModuleBaseNameW(self.process, module, path.as_mut_ptr(), MAX_PATH) };
+        let res = unsafe {
+            ffi::K32GetModuleBaseNameW(self.process, module, path.as_mut_ptr(), MAX_PATH)
+        };
 
         if res == 0 {
             None
@@ -143,14 +138,14 @@ impl ProcessReader {
         }
     }
 
-    fn get_module_info(&self, module: HMODULE) -> Option<MODULEINFO> {
-        let mut info: MaybeUninit<MODULEINFO> = MaybeUninit::uninit();
+    fn get_module_info(&self, module: HMODULE) -> Option<ffi::MODULEINFO> {
+        let mut info: MaybeUninit<ffi::MODULEINFO> = MaybeUninit::uninit();
         let res = unsafe {
-            K32GetModuleInformation(
+            ffi::K32GetModuleInformation(
                 self.process,
                 module,
                 info.as_mut_ptr(),
-                size_of::<MODULEINFO>() as u32,
+                size_of::<ffi::MODULEINFO>() as u32,
             )
         };
 
