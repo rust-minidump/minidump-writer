@@ -7,6 +7,7 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
+        process_inspection::ProcessInspector,
         process_reader::{CopyFromProcessError, ProcessReader},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
@@ -41,8 +42,6 @@ use {
 
 #[cfg(target_os = "android")]
 use super::android::late_process_mappings;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use super::thread_info;
 
 pub use super::auxv::{AuxvType, DirectAuxvDumpInfo};
 
@@ -82,6 +81,7 @@ pub struct MinidumpWriterConfig {
     crashing_thread_context: CrashingThreadContext,
     stop_timeout: Duration,
     direct_auxv_dump_info: Option<DirectAuxvDumpInfo>,
+    process_inspector: ProcessInspector,
 }
 
 #[derive(Debug)]
@@ -104,6 +104,7 @@ pub struct MinidumpWriter {
     pub crash_context: Option<CrashContext>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
+    process_inspector: ProcessInspector,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +138,7 @@ impl MinidumpWriterConfig {
             crashing_thread_context: Default::default(),
             stop_timeout: STOP_TIMEOUT,
             direct_auxv_dump_info: Default::default(),
+            process_inspector: ProcessInspector::local(),
         }
     }
 
@@ -243,6 +245,7 @@ impl MinidumpWriterConfig {
             crash_context: self.crash_context,
             app_memory: self.app_memory,
             memory_blocks: self.memory_blocks,
+            process_inspector: self.process_inspector,
         }
     }
 }
@@ -515,7 +518,11 @@ impl MinidumpWriter {
     }
 
     /// Suspends a thread by attaching to it.
-    fn suspend_thread(child: Pid) -> Result<(), WriterError> {
+    fn suspend_thread(
+        #[allow(unused)] // TODO
+        process_inspector: &ProcessInspector,
+        child: Pid,
+    ) -> Result<(), WriterError> {
         use WriterError::PtraceAttachError as AttachErr;
 
         let pid = nix::unistd::Pid::from_raw(child);
@@ -561,7 +568,7 @@ impl MinidumpWriter {
             // We thus test the stack pointer and exclude any threads that are part of
             // the seccomp sandbox's trusted code.
             let skip_thread;
-            let regs = thread_info::ThreadInfo::getregs(pid.into());
+            let regs = process_inspector.get_gen_regs(pid.into());
             if let Ok(regs) = regs {
                 #[cfg(target_arch = "x86_64")]
                 {
@@ -592,13 +599,15 @@ impl MinidumpWriter {
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(|x| match Self::suspend_thread(x.tid) {
-            Ok(()) => true,
-            Err(e) => {
-                soft_errors.push(e);
-                false
-            }
-        });
+        self.threads.retain(
+            |x| match Self::suspend_thread(&self.process_inspector, x.tid) {
+                Ok(()) => true,
+                Err(e) => {
+                    soft_errors.push(e);
+                    false
+                }
+            },
+        );
 
         self.threads_suspended = true;
 
@@ -755,7 +764,11 @@ impl MinidumpWriter {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        ThreadInfo::create(self.process_id, self.threads[index].tid)
+        ThreadInfo::create(
+            &self.process_inspector,
+            self.process_id,
+            self.threads[index].tid,
+        )
     }
 
     // Returns a valid stack pointer and the mapping that contains the stack.

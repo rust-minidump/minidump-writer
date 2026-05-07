@@ -1,16 +1,15 @@
 use {
-    super::{Pid, serializers::*},
+    super::{
+        Pid,
+        process_inspection::{ProcessInspector, regs},
+        serializers::*,
+    },
     crate::serializers::*,
-    nix::errno::Errno,
     std::{
-        ffi::c_void,
         io::{self, BufRead},
         path,
     },
 };
-
-#[cfg(target_arch = "x86_64")]
-pub use x86::copy_u32_registers;
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
 
@@ -46,6 +45,9 @@ cfg_if::cfg_if! {
     if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
         mod x86;
         pub type ThreadInfo = x86::ThreadInfoX86;
+
+        #[cfg(target_arch = "x86_64")]
+        pub use x86::copy_u32_registers;
     } else if #[cfg(target_arch = "arm")] {
         mod arm;
         pub type ThreadInfo = arm::ThreadInfoArm;
@@ -55,18 +57,12 @@ cfg_if::cfg_if! {
     }
 }
 
-#[cfg(target_env = "gnu")]
-type PtraceRequestType = core::ffi::c_uint;
-
-#[cfg(not(target_env = "gnu"))]
-type PtraceRequestType = core::ffi::c_int;
-
-fn get_ppid_and_tgid(tid: Pid) -> Result<(Pid, Pid)> {
+fn get_ppid_and_tgid(process_inspector: &ProcessInspector, tid: Pid) -> Result<(Pid, Pid)> {
     let mut ppid = -1;
     let mut tgid = -1;
 
     let status_path = path::PathBuf::from(format!("/proc/{tid}/status"));
-    let status_file = std::fs::File::open(status_path)?;
+    let status_file = process_inspector.read_file(status_path)?;
     for line in io::BufReader::new(status_file).lines() {
         let l = line?;
         let start = l
@@ -96,38 +92,4 @@ fn get_ppid_and_tgid(tid: Pid) -> Result<(Pid, Pid)> {
         ));
     }
     Ok((ppid, tgid))
-}
-
-/// Safety: RequestType and T must agree on the size of the returned type
-unsafe fn ptrace_getregs<T>(request: PtraceRequestType, pid: libc::pid_t) -> Result<T> {
-    let mut output = std::mem::MaybeUninit::uninit();
-
-    // Since ptrace() is vararg, best to explicitly state arg types
-    let addr: *mut c_void = std::ptr::null_mut();
-    let data: *mut c_void = (&raw mut output).cast();
-    let res = unsafe { libc::ptrace(request, pid, addr, data) };
-    Errno::result(res).map_err(ThreadInfoError::PtraceError)?;
-    Ok(unsafe { output.assume_init() })
-}
-
-fn ptrace_getregset<T>(regset_type: usize, pid: libc::pid_t) -> Result<T> {
-    let mut output = std::mem::MaybeUninit::<T>::uninit();
-    let mut io = libc::iovec {
-        iov_base: output.as_mut_ptr().cast(),
-        iov_len: std::mem::size_of::<T>(),
-    };
-
-    // Since ptrace() is vararg, best to explicitly state arg types
-    let addr: *mut c_void = regset_type as *mut c_void;
-    let data: *mut c_void = (&raw mut io).cast();
-    let res = unsafe { libc::ptrace(libc::PTRACE_GETREGSET, pid, addr, data) };
-    Errno::result(res).map_err(ThreadInfoError::PtraceError)?;
-
-    // PTRACE_GETREGSET returns the number of bytes actually read in iov_len. Need to ensure
-    // all bytes of T are actually initialized
-    if io.iov_len != std::mem::size_of::<T>() {
-        return Err(ThreadInfoError::PtraceError(Errno::EINVAL));
-    }
-
-    Ok(unsafe { output.assume_init() })
 }
