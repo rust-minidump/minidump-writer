@@ -1,4 +1,4 @@
-use crate::module_reader::{ModuleMemory, ModuleMemoryReadError};
+use crate::module_reader::{ModuleMemoryReadError, ProcessModuleMemoryReader};
 use crate::serializers::*;
 use goblin::container::{Container, Ctx, Endian};
 use goblin::mach::{
@@ -11,7 +11,7 @@ use scroll::ctx::{SizeWith, TryFromCtx};
 const DATA_SEGMENT: &[u8; 16] = b"__DATA\0\0\0\0\0\0\0\0\0\0";
 
 pub struct ModuleReader<'a> {
-    module_memory: ModuleMemory<'a>,
+    module_memory: ProcessModuleMemoryReader<'a>,
     header: Header,
     context: Ctx,
 }
@@ -58,7 +58,7 @@ macro_rules! read_scroll_array {
     }};
 }
 
-impl ModuleMemory<'_> {
+impl ProcessModuleMemoryReader<'_> {
     /// Read an array of values using scroll traits.
     ///
     /// See `read_scroll` for an explanation of the return form.
@@ -94,7 +94,7 @@ impl ModuleMemory<'_> {
 }
 
 impl<'a> ModuleReader<'a> {
-    pub fn new(module_memory: ModuleMemory<'a>) -> Result<Self, ModuleReaderError> {
+    pub fn new(module_memory: ProcessModuleMemoryReader<'a>) -> Result<Self, ModuleReaderError> {
         let header_size = Header::size_with(&Ctx::new(Container::Big, Endian::default()));
         let header_data = module_memory.read(0, header_size as u64)?;
         let (_, ctx) = mach::parse_magic_and_ctx(&header_data, 0)?;

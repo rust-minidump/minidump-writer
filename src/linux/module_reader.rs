@@ -1,12 +1,16 @@
 use {
-    super::serializers::*,
-    crate::module_reader::{ModuleMemory, ModuleMemoryReadError},
+    super::{process_inspection::ProcessInspector, serializers::*},
+    crate::module_reader::{ModuleMemoryReadError, ProcessModuleMemoryReader},
     crate::{minidump_format::GUID, serializers::*},
     goblin::{
         container::{Container, Ctx, Endian},
         elf,
     },
-    std::{borrow::Cow, ffi::CStr},
+    std::{
+        borrow::Cow,
+        ffi::{CStr, OsString},
+        path::Path,
+    },
 };
 
 type Error = ModuleReaderError;
@@ -70,12 +74,28 @@ pub enum ModuleReaderError {
         program_headers: Box<Self>,
         section: Box<Self>,
     },
-}
-
-impl crate::module_reader::ModuleMemory<'_> {
-    pub fn read_from_module<T: ReadFromModule>(self) -> Result<T, Error> {
-        T::read_from_module(self)
-    }
+    #[error("Not safe to open mapping {}", .0.to_string_lossy())]
+    NotSafeToOpenMapping(OsString),
+    #[error("Mmapped file empty or not an ELF file")]
+    MmapSanityCheckFailed,
+    #[error("Linux gate location doesn't fit in the required integer type")]
+    LinuxGateNotConvertable(
+        #[source]
+        #[serde(skip)]
+        std::num::TryFromIntError,
+    ),
+    #[error("IO Error")]
+    FileError(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
+    #[error("failed to map file")]
+    MapError(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
 }
 
 #[inline]
@@ -105,11 +125,11 @@ fn build_id_from_bytes(data: &[u8]) -> Vec<u8> {
 }
 
 // `name` should be null-terminated
-fn section_header_with_name<'sc>(
+fn section_header_with_name<'sc, MM: ReadModuleMemory>(
     section_headers: &'sc elf::SectionHeaders,
     strtab_index: usize,
     name: &[u8],
-    module_memory: &ModuleMemory<'_>,
+    module_memory: &MM,
 ) -> Result<Option<&'sc elf::SectionHeader>, Error> {
     let strtab_section_header = section_headers
         .get(strtab_index)
@@ -134,46 +154,73 @@ fn section_header_with_name<'sc>(
     Ok(None)
 }
 
-/// Types which can be read from ModuleMemory.
-pub trait ReadFromModule: Sized {
-    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error>;
-
-    fn read_from_file(path: &std::path::Path) -> Result<Self, Error> {
-        let map = std::fs::File::open(path)
-            // Safety: the file is an executable binary (very likely read-only), and won't be changed.
-            .and_then(|file| unsafe { memmap2::Mmap::map(&file) })
-            .map_err(|error| Error::MapFile {
-                path: path.to_owned(),
-                error,
-            })?;
-        Self::read_from_module(ModuleMemory::Slice(&map))
-    }
+pub fn read_build_id_from_file(
+    process_inspector: &ProcessInspector,
+    path: &Path,
+) -> Result<Vec<u8>, Error> {
+    let module_memory_reader = process_inspector.read_memory_mapped_module(path, 0)?;
+    read_build_id_from_module(module_memory_reader)
 }
 
-/// The module build id.
-pub struct BuildId(pub Vec<u8>);
+pub fn read_build_id_from_module(module_memory: impl ReadModuleMemory) -> Result<Vec<u8>, Error> {
+    let reader = ModuleReader::new(module_memory)?;
+    let program_headers = match reader.build_id_from_program_headers() {
+        Ok(v) => return Ok(v),
+        Err(e) => Box::new(e),
+    };
+    let section = match reader.build_id_from_section() {
+        Ok(v) => return Ok(v),
+        Err(e) => Box::new(e),
+    };
+    let generated = match reader.build_id_generate_from_text() {
+        Ok(v) => return Ok(v),
+        Err(e) => Box::new(e),
+    };
+    Err(Error::NoBuildId {
+        program_headers,
+        section,
+        generated,
+    })
+}
 
-impl ReadFromModule for BuildId {
-    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
-        let reader = ModuleReader::new(module_memory)?;
-        let program_headers = match reader.build_id_from_program_headers() {
-            Ok(v) => return Ok(BuildId(v)),
-            Err(e) => Box::new(e),
-        };
-        let section = match reader.build_id_from_section() {
-            Ok(v) => return Ok(BuildId(v)),
-            Err(e) => Box::new(e),
-        };
-        let generated = match reader.build_id_generate_from_text() {
-            Ok(v) => return Ok(BuildId(v)),
-            Err(e) => Box::new(e),
-        };
-        Err(Error::NoBuildId {
-            program_headers,
-            section,
-            generated,
-        })
+pub fn read_soname_from_file(
+    process_inspector: &ProcessInspector,
+    path: &Path,
+    offset: usize,
+) -> Result<String, Error> {
+    let offset = u64::try_from(offset).map_err(Error::LinuxGateNotConvertable)?;
+
+    // It is unsafe to attempt to open a mapped file that lives under /dev,
+    // because the semantics of the open may be driver-specific so we'd risk
+    // hanging the crash dumper. And a file in /dev/ almost certainly has no
+    // ELF file identifier anyways.
+    if path.starts_with("/dev/") {
+        return Err(Error::NotSafeToOpenMapping(path.as_os_str().to_os_string()));
     }
+
+    let module_memory_reader = process_inspector.read_memory_mapped_module(path, offset)?;
+
+    if module_memory_reader.is_empty() || module_memory_reader.len() < elf::header::SELFMAG {
+        return Err(Error::MmapSanityCheckFailed);
+    }
+
+    read_soname_from_module(module_memory_reader)
+}
+
+pub fn read_soname_from_module(module_memory: impl ReadModuleMemory) -> Result<String, Error> {
+    let reader = ModuleReader::new(module_memory)?;
+    let program_headers = match reader.soname_from_program_headers() {
+        Ok(v) => return Ok(v),
+        Err(e) => Box::new(e),
+    };
+    let section = match reader.soname_from_sections() {
+        Ok(v) => return Ok(v),
+        Err(e) => Box::new(e),
+    };
+    Err(Error::NoSoName {
+        program_headers,
+        section,
+    })
 }
 
 struct DynIter<'a> {
@@ -209,36 +256,14 @@ impl Iterator for DynIter<'_> {
     }
 }
 
-/// The module SONAME.
-#[derive(Default, Clone, Debug)]
-pub struct SoName(pub String);
-
-impl ReadFromModule for SoName {
-    fn read_from_module(module_memory: ModuleMemory<'_>) -> Result<Self, Error> {
-        let reader = ModuleReader::new(module_memory)?;
-        let program_headers = match reader.soname_from_program_headers() {
-            Ok(v) => return Ok(SoName(v)),
-            Err(e) => Box::new(e),
-        };
-        let section = match reader.soname_from_sections() {
-            Ok(v) => return Ok(SoName(v)),
-            Err(e) => Box::new(e),
-        };
-        Err(Error::NoSoName {
-            program_headers,
-            section,
-        })
-    }
-}
-
-pub struct ModuleReader<'buf> {
-    module_memory: ModuleMemory<'buf>,
+pub struct ModuleReader<MM> {
+    module_memory: MM,
     header: elf::Header,
     context: Ctx,
 }
 
-impl<'buf> ModuleReader<'buf> {
-    pub fn new(module_memory: ModuleMemory<'buf>) -> Result<Self, Error> {
+impl<MM: ReadModuleMemory> ModuleReader<MM> {
+    pub fn new(module_memory: MM) -> Result<ModuleReader<MM>, Error> {
         // We could use `Ctx::default()` (which defaults to the native system), however to be extra
         // permissive we'll just use a 64-bit ("Big") context which would result in the largest
         // possible header size.
@@ -428,7 +453,7 @@ impl<'buf> ModuleReader<'buf> {
         Ok(build_id_from_bytes(&text_data))
     }
 
-    fn read_segment(&self, header: &elf::ProgramHeader) -> Result<Cow<'buf, [u8]>, Error> {
+    fn read_segment<'a>(&'a self, header: &elf::ProgramHeader) -> Result<Cow<'a, [u8]>, Error> {
         let (offset, size) = if self.module_memory.is_process_memory() {
             (header.p_vaddr, header.p_memsz)
         } else {
@@ -543,6 +568,31 @@ impl<'buf> ModuleReader<'buf> {
     }
 }
 
+pub trait ReadModuleMemory {
+    fn read<'a>(&'a self, offset: u64, length: u64)
+    -> Result<Cow<'a, [u8]>, ModuleMemoryReadError>;
+    fn absolute_to_relative(&self, addr: u64) -> Option<u64>;
+    /// Calculates the absolute address of the specified relative address
+    fn relative_to_absolute(&self, addr: u64) -> Option<u64>;
+    fn is_process_memory(&self) -> bool;
+}
+
+impl<'a> ReadModuleMemory for ProcessModuleMemoryReader<'a> {
+    fn read(&self, offset: u64, length: u64) -> Result<Cow<'a, [u8]>, ModuleMemoryReadError> {
+        self.read(offset, length)
+    }
+    fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
+        addr.checked_sub(self.start_address)
+    }
+    /// Calculates the absolute address of the specified relative address
+    fn relative_to_absolute(&self, addr: u64) -> Option<u64> {
+        self.start_address.checked_add(addr)
+    }
+    fn is_process_memory(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -621,7 +671,7 @@ mod test {
 
     #[test]
     fn build_id_program_headers() {
-        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let reader = ModuleReader::new(SliceModuleMemoryReader(TINY_ELF)).unwrap();
         let id = reader.build_id_from_program_headers().unwrap();
         assert_eq!(
             id,
@@ -631,7 +681,7 @@ mod test {
 
     #[test]
     fn build_id_section() {
-        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let reader = ModuleReader::new(SliceModuleMemoryReader(TINY_ELF)).unwrap();
         let id = reader.build_id_from_section().unwrap();
         assert_eq!(
             id,
@@ -641,7 +691,7 @@ mod test {
 
     #[test]
     fn build_id_text_hash() {
-        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let reader = ModuleReader::new(SliceModuleMemoryReader(TINY_ELF)).unwrap();
         let id = reader.build_id_generate_from_text().unwrap();
         assert_eq!(
             id,
@@ -653,15 +703,53 @@ mod test {
 
     #[test]
     fn soname_program_headers() {
-        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let reader = ModuleReader::new(SliceModuleMemoryReader(TINY_ELF)).unwrap();
         let soname = reader.soname_from_program_headers().unwrap();
         assert_eq!(soname, "libfoo.so.1");
     }
 
     #[test]
     fn soname_section() {
-        let reader = ModuleReader::new(TINY_ELF.into()).unwrap();
+        let reader = ModuleReader::new(SliceModuleMemoryReader(TINY_ELF)).unwrap();
         let soname = reader.soname_from_sections().unwrap();
         assert_eq!(soname, "libfoo.so.1");
+    }
+
+    pub struct SliceModuleMemoryReader<'a>(pub &'a [u8]);
+
+    impl<'a> ReadModuleMemory for SliceModuleMemoryReader<'a> {
+        fn read<'b>(
+            &'b self,
+            offset: u64,
+            length: u64,
+        ) -> Result<Cow<'b, [u8]>, ModuleMemoryReadError> {
+            let inner = || {
+                use crate::module_reader::ReadError as E;
+                let offset = usize::try_from(offset).map_err(|_| E::Overflow)?;
+                let length = usize::try_from(length).map_err(|_| E::Overflow)?;
+                let end = offset.checked_add(length).ok_or(E::Overflow)?;
+                self.0
+                    .get(offset..end)
+                    .map(Cow::Borrowed)
+                    .ok_or(E::OutOfBounds)
+            };
+
+            inner().map_err(|error| ModuleMemoryReadError {
+                start_address: None,
+                offset,
+                length,
+                error,
+            })
+        }
+        fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
+            Some(addr)
+        }
+        /// Calculates the absolute address of the specified relative address
+        fn relative_to_absolute(&self, addr: u64) -> Option<u64> {
+            Some(addr)
+        }
+        fn is_process_memory(&self) -> bool {
+            false
+        }
     }
 }

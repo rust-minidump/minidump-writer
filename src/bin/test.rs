@@ -12,7 +12,6 @@ mod linux {
         minidump_writer::{
             LINUX_GATE_LIBRARY_NAME,
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
-            module_reader,
         },
         nix::{
             sys::mman::{MapFlags, ProtFlags, mmap_anonymous},
@@ -191,7 +190,7 @@ mod linux {
             }
         }
         let idx = found_exe.unwrap();
-        let module_reader::BuildId(id) = dumper.from_process_memory_for_index(idx)?;
+        let id = dumper.build_id_from_process_memory_for_index(idx)?;
 
         drop(dumper);
 
@@ -228,19 +227,17 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid().as_raw();
-        let dumper = fail_on_soft_error!(
+        let mut dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         let mut found_linux_gate = false;
-        for mapping in dumper.mappings.clone() {
-            if mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
+        for idx in 0..dumper.mappings.len() {
+            if dumper.mappings[idx].name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
                 found_linux_gate = true;
 
-                let module_reader::BuildId(id) = MinidumpWriter::from_process_memory_for_mapping(
-                    &dumper.process_inspector,
-                    &mapping,
-                )?;
+                let id = dumper.build_id_from_process_memory_for_index(idx)?;
+
                 test!(!id.is_empty(), "id-vec is empty");
                 test!(id.iter().any(|&x| x > 0), "all id elements are 0");
                 drop(dumper);

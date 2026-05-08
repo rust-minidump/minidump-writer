@@ -1,11 +1,7 @@
 use {
-    super::{Pid, maps_reader::MappingInfo, serializers::*},
-    crate::module_reader::ModuleMemory,
+    super::{Pid, serializers::*},
     std::sync::OnceLock,
 };
-
-#[cfg(target_os = "android")]
-use super::super::module_reader::SoName;
 
 #[derive(Debug)]
 enum Style {
@@ -232,33 +228,5 @@ impl ProcessReader {
         }
 
         Ok(dst.len())
-    }
-
-    /// Find the address at which a module with the given name is loaded in the process.
-    pub fn find_module(&self, module_name: &str) -> Result<ModuleMemory<'_>, FindModuleError> {
-        MappingInfo::for_pid(self.pid.as_raw(), None)?
-            .into_iter()
-            .find_map(|m| {
-                let mmem = ModuleMemory::from_process(self, m.start_address);
-                let name = m.name.as_ref().and_then(|s| s.to_str())?;
-                if name == module_name {
-                    return Some(mmem);
-                }
-                // Check whether the SO_NAME matches the module name.
-                //
-                // For now, only check the SO_NAME of Android APKS, because libraries may be mapped
-                // directly from within an APK. See bug 1982902.
-                #[cfg(target_os = "android")]
-                if name.ends_with(".apk") {
-                    if let Ok(SoName(so_name)) = mmem.read_from_module() {
-                        if so_name == name {
-                            return Some(mmem);
-                        }
-                    }
-                }
-
-                None
-            })
-            .ok_or(FindModuleError::ModuleNotFound)
     }
 }

@@ -2,14 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::module_reader::ModuleMemory;
-use mach2::{
-    kern_return::KERN_SUCCESS,
-    task::task_info,
-    task_info::{TASK_DYLD_ALL_IMAGE_INFO_64, TASK_DYLD_INFO, task_dyld_info},
-    vm::mach_vm_read_overwrite,
+use {
+    crate::module_reader::ProcessModuleMemoryReader,
+    mach2::{
+        kern_return::KERN_SUCCESS,
+        task::task_info,
+        task_info::{TASK_DYLD_ALL_IMAGE_INFO_64, TASK_DYLD_INFO, task_dyld_info},
+        vm::mach_vm_read_overwrite,
+    },
+    std::mem::{MaybeUninit, size_of},
 };
-use std::mem::{MaybeUninit, size_of};
 
 pub type ProcessHandle = mach2::mach_types::task_t;
 
@@ -100,7 +102,10 @@ impl ProcessReader {
         }
     }
 
-    pub fn find_module(&self, module_name: &str) -> Result<ModuleMemory<'_>, FindModuleError> {
+    pub fn find_module(
+        &self,
+        module_name: &str,
+    ) -> Result<ProcessModuleMemoryReader<'_>, FindModuleError> {
         let dyld_info = self.task_info()?;
         if (dyld_info.all_image_info_format as u32) != TASK_DYLD_ALL_IMAGE_INFO_64 {
             return Err(FindModuleError::ImageFormatInvalid);
@@ -143,7 +148,7 @@ impl ProcessReader {
                     false
                 }
             })
-            .map(|image| ModuleMemory::from_process(self, image.load_address as usize))
+            .map(|image| ProcessModuleMemoryReader::new(self, image.load_address as usize))
             .ok_or(FindModuleError::ModuleNotFound)
     }
 

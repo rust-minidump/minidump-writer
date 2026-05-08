@@ -11,7 +11,7 @@ use {
         crash_context::CrashContext,
         maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
-        module_reader::{BuildId, ReadFromModule},
+        module_reader::{self},
     },
     nix::{errno::Errno, sys::signal::Signal},
     procfs_core::process::MMPermissions,
@@ -724,8 +724,9 @@ fn with_deleted_binary() {
 
     let pid = child.id() as i32;
 
-    let BuildId(mut build_id) =
-        BuildId::read_from_module(mem_slice.as_slice().into()).expect("Failed to get build_id");
+    let mut build_id =
+        module_reader::read_build_id_from_module(SliceModuleMemoryReader(mem_slice.as_slice()))
+            .expect("Failed to get build_id");
 
     std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
 

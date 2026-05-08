@@ -733,8 +733,12 @@ impl MinidumpWriter {
         // case its entry when creating the list of mappings.
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
-        self.mappings = MappingInfo::for_pid(self.process_id, self.auxv.get_linux_gate_address())
-            .map_err(InitError::AggregateMappingsFailed)?;
+        self.mappings = MappingInfo::for_pid(
+            &self.process_inspector,
+            self.process_id,
+            self.auxv.get_linux_gate_address(),
+        )
+        .map_err(InitError::AggregateMappingsFailed)?;
 
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
@@ -945,23 +949,28 @@ impl MinidumpWriter {
         })
     }
 
-    pub fn from_process_memory_for_index<T: module_reader::ReadFromModule>(
+    pub fn build_id_from_process_memory_for_index(
         &mut self,
         idx: usize,
-    ) -> Result<T, WriterError> {
-        assert!(idx < self.mappings.len());
-
-        Self::from_process_memory_for_mapping(&self.process_inspector, &self.mappings[idx])
+    ) -> Result<Vec<u8>, WriterError> {
+        let reader = self.process_inspector.process_reader();
+        module_reader::read_build_id_from_module(module_reader::ProcessModuleMemoryReader::new(
+            reader,
+            self.mappings[idx].start_address,
+        ))
+        .map_err(WriterError::ModuleReaderError)
     }
 
-    pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
-        process_inspector: &ProcessInspector,
-        mapping: &MappingInfo,
-    ) -> Result<T, WriterError> {
-        let reader = process_inspector.process_reader();
-        Ok(T::read_from_module(
-            module_reader::ModuleMemory::from_process(reader, mapping.start_address),
-        )?)
+    pub fn soname_from_process_memory_for_index(
+        &mut self,
+        idx: usize,
+    ) -> Result<String, WriterError> {
+        let reader = self.process_inspector.process_reader();
+        module_reader::read_soname_from_module(module_reader::ProcessModuleMemoryReader::new(
+            reader,
+            self.mappings[idx].start_address,
+        ))
+        .map_err(WriterError::ModuleReaderError)
     }
 
     /// Copies a block of bytes from the target process, returning the heap
