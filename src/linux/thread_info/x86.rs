@@ -368,14 +368,13 @@ fn ptrace_peekuser(pid: libc::pid_t, addr: usize) -> Result<[u8; mem::size_of::<
 
 #[cfg(target_arch = "x86_64")]
 pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
-    // SAFETY: We are copying a block of memory from ptrace as u32s to the u128
-    // format of minidump-common
+    assert_eq!(mem::size_of_val(src), mem::size_of_val(dst));
+    // SAFETY: All bit patterns are valid for both types
     unsafe {
-        let dst: &mut [u8] =
-            std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast(), dst.len() * 16);
-        let src: &[u8] = std::slice::from_raw_parts(src.as_ptr().cast(), src.len() * 4);
-
-        let to_copy = std::cmp::min(dst.len(), src.len());
-        dst[..to_copy].copy_from_slice(&src[..to_copy]);
+        std::ptr::copy_nonoverlapping(
+            src.as_ptr().cast::<u8>(),
+            dst.as_mut_ptr().cast::<u8>(),
+            mem::size_of_val(src),
+        );
     }
 }
