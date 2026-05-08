@@ -23,11 +23,6 @@ cfg_if::cfg_if! {
         pub use format::X86CpuInfo as MDCPUInformation;
     } else if #[cfg(any(target_arch = "arm", target_arch = "aarch64"))] {
         pub use format::ARMCpuInfo as MDCPUInformation;
-    } else if #[cfg(target_arch = "mips")] {
-        pub struct MDCPUInformation {
-            pub cpuid: [u64; 2],
-            _padding: [u32; 2],
-        }
     }
 }
 

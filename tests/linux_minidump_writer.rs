@@ -35,7 +35,6 @@ enum Context {
 impl Context {
     pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
         let mut mw = MinidumpWriterConfig::new(pid, pid);
-        #[cfg(not(target_arch = "mips"))]
         if self == &Context::With {
             let crash_context = get_crash_context(pid);
             mw.set_crash_context(crash_context);
@@ -44,7 +43,6 @@ impl Context {
     }
 }
 
-#[cfg(not(target_arch = "mips"))]
 fn get_ucontext() -> Result<crash_context::ucontext_t> {
     let mut context = std::mem::MaybeUninit::uninit();
     unsafe {
@@ -55,7 +53,6 @@ fn get_ucontext() -> Result<crash_context::ucontext_t> {
     }
 }
 
-#[cfg(not(target_arch = "mips"))]
 fn get_crash_context(tid: Pid) -> CrashContext {
     let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
@@ -86,7 +83,6 @@ macro_rules! contextual_test {
                 test(Context::Without)
             }
 
-            #[cfg(not(target_arch = "mips"))]
             #[test]
             $(#[$attr])?
             fn with_context() {
