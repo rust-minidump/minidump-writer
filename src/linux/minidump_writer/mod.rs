@@ -519,8 +519,7 @@ impl MinidumpWriter {
 
     /// Suspends a thread by attaching to it.
     fn suspend_thread(
-        #[allow(unused)] // TODO
-        process_inspector: &ProcessInspector,
+        _process_inspector: &ProcessInspector,
         child: Pid,
     ) -> Result<(), WriterError> {
         use WriterError::PtraceAttachError as AttachErr;
@@ -568,7 +567,7 @@ impl MinidumpWriter {
             // We thus test the stack pointer and exclude any threads that are part of
             // the seccomp sandbox's trusted code.
             let skip_thread;
-            let regs = process_inspector.get_gen_regs(pid.into());
+            let regs = _process_inspector.get_gen_regs(pid.into());
             if let Ok(regs) = regs {
                 #[cfg(target_arch = "x86_64")]
                 {
@@ -764,11 +763,7 @@ impl MinidumpWriter {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        ThreadInfo::create(
-            &self.process_inspector,
-            self.process_id,
-            self.threads[index].tid,
-        )
+        ThreadInfo::create(&self.process_inspector, self.threads[index].tid)
     }
 
     // Returns a valid stack pointer and the mapping that contains the stack.

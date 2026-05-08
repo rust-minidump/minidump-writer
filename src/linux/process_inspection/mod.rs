@@ -108,11 +108,11 @@ fn getfpregs(_pid: libc::pid_t) -> nix::Result<FpRegs> {
 
 /// Safety: RequestType and T must agree on the size of the returned type
 unsafe fn ptrace_getregs<T>(request: PtraceRequestType, pid: libc::pid_t) -> nix::Result<T> {
-    let mut output = mem::MaybeUninit::uninit();
+    let mut output = mem::MaybeUninit::<T>::uninit();
 
     // Since ptrace() is vararg, best to explicitly state arg types
     let addr: *mut c_void = core::ptr::null_mut();
-    let data: *mut c_void = (&raw mut output).cast();
+    let data: *mut c_void = output.as_mut_ptr().cast();
     let res = unsafe { libc::ptrace(request, pid, addr, data) };
     Errno::result(res)?;
     Ok(unsafe { output.assume_init() })

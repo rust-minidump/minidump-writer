@@ -34,11 +34,7 @@ impl ThreadInfoAarch64 {
         out.float_regs[..FP_REG_COUNT].copy_from_slice(&self.fpregs.vregs[..FP_REG_COUNT]);
     }
 
-    pub fn create(
-        process_inspector: &ProcessInspector,
-        _pid: Pid,
-        tid: Pid,
-    ) -> Result<Self, ThreadInfoError> {
+    pub fn create(process_inspector: &ProcessInspector, tid: Pid) -> Result<Self, ThreadInfoError> {
         let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
         let regs = process_inspector
             .get_gen_regs(tid)

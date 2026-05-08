@@ -27,11 +27,7 @@ impl ThreadInfoArm {
         out.float_save.regs = self.fpregs.fpregs;
     }
 
-    pub fn create(
-        process_inspector: &ProcessInspector,
-        _pid: Pid,
-        tid: Pid,
-    ) -> Result<Self, ThreadInfoError> {
+    pub fn create(process_inspector: &ProcessInspector, tid: Pid) -> Result<Self, ThreadInfoError> {
         let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
         let regs = process_inspector
             .get_gen_regs(tid)
