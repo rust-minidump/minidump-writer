@@ -39,11 +39,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     ];
 
     // processor_architecture should always be set, do this first
-    sys_info.processor_architecture = if cfg!(target_arch = "mips") {
-        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS
-    } else if cfg!(target_arch = "mips64") {
-        MDCPUArchitecture::PROCESSOR_ARCHITECTURE_MIPS64
-    } else if cfg!(target_arch = "x86") {
+    sys_info.processor_architecture = if cfg!(target_arch = "x86") {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_INTEL
     } else {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64

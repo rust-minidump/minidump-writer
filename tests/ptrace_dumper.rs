@@ -139,8 +139,6 @@ fn thread_list_from_parent() {
         let process_tid_location = info.regs.uregs[3];
         #[cfg(target_arch = "aarch64")]
         let process_tid_location = info.regs.regs[3];
-        #[cfg(target_arch = "mips")]
-        let process_tid_location = info.mcontext.gregs[1];
 
         let thread_id_data = PtraceDumper::copy_from_process(
             *curr_thread,
@@ -175,7 +173,7 @@ fn thread_list_from_parent() {
     // assert_eq!(matching_threads, num_of_threads);
 }
 
-#[cfg(not(any(target_arch = "mips", target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn mappings_include_linux_gate() {
@@ -376,8 +374,6 @@ fn sanitizes_stack_copies() {
     // let heap_addr = thread_info.regs.uregs[3] as usize;
     // #[cfg(target_arch = "aarch64")]
     // let heap_addr = thread_info.regs.regs[3] as usize;
-    // #[cfg(target_arch = "mips")]
-    // let heap_addr = thread_info.mcontext.gregs[1] as usize;
 
     simulated_stack = vec![0u8; 2 * size_of::<usize>()];
 
