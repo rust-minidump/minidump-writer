@@ -7,8 +7,7 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
-        process_inspection::ProcessInspector,
-        process_reader::{CopyFromProcessError, ProcessReader},
+        process_inspection::{ProcessInspector, process_reader::CopyFromProcessError},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
     },
@@ -104,7 +103,7 @@ pub struct MinidumpWriter {
     pub crash_context: Option<CrashContext>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
-    process_inspector: ProcessInspector,
+    pub process_inspector: ProcessInspector,
 }
 
 #[derive(Debug, Clone)]
@@ -138,7 +137,7 @@ impl MinidumpWriterConfig {
             crashing_thread_context: Default::default(),
             stop_timeout: STOP_TIMEOUT,
             direct_auxv_dump_info: Default::default(),
-            process_inspector: ProcessInspector::local(),
+            process_inspector: ProcessInspector::local(process_id),
         }
     }
 
@@ -298,7 +297,7 @@ impl MinidumpWriter {
 
         #[cfg(target_os = "android")]
         {
-            late_process_mappings(self.process_id, &mut self.mappings)?;
+            late_process_mappings(&self.process_inspector, self.process_id, &mut self.mappings)?;
         }
 
         if self.skip_stacks_if_mapping_unreferenced {
@@ -427,7 +426,12 @@ impl MinidumpWriter {
         file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
         file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
-        let dirent = match dso_debug::write_dso_debug_stream(buffer, self.process_id, &self.auxv) {
+        let dirent = match dso_debug::write_dso_debug_stream(
+            &self.process_inspector,
+            buffer,
+            self.process_id,
+            &self.auxv,
+        ) {
             Ok(dirent) => dirent,
             Err(e) => {
                 soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
@@ -500,6 +504,7 @@ impl MinidumpWriter {
         };
 
         let stack_copy = match MinidumpWriter::copy_from_process(
+            &self.process_inspector,
             self.blamed_thread,
             valid_stack_pointer,
             stack_len,
@@ -946,16 +951,16 @@ impl MinidumpWriter {
     ) -> Result<T, WriterError> {
         assert!(idx < self.mappings.len());
 
-        Self::from_process_memory_for_mapping(&self.mappings[idx], self.process_id)
+        Self::from_process_memory_for_mapping(&self.process_inspector, &self.mappings[idx])
     }
 
     pub fn from_process_memory_for_mapping<T: module_reader::ReadFromModule>(
+        process_inspector: &ProcessInspector,
         mapping: &MappingInfo,
-        pid: Pid,
     ) -> Result<T, WriterError> {
-        let reader = ProcessReader::new(pid);
+        let reader = process_inspector.process_reader();
         Ok(T::read_from_module(
-            module_reader::ModuleMemory::from_process(&reader, mapping.start_address),
+            module_reader::ModuleMemory::from_process(reader, mapping.start_address),
         )?)
     }
 
@@ -963,6 +968,7 @@ impl MinidumpWriter {
     /// allocated copy
     #[inline]
     pub fn copy_from_process(
+        process_inspector: &ProcessInspector,
         pid: Pid,
         src: usize,
         length: usize,
@@ -978,7 +984,7 @@ impl MinidumpWriter {
             source: nix::errno::Errno::EINVAL,
         })?;
 
-        let mem = ProcessReader::new(pid);
+        let mem = process_inspector.process_reader();
         mem.read_to_vec(src, length)
     }
 }

@@ -5,9 +5,7 @@ use {
 };
 
 #[cfg(target_os = "android")]
-use super::module_reader::SoName;
-
-pub type ProcessHandle = libc::pid_t;
+use super::super::module_reader::SoName;
 
 #[derive(Debug)]
 enum Style {
@@ -84,7 +82,7 @@ impl ProcessReader {
     /// Creates a [`Self`] for the specified process id, the method used will
     /// be probed for on the first access
     #[inline]
-    pub fn new(pid: ProcessHandle) -> Self {
+    pub(super) fn new(pid: libc::pid_t) -> Self {
         Self {
             pid: nix::unistd::Pid::from_raw(pid),
             style: OnceLock::default(),
@@ -93,7 +91,7 @@ impl ProcessReader {
 
     #[inline]
     #[doc(hidden)]
-    pub fn for_virtual_mem(pid: i32) -> Self {
+    pub(super) fn for_virtual_mem(pid: libc::pid_t) -> Self {
         Self {
             pid: nix::unistd::Pid::from_raw(pid),
             style: OnceLock::from(Style::VirtualMem),
@@ -102,7 +100,7 @@ impl ProcessReader {
 
     #[inline]
     #[doc(hidden)]
-    pub fn for_file(pid: i32) -> std::io::Result<Self> {
+    pub(super) fn for_file(pid: libc::pid_t) -> std::io::Result<Self> {
         let file = std::fs::File::open(format!("/proc/{pid}/mem"))?;
 
         Ok(Self {
@@ -113,7 +111,7 @@ impl ProcessReader {
 
     #[inline]
     #[doc(hidden)]
-    pub fn for_ptrace(pid: i32) -> Self {
+    pub(super) fn for_ptrace(pid: libc::pid_t) -> Self {
         Self {
             pid: nix::unistd::Pid::from_raw(pid),
             style: OnceLock::from(Style::Ptrace),
