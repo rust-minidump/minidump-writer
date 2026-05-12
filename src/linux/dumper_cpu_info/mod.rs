@@ -1,4 +1,5 @@
 use {
+    super::process_inspection::ProcessInspector,
     crate::{minidump_format::PlatformId, serializers::*},
     nix::sys::utsname::uname,
 };

@@ -1,11 +1,8 @@
 use {
-    super::CpuInfoError,
+    super::{CpuInfoError, ProcessInspector},
     crate::minidump_format::*,
     failspot::failspot,
-    std::{
-        io::{BufRead, BufReader},
-        path,
-    },
+    std::io::{BufRead, BufReader},
 };
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
@@ -26,7 +23,10 @@ impl CpuInfoEntry {
     }
 }
 
-pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
+pub fn write_cpu_information(
+    process_inspector: &ProcessInspector,
+    sys_info: &mut MDRawSystemInfo,
+) -> Result<()> {
     let vendor_id_name = "vendor_id";
     let mut cpu_info_table = [
         CpuInfoEntry::new("processor", -1, false),
@@ -50,7 +50,7 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
         bail(std::io::Error::other("test requested cpuinfo file failure"))
     );
 
-    let cpuinfo_file = std::fs::File::open(path::PathBuf::from("/proc/cpuinfo"))?;
+    let cpuinfo_file = process_inspector.read_file("/proc/cpuinfo")?;
 
     let mut vendor_id = String::new();
     for line in BufReader::new(cpuinfo_file).lines() {
