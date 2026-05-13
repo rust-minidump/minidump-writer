@@ -1,8 +1,8 @@
 use {
-    super::{CommonThreadInfo, NT_Elf, Pid, ThreadInfoError},
+    super::{Pid, PtraceRequestType, ThreadInfoError},
     crate::{minidump_cpu::RawContextCPU, minidump_format::format},
-    core::mem::size_of_val,
-    nix::sys::ptrace,
+    core::mem,
+    nix::errno::Errno,
     scroll::Pwrite,
 };
 
@@ -12,6 +12,12 @@ use libc::user_fpxregs_struct;
 use libc::{user, user_fpregs_struct, user_regs_struct};
 
 type Result<T> = std::result::Result<T, ThreadInfoError>;
+
+#[cfg(target_arch = "x86")]
+type RegType = u32;
+
+#[cfg(target_arch = "x86_64")]
+type RegType = u64;
 
 // Not defined by libc on Android
 #[cfg(all(target_os = "android", target_arch = "x86"))]
@@ -101,107 +107,59 @@ pub struct ThreadInfoX86 {
     pub ppid: Pid, // parent process
     pub regs: user_regs_struct,
     pub fpregs: user_fpregs_struct,
-    #[cfg(target_arch = "x86_64")]
-    pub dregs: [libc::c_ulonglong; NUM_DEBUG_REGISTERS],
-    #[cfg(target_arch = "x86")]
-    pub dregs: [libc::c_int; NUM_DEBUG_REGISTERS],
+    pub dregs: [RegType; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
     pub fpxregs: user_fpxregs_struct,
 }
 
-impl CommonThreadInfo for ThreadInfoX86 {}
-
 impl ThreadInfoX86 {
-    // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
     fn getregset(pid: Pid) -> Result<user_regs_struct> {
-        Self::ptrace_get_data_via_io(
-            0x4204 as ptrace::RequestType, // PTRACE_GETREGSET
-            Some(NT_Elf::NT_PRSTATUS),
-            nix::unistd::Pid::from_raw(pid),
-        )
+        const NT_PRSTATUS: usize = 1;
+        super::ptrace_getregset(NT_PRSTATUS, pid)
     }
 
     pub fn getregs(pid: Pid) -> Result<user_regs_struct> {
-        // TODO: nix restricts PTRACE_GETREGS to arm android for some reason
-        Self::ptrace_get_data(
-            12 as ptrace::RequestType, // PTRACE_GETREGS
-            None,
-            nix::unistd::Pid::from_raw(pid),
-        )
+        const PTRACE_GETREGS: PtraceRequestType = 12;
+        unsafe { super::ptrace_getregs::<user_regs_struct>(PTRACE_GETREGS, pid) }
     }
 
-    // nix currently doesn't support PTRACE_GETREGSET, so we have to do it ourselves
     fn getfpregset(pid: Pid) -> Result<user_fpregs_struct> {
-        Self::ptrace_get_data_via_io(
-            0x4204 as ptrace::RequestType, // PTRACE_GETREGSET
-            Some(NT_Elf::NT_PRFPREGSET),
-            nix::unistd::Pid::from_raw(pid),
-        )
+        const NT_PRFPREGSET: usize = 2;
+        super::ptrace_getregset(NT_PRFPREGSET, pid)
     }
 
-    // nix currently doesn't support PTRACE_GETFPREGS, so we have to do it ourselves
     fn getfpregs(pid: Pid) -> Result<user_fpregs_struct> {
-        Self::ptrace_get_data(
-            14 as ptrace::RequestType, // PTRACE_GETFPREGS
-            None,
-            nix::unistd::Pid::from_raw(pid),
-        )
+        const PTRACE_GETFPREGS: PtraceRequestType = 14;
+        unsafe { super::ptrace_getregs::<user_fpregs_struct>(PTRACE_GETFPREGS, pid) }
     }
 
-    // nix currently doesn't support PTRACE_GETFPXREGS, so we have to do it ourselves
     #[cfg(target_arch = "x86")]
     fn getfpxregs(pid: Pid) -> Result<user_fpxregs_struct> {
-        Self::ptrace_get_data(
-            18 as ptrace::RequestType, // PTRACE_GETFPXREGS
-            None,
-            nix::unistd::Pid::from_raw(pid),
-        )
+        const PTRACE_GETFPXREGS: PtraceRequestType = 18;
+        unsafe { super::ptrace_getregs::<user_fpxregs_struct>(PTRACE_GETFPXREGS, pid) }
     }
 
-    fn peek_user(pid: Pid, addr: ptrace::AddressType) -> nix::Result<libc::c_long> {
-        Self::ptrace_peek(
-            ptrace::Request::PTRACE_PEEKUSER as ptrace::RequestType,
-            nix::unistd::Pid::from_raw(pid),
-            addr,
-            std::ptr::null_mut(),
-        )
-    }
-
-    pub fn create_impl(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = Self::get_ppid_and_tgid(tid)?;
+    pub fn create(_pid: Pid, tid: Pid) -> Result<Self> {
+        let (ppid, tgid) = super::get_ppid_and_tgid(tid)?;
         let regs = Self::getregset(tid).or_else(|_| Self::getregs(tid))?;
         let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
+
         #[cfg(target_arch = "x86")]
-        let fpxregs: user_fpxregs_struct;
-        #[cfg(target_arch = "x86")]
-        {
+        let fpxregs = {
             if cfg!(target_feature = "fxsr") {
-                fpxregs = Self::getfpxregs(tid)?;
+                Self::getfpxregs(tid)?
             } else {
-                fpxregs = unsafe { std::mem::zeroed() };
+                unsafe { mem::zeroed() }
             }
-        }
+        };
 
-        #[cfg(target_arch = "x86_64")]
-        let mut dregs: [libc::c_ulonglong; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
-        #[cfg(target_arch = "x86")]
-        let mut dregs: [libc::c_int; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
+        let mut dregs: [RegType; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
 
-        let debug_offset = std::mem::offset_of!(user, u_debugreg);
-        let elem_offset = size_of_val(&dregs[0]);
+        let debug_offset = mem::offset_of!(user, u_debugreg);
         for (idx, dreg) in dregs.iter_mut().enumerate() {
-            let chunk = Self::peek_user(
-                tid,
-                (debug_offset + idx * elem_offset) as ptrace::AddressType,
-            )?;
-            #[cfg(target_arch = "x86_64")]
-            {
-                *dreg = chunk as u64; // libc / ptrace is very messy wrt int types used...
-            }
-            #[cfg(target_arch = "x86")]
-            {
-                *dreg = chunk as i32; // libc / ptrace is very messy wrt int types used...
-            }
+            let chunk = ptrace_peekuser(tid, debug_offset + idx * mem::size_of::<RegType>())?;
+
+            *dreg = RegType::from_ne_bytes(chunk[0..mem::size_of::<RegType>()].try_into().unwrap());
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -294,8 +252,8 @@ impl ThreadInfoX86 {
                 ..Default::default()
             };
 
-            super::copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
-            super::copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
+            copy_u32_registers(&mut float_save.float_registers, &fs.st_space);
+            copy_u32_registers(&mut float_save.xmm_registers, &fs.xmm_space);
 
             out.float_save
                 .pwrite_with(float_save, 0, scroll::Endian::Little)
@@ -392,5 +350,31 @@ impl ThreadInfoX86 {
                 write_er!(val);
             }
         }
+    }
+}
+
+fn ptrace_peekuser(pid: libc::pid_t, addr: usize) -> Result<[u8; mem::size_of::<libc::c_long>()]> {
+    // Since ptrace() is vararg, best to explicitly state arg types
+    let addr: *mut libc::c_void = addr as *mut libc::c_void;
+    let data: *mut libc::c_void = core::ptr::null_mut();
+    Errno::set_raw(0);
+    let rv = unsafe { libc::ptrace(libc::PTRACE_PEEKUSER, pid, addr, data) };
+    if rv == -1 && Errno::last_raw() != 0 {
+        Err(ThreadInfoError::PtraceError(Errno::last()))
+    } else {
+        Ok(rv.to_ne_bytes())
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn copy_u32_registers(dst: &mut [u128], src: &[u32]) {
+    assert_eq!(mem::size_of_val(src), mem::size_of_val(dst));
+    // SAFETY: All bit patterns are valid for both types
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            src.as_ptr().cast::<u8>(),
+            dst.as_mut_ptr().cast::<u8>(),
+            mem::size_of_val(src),
+        );
     }
 }
