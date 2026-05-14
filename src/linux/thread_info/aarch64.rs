@@ -1,20 +1,8 @@
 use {
-    super::{Pid, PtraceRequestType, ThreadInfoError},
+    super::{Pid, ProcessInspector, ThreadInfoError, regs::*},
     crate::minidump_cpu::{FP_REG_COUNT, GP_REG_COUNT, RawContextCPU},
 };
 
-/// https://github.com/rust-lang/libc/pull/2719
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct user_fpsimd_struct {
-    pub vregs: [u128; 32],
-    pub fpsr: u32,
-    pub fpcr: u32,
-}
-
-type Result<T> = std::result::Result<T, ThreadInfoError>;
-
-#[cfg(target_arch = "aarch64")]
 #[derive(Debug)]
 pub struct ThreadInfoAarch64 {
     pub stack_pointer: usize,
@@ -27,26 +15,6 @@ pub struct ThreadInfoAarch64 {
 impl ThreadInfoAarch64 {
     pub fn get_instruction_pointer(&self) -> usize {
         self.regs.pc as usize
-    }
-
-    fn getregset(pid: Pid) -> Result<libc::user_regs_struct> {
-        const NT_PRSTATUS: usize = 1;
-        super::ptrace_getregset(NT_PRSTATUS, pid)
-    }
-
-    fn getregs(pid: Pid) -> Result<libc::user_regs_struct> {
-        const PTRACE_GETREGS: PtraceRequestType = 12;
-        unsafe { super::ptrace_getregs::<libc::user_regs_struct>(PTRACE_GETREGS, pid) }
-    }
-
-    fn getfpregset(pid: Pid) -> Result<user_fpsimd_struct> {
-        const NT_PRFPREGSET: usize = 2;
-        super::ptrace_getregset(NT_PRFPREGSET, pid)
-    }
-
-    fn getfpregs(pid: Pid) -> Result<user_fpsimd_struct> {
-        const PTRACE_GETFPREGS: PtraceRequestType = 14;
-        unsafe { super::ptrace_getregs::<user_fpsimd_struct>(PTRACE_GETFPREGS, pid) }
     }
 
     pub fn fill_cpu_context(&self, out: &mut RawContextCPU) {
@@ -66,10 +34,14 @@ impl ThreadInfoAarch64 {
         out.float_regs[..FP_REG_COUNT].copy_from_slice(&self.fpregs.vregs[..FP_REG_COUNT]);
     }
 
-    pub fn create(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = super::get_ppid_and_tgid(tid)?;
-        let regs = Self::getregset(tid).or_else(|_| Self::getregs(tid))?;
-        let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
+    pub fn create(process_inspector: &ProcessInspector, tid: Pid) -> Result<Self, ThreadInfoError> {
+        let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
+        let regs = process_inspector
+            .get_gen_regs(tid)
+            .map_err(ThreadInfoError::PtraceError)?;
+        let fpregs = process_inspector
+            .get_fp_regs(tid)
+            .map_err(ThreadInfoError::PtraceError)?;
 
         let stack_pointer = regs.sp as usize;
 

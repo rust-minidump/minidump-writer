@@ -1,105 +1,9 @@
 use {
-    super::{Pid, PtraceRequestType, ThreadInfoError},
+    super::{Pid, ProcessInspector, ThreadInfoError, regs::*},
     crate::{minidump_cpu::RawContextCPU, minidump_format::format},
     core::mem,
-    nix::errno::Errno,
     scroll::Pwrite,
 };
-
-#[cfg(all(not(target_os = "android"), target_arch = "x86"))]
-use libc::user_fpxregs_struct;
-#[cfg(not(all(target_os = "android", target_arch = "x86")))]
-use libc::{user, user_fpregs_struct, user_regs_struct};
-
-type Result<T> = std::result::Result<T, ThreadInfoError>;
-
-#[cfg(target_arch = "x86")]
-type RegType = u32;
-
-#[cfg(target_arch = "x86_64")]
-type RegType = u64;
-
-// Not defined by libc on Android
-#[cfg(all(target_os = "android", target_arch = "x86"))]
-#[allow(non_camel_case_types)]
-#[repr(C)]
-pub struct user_regs_struct {
-    pub ebx: libc::c_long,
-    pub ecx: libc::c_long,
-    pub edx: libc::c_long,
-    pub esi: libc::c_long,
-    pub edi: libc::c_long,
-    pub ebp: libc::c_long,
-    pub eax: libc::c_long,
-    pub xds: libc::c_long,
-    pub xes: libc::c_long,
-    pub xfs: libc::c_long,
-    pub xgs: libc::c_long,
-    pub orig_eax: libc::c_long,
-    pub eip: libc::c_long,
-    pub xcs: libc::c_long,
-    pub eflags: libc::c_long,
-    pub esp: libc::c_long,
-    pub xss: libc::c_long,
-}
-
-// Not defined by libc on Android
-#[cfg(all(target_os = "android", target_arch = "x86"))]
-#[allow(non_camel_case_types)]
-#[repr(C)]
-pub struct user_fpxregs_struct {
-    pub cwd: libc::c_ushort,
-    pub swd: libc::c_ushort,
-    pub twd: libc::c_ushort,
-    pub fop: libc::c_ushort,
-    pub fip: libc::c_long,
-    pub fcs: libc::c_long,
-    pub foo: libc::c_long,
-    pub fos: libc::c_long,
-    pub mxcsr: libc::c_long,
-    __reserved: libc::c_long,
-    pub st_space: [libc::c_long; 32],
-    pub xmm_space: [libc::c_long; 32],
-    padding: [libc::c_long; 56],
-}
-
-// Not defined by libc on Android
-#[cfg(all(target_os = "android", target_arch = "x86"))]
-#[allow(non_camel_case_types)]
-#[repr(C)]
-pub struct user_fpregs_struct {
-    pub cwd: libc::c_long,
-    pub swd: libc::c_long,
-    pub twd: libc::c_long,
-    pub fip: libc::c_long,
-    pub fcs: libc::c_long,
-    pub foo: libc::c_long,
-    pub fos: libc::c_long,
-    pub st_space: [libc::c_long; 20],
-}
-
-#[cfg(all(target_os = "android", target_arch = "x86"))]
-#[allow(non_camel_case_types)]
-#[repr(C)]
-pub struct user {
-    pub regs: user_regs_struct,
-    pub u_fpvalid: libc::c_long,
-    pub i387: user_fpregs_struct,
-    pub u_tsize: libc::c_ulong,
-    pub u_dsize: libc::c_ulong,
-    pub u_ssize: libc::c_ulong,
-    pub start_code: libc::c_ulong,
-    pub start_stack: libc::c_ulong,
-    pub signal: libc::c_long,
-    __reserved: libc::c_int,
-    pub u_ar0: *mut user_regs_struct,
-    pub u_fpstate: *mut user_fpregs_struct,
-    pub magic: libc::c_ulong,
-    pub u_comm: [libc::c_char; 32],
-    pub u_debugreg: [libc::c_int; 8],
-}
-
-const NUM_DEBUG_REGISTERS: usize = 8;
 
 pub struct ThreadInfoX86 {
     pub stack_pointer: usize,
@@ -113,41 +17,21 @@ pub struct ThreadInfoX86 {
 }
 
 impl ThreadInfoX86 {
-    fn getregset(pid: Pid) -> Result<user_regs_struct> {
-        const NT_PRSTATUS: usize = 1;
-        super::ptrace_getregset(NT_PRSTATUS, pid)
-    }
-
-    pub fn getregs(pid: Pid) -> Result<user_regs_struct> {
-        const PTRACE_GETREGS: PtraceRequestType = 12;
-        unsafe { super::ptrace_getregs::<user_regs_struct>(PTRACE_GETREGS, pid) }
-    }
-
-    fn getfpregset(pid: Pid) -> Result<user_fpregs_struct> {
-        const NT_PRFPREGSET: usize = 2;
-        super::ptrace_getregset(NT_PRFPREGSET, pid)
-    }
-
-    fn getfpregs(pid: Pid) -> Result<user_fpregs_struct> {
-        const PTRACE_GETFPREGS: PtraceRequestType = 14;
-        unsafe { super::ptrace_getregs::<user_fpregs_struct>(PTRACE_GETFPREGS, pid) }
-    }
-
-    #[cfg(target_arch = "x86")]
-    fn getfpxregs(pid: Pid) -> Result<user_fpxregs_struct> {
-        const PTRACE_GETFPXREGS: PtraceRequestType = 18;
-        unsafe { super::ptrace_getregs::<user_fpxregs_struct>(PTRACE_GETFPXREGS, pid) }
-    }
-
-    pub fn create(_pid: Pid, tid: Pid) -> Result<Self> {
-        let (ppid, tgid) = super::get_ppid_and_tgid(tid)?;
-        let regs = Self::getregset(tid).or_else(|_| Self::getregs(tid))?;
-        let fpregs = Self::getfpregset(tid).or_else(|_| Self::getfpregs(tid))?;
+    pub fn create(process_inspector: &ProcessInspector, tid: Pid) -> Result<Self, ThreadInfoError> {
+        let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
+        let regs = process_inspector
+            .get_gen_regs(tid)
+            .map_err(ThreadInfoError::PtraceError)?;
+        let fpregs = process_inspector
+            .get_fp_regs(tid)
+            .map_err(ThreadInfoError::PtraceError)?;
 
         #[cfg(target_arch = "x86")]
         let fpxregs = {
             if cfg!(target_feature = "fxsr") {
-                Self::getfpxregs(tid)?
+                process_inspector
+                    .get_fpx_regs(tid)
+                    .map_err(ThreadInfoError::PtraceError)?
             } else {
                 unsafe { mem::zeroed() }
             }
@@ -157,7 +41,9 @@ impl ThreadInfoX86 {
 
         let debug_offset = mem::offset_of!(user, u_debugreg);
         for (idx, dreg) in dregs.iter_mut().enumerate() {
-            let chunk = ptrace_peekuser(tid, debug_offset + idx * mem::size_of::<RegType>())?;
+            let chunk = process_inspector
+                .ptrace_peekuser(tid, debug_offset + idx * mem::size_of::<RegType>())
+                .map_err(ThreadInfoError::PtraceError)?;
 
             *dreg = RegType::from_ne_bytes(chunk[0..mem::size_of::<RegType>()].try_into().unwrap());
         }
@@ -350,19 +236,6 @@ impl ThreadInfoX86 {
                 write_er!(val);
             }
         }
-    }
-}
-
-fn ptrace_peekuser(pid: libc::pid_t, addr: usize) -> Result<[u8; mem::size_of::<libc::c_long>()]> {
-    // Since ptrace() is vararg, best to explicitly state arg types
-    let addr: *mut libc::c_void = addr as *mut libc::c_void;
-    let data: *mut libc::c_void = core::ptr::null_mut();
-    Errno::set_raw(0);
-    let rv = unsafe { libc::ptrace(libc::PTRACE_PEEKUSER, pid, addr, data) };
-    if rv == -1 && Errno::last_raw() != 0 {
-        Err(ThreadInfoError::PtraceError(Errno::last()))
-    } else {
-        Ok(rv.to_ne_bytes())
     }
 }
 
