@@ -1,6 +1,8 @@
 use {
+    super::{Pid, maps_reader, serializers},
     core::{ffi::c_void, mem},
     nix::errno::Errno,
+    process_reader::ProcessReader,
     regs::*,
     std::{
         fs::File,
@@ -9,6 +11,7 @@ use {
     },
 };
 
+pub mod process_reader;
 pub mod regs;
 
 #[cfg(target_env = "gnu")]
@@ -19,12 +22,20 @@ type PtraceRequestType = core::ffi::c_int;
 
 #[derive(Debug)]
 pub struct ProcessInspector {
-    _private: (), // Placeholder to force API usage for creation
+    pid: libc::pid_t,
+    process_reader: ProcessReader,
 }
 
 impl ProcessInspector {
-    pub fn local() -> Self {
-        ProcessInspector { _private: () }
+    pub fn local(pid: libc::pid_t) -> Self {
+        ProcessInspector {
+            pid,
+            process_reader: ProcessReader::new(pid),
+        }
+    }
+
+    pub fn process_reader(&self) -> &ProcessReader {
+        &self.process_reader
     }
 
     pub fn read_file(&self, path: impl AsRef<Path>) -> io::Result<impl Read> {
@@ -138,4 +149,21 @@ fn ptrace_getregset<T>(regset_type: usize, pid: libc::pid_t) -> nix::Result<T> {
     }
 
     Ok(unsafe { output.assume_init() })
+}
+
+#[doc(hidden)]
+impl ProcessInspector {
+    pub fn force_pr_reset(&mut self) {
+        self.process_reader = ProcessReader::new(self.pid)
+    }
+    pub fn force_pr_virtual_mem(&mut self) {
+        self.process_reader = ProcessReader::for_virtual_mem(self.pid)
+    }
+    pub fn force_pr_file(&mut self) -> std::io::Result<()> {
+        self.process_reader = ProcessReader::for_file(self.pid)?;
+        Ok(())
+    }
+    pub fn force_pr_ptrace(&mut self) {
+        self.process_reader = ProcessReader::for_ptrace(self.pid);
+    }
 }
