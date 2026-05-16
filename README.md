@@ -87,6 +87,23 @@ fn write_minidump(crash_context: crash_context::CrashContext) {
 }
 ```
 
+### FreeBSD
+
+#### Local process
+
+The FreeBSD implementation uses ptrace (`PT_ATTACH`, `PT_IO`, `PT_GETREGS`) to gather information about the process when writing a minidump for it, which cannot be done from the process itself. It's possible to fork the process and dump the current process from the child, but that's out of scope for an example.
+
+#### External process
+
+```rust
+fn write_minidump(pid: i32, tid: i32) {
+    let mut writer = minidump_writer::minidump_writer::MinidumpWriterConfig::new(pid, tid);
+
+    let mut minidump_file = std::fs::File::create("example_dump.mdmp").expect("failed to create file");
+    writer.write(&mut minidump_file).expect("failed to write minidump");
+}
+```
+
 ### MacOS
 
 #### Local process
@@ -119,9 +136,9 @@ fn write_minidump(crash_context: crash_context::CrashContext) {
 - ⭕️ Unimplemented, but could be implemented in the future
 - ❌ Unimplemented, and unlikely to ever be implemented
 
-| Arch      | unknown-linux-gnu | unknown-linux-musl | linux-android | pc-windows-msvc | apple-darwin | apple-ios |
------------ | ----------------- | ------------------ | ------------- | --------------- | ------------ | --------- |
-`x86_64`    | ✅                | ✅                 | ⚠️            | ✅              | ✅           | ⭕️        |
-`i686`      | ✅                | ✅                 | ❌            | ⭕️              | ❌           | ❌        |
-`arm`       | ⚠️                | ⚠️                 | ⚠️            | ⭕️              | ❌           | ❌        |
-`aarch64`   | ⚠️                | ⚠️                 | ⚠️            | ⭕️              | ✅           | ⭕️        |
+| Arch      | unknown-linux-gnu | unknown-linux-musl | linux-android | pc-windows-msvc | apple-darwin | apple-ios | unknown-freebsd |
+----------- | ----------------- | ------------------ | ------------- | --------------- | ------------ | --------- | ---------------- |
+`x86_64`    | ✅                | ✅                 | ⚠️            | ✅              | ✅           | ⭕️        | ⚠️               |
+`i686`      | ✅                | ✅                 | ❌            | ⭕️              | ❌           | ❌        | ⭕️               |
+`arm`       | ⚠️                | ⚠️                 | ⚠️            | ⭕️              | ❌           | ❌        | ❌               |
+`aarch64`   | ⚠️                | ⚠️                 | ⚠️            | ⭕️              | ✅           | ⭕️        | ⭕️               |
