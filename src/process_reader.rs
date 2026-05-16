@@ -7,6 +7,9 @@ pub use crate::windows::process_reader::*;
 #[cfg(target_os = "macos")]
 pub use crate::mac::process_reader::*;
 
+#[cfg(target_os = "freebsd")]
+pub use crate::freebsd::process_reader::*;
+
 use std::{ffi::CString, mem::MaybeUninit};
 
 impl ProcessReader {
