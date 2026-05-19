@@ -1,6 +1,6 @@
 use {
     crate::{
-        module_reader::{ModuleMemory, ModuleMemoryReadError},
+        module_reader::{ModuleMemoryReadError, ProcessModuleMemoryReader},
         serializers::*,
     },
     goblin::pe::header::Header,
@@ -24,7 +24,7 @@ pub enum ModuleReaderError {
 }
 
 impl<'a> ModuleReader<'a> {
-    pub fn new(module_memory: ModuleMemory<'a>) -> Result<Self, ModuleReaderError> {
+    pub fn new(module_memory: ProcessModuleMemoryReader<'a>) -> Result<Self, ModuleReaderError> {
         // We read only the first page from the module, this should be more than
         // enough to read the header and section list. In the future we might do
         // this incrementally but for now goblin requires an array to parse

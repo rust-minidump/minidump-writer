@@ -1,6 +1,11 @@
 use {
-    super::{Pid, maps_reader, serializers},
+    super::{
+        Pid, maps_reader,
+        module_reader::{ModuleReaderError, ReadModuleMemory},
+        serializers,
+    },
     core::{ffi::c_void, mem},
+    module_reader::MappedModuleMemoryReader,
     nix::errno::Errno,
     process_reader::ProcessReader,
     regs::*,
@@ -13,6 +18,8 @@ use {
 
 pub mod process_reader;
 pub mod regs;
+
+mod module_reader;
 
 #[cfg(target_env = "gnu")]
 type PtraceRequestType = core::ffi::c_uint;
@@ -36,6 +43,14 @@ impl ProcessInspector {
 
     pub fn process_reader(&self) -> &ProcessReader {
         &self.process_reader
+    }
+
+    pub fn read_memory_mapped_module(
+        &self,
+        path: impl AsRef<Path>,
+        offset: u64,
+    ) -> Result<MappedModuleMemoryReader, ModuleReaderError> {
+        MappedModuleMemoryReader::new(path.as_ref(), offset)
     }
 
     pub fn read_file(&self, path: impl AsRef<Path>) -> io::Result<impl Read> {

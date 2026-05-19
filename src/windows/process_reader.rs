@@ -1,6 +1,6 @@
 use {
     super::ffi::{self, HMODULE},
-    crate::{module_reader::ModuleMemory, serializers::serialize_io_error},
+    crate::{module_reader::ProcessModuleMemoryReader, serializers::serialize_io_error},
     std::{
         convert::TryInto,
         ffi::OsString,
@@ -64,7 +64,10 @@ impl ProcessReader {
         }
     }
 
-    pub fn find_module(&self, module_name: &str) -> Result<ModuleMemory<'_>, FindModuleError> {
+    pub fn find_module(
+        &self,
+        module_name: &str,
+    ) -> Result<ProcessModuleMemoryReader<'_>, FindModuleError> {
         let modules = self.get_module_list()?;
 
         let module = modules.iter().find_map(|&module| {
@@ -80,7 +83,7 @@ impl ProcessReader {
         });
 
         module
-            .map(|m| ModuleMemory::from_process(self, m))
+            .map(|m| ProcessModuleMemoryReader::new(self, m))
             .ok_or(FindModuleError::ModuleNotFound)
     }
 
