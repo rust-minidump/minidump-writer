@@ -13,6 +13,7 @@ use {
             thread_names_stream::SectionThreadNamesError,
         },
         module_reader::ModuleReaderError,
+        process_inspection,
         serializers::*,
     },
     crate::{dir_section::FileWriterError, mem_writer::MemoryWriterError, serializers::*},
@@ -150,15 +151,18 @@ pub enum WriterError {
         #[serde(skip)]
         std::num::TryFromIntError,
     ),
+    #[error("failed to suspend thread")]
+    SuspendThreadFailed(#[source] process_inspection::SuspendResumeThreadError),
+    #[error("failed to resume thread")]
+    ResumeThreadFailed(#[source] process_inspection::SuspendResumeThreadError),
 }
 
 #[derive(Debug, Error, serde::Serialize)]
 pub enum InitError {
     #[error("failed to read auxv")]
     ReadAuxvFailed(#[source] super::super::auxv::AuxvError),
-    #[error("IO error for file {0}")]
-    IOError(
-        String,
+    #[error("IO error reading /proc/<pid>/task")]
+    ReadProcTaskFailed(
         #[source]
         #[serde(serialize_with = "serialize_io_error")]
         std::io::Error,
@@ -220,6 +224,12 @@ pub enum StopProcessError {
         #[serde(serialize_with = "serialize_nix_error")]
         nix::Error,
     ),
+    #[error("failed to open process file")]
+    ReadFileFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
     #[error("Failed to get the process state")]
     State(
         #[from]
@@ -231,7 +241,5 @@ pub enum StopProcessError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ContinueProcessError {
-    #[error("Failed to continue the process")]
-    Continue(#[from] Errno),
-}
+#[error("Failed to continue the process")]
+pub struct ContinueProcessError(#[source] pub Errno);

@@ -38,19 +38,13 @@ impl MinidumpWriter {
                 // from the file. If there is no note segment with the build id in
                 // the program headers, we can't get to the note section if the section header
                 // table isn't loaded.
-                if let Some(path) = &self.mappings[map_idx].name {
-                    let path = std::path::Path::new(&path);
-                    if path.exists() {
-                        log::debug!("failed to get build id from process memory ({e}), attempting to retrieve from {}", path.display());
-                        return module_reader::read_build_id_from_file(&self.process_inspector, path)
-                            .map_err(errors::WriterError::ModuleReaderError);
-                    }
-                    log::debug!(
-                        "not attempting to get build id from {}: path does not exist",
-                        path.display()
-                    );
-                }
-                Err(e)
+                let Some(path) = &self.mappings[map_idx].name else {
+                    return Err(e);
+                };
+
+                log::debug!("failed to get build id from process memory ({e}), attempting to retrieve from {}", path.display());
+
+                module_reader::read_build_id_from_file(&self.process_inspector, path.as_ref()).map_err(errors::WriterError::ModuleReaderError)
             })
             .unwrap_or_else(|e| {
                 log::warn!("failed to get build id for mapping: {e}");

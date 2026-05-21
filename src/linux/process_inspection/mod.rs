@@ -2,17 +2,24 @@ use {
     super::{
         Pid, maps_reader,
         module_reader::{ModuleReaderError, ReadModuleMemory},
-        serializers,
+        serializers::{self, *},
     },
+    crate::serializers::*,
     core::{ffi::c_void, mem},
     module_reader::MappedModuleMemoryReader,
-    nix::errno::Errno,
+    nix::{
+        errno::Errno,
+        sys::{ptrace, signal, wait},
+        unistd::Pid as NixPid,
+    },
     process_reader::ProcessReader,
     regs::*,
     std::{
-        fs::File,
+        ffi::{CString, OsString},
+        fs::{self, File},
         io::{self, Read},
-        path::Path,
+        os::unix::ffi::OsStringExt,
+        path::{Path, PathBuf},
     },
 };
 
@@ -45,6 +52,51 @@ impl ProcessInspector {
         &self.process_reader
     }
 
+    pub fn stop_process(&self) -> Result<(), Errno> {
+        signal::kill(NixPid::from_raw(self.pid), Some(signal::SIGSTOP))
+    }
+
+    pub fn continue_process(&self) -> Result<(), Errno> {
+        signal::kill(NixPid::from_raw(self.pid), Some(signal::SIGCONT))
+    }
+
+    pub fn suspend_thread(&self, tid: libc::pid_t) -> Result<(), SuspendResumeThreadError> {
+        let tid = NixPid::from_raw(tid);
+        ptrace::attach(tid).map_err(SuspendResumeThreadError::PtraceAttachFailed)?;
+        loop {
+            match wait::waitpid(tid, Some(wait::WaitPidFlag::__WALL)) {
+                Ok(status) => {
+                    let wait::WaitStatus::Stopped(_, signal) = status else {
+                        return Err(SuspendResumeThreadError::UnexpectedStatus(status));
+                    };
+
+                    // Any signal will stop the thread, make sure it is SIGSTOP. Otherwise, this
+                    // signal will be delivered after PTRACE_DETACH, and the thread will enter
+                    // the "T (stopped)" state.
+                    if signal == signal::SIGSTOP {
+                        break;
+                    }
+
+                    // Signals other than SIGSTOP that are received need to be reinjected,
+                    // or they will otherwise get lost.
+                    ptrace::cont(tid, signal)
+                        .map_err(|e| SuspendResumeThreadError::ReinjectFailed(e, signal))?;
+                }
+                Err(Errno::EINTR) => (),
+                Err(e) => {
+                    ptrace_detach(tid).map_err(SuspendResumeThreadError::PtraceDetachFailed)?;
+                    return Err(SuspendResumeThreadError::WaitPidFailed(e));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resume_thread(&self, tid: libc::pid_t) -> Result<(), SuspendResumeThreadError> {
+        let tid = NixPid::from_raw(tid);
+        ptrace_detach(tid).map_err(SuspendResumeThreadError::PtraceDetachFailed)
+    }
+
     pub fn read_memory_mapped_module(
         &self,
         path: impl AsRef<Path>,
@@ -53,8 +105,31 @@ impl ProcessInspector {
         MappedModuleMemoryReader::new(path.as_ref(), offset)
     }
 
-    pub fn read_file(&self, path: impl AsRef<Path>) -> io::Result<impl Read> {
-        File::open(path)
+    pub fn stat_file(&self, path: impl Into<PathBuf>) -> io::Result<libc::stat> {
+        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+
+        let mut output = unsafe { mem::zeroed::<libc::stat>() };
+        let rv = unsafe { libc::stat(c_path.as_ptr(), &mut output) };
+        if rv == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(output)
+    }
+
+    pub fn read_file(&self, path: impl AsRef<Path>) -> io::Result<FileReader> {
+        File::open(path).map(FileReader)
+    }
+
+    pub fn read_dir(&self, path: impl AsRef<Path>) -> io::Result<DirReader> {
+        fs::read_dir(path).map(DirReader)
+    }
+
+    pub fn read_link(&self, path: impl AsRef<Path>) -> io::Result<PathBuf> {
+        fs::read_link(path)
+    }
+
+    pub fn path_exists(&self, path: impl AsRef<Path>) -> bool {
+        path.as_ref().exists()
     }
 
     pub fn get_gen_regs(&self, tid: libc::pid_t) -> nix::Result<GenRegs> {
@@ -88,6 +163,58 @@ impl ProcessInspector {
             Ok(rv.to_ne_bytes())
         }
     }
+}
+
+#[derive(Debug)]
+pub struct FileReader(File);
+
+impl Read for FileReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+#[derive(Debug)]
+pub struct DirReader(fs::ReadDir);
+
+impl Iterator for DirReader {
+    type Item = io::Result<OsString>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|result| result.map(|entry| entry.file_name()))
+    }
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum SuspendResumeThreadError {
+    #[error("failed to attach to process")]
+    PtraceAttachFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_nix_error")]
+        Errno,
+    ),
+    #[error("failed to detach from process")]
+    PtraceDetachFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_nix_error")]
+        Errno,
+    ),
+    #[error("received an unexpected status: {0:?}")]
+    UnexpectedStatus(#[serde(serialize_with = "serialize_debug_string")] wait::WaitStatus),
+    #[error("failed to reinject irrelevant signal: {1:?}")]
+    ReinjectFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_nix_error")]
+        Errno,
+        #[serde(serialize_with = "serialize_debug_string")] signal::Signal,
+    ),
+    #[error("failed waiting for process state to change")]
+    WaitPidFailed(
+        #[source]
+        #[serde(serialize_with = "serialize_nix_error")]
+        Errno,
+    ),
 }
 
 fn getregset(_pid: libc::pid_t) -> nix::Result<GenRegs> {
@@ -164,6 +291,18 @@ fn ptrace_getregset<T>(regset_type: usize, pid: libc::pid_t) -> nix::Result<T> {
     }
 
     Ok(unsafe { output.assume_init() })
+}
+
+fn ptrace_detach(tid: NixPid) -> Result<(), Errno> {
+    ptrace::detach(tid, None).or_else(|e| {
+        // errno is set to ESRCH if the pid no longer exists, but we don't want to error in that
+        // case.
+        if e == nix::Error::ESRCH {
+            Ok(())
+        } else {
+            Err(e)
+        }
+    })
 }
 
 #[doc(hidden)]
