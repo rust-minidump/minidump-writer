@@ -144,13 +144,13 @@ pub fn assert_soft_errors_in_minidump<'a, 'b, T, I>(
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
 #[allow(unused)]
-pub use linux::*;
+pub use elf_module_reader::*;
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
 #[allow(unused)]
-mod linux {
+mod elf_module_reader {
     use {
         minidump_writer::module_reader::{self, ModuleMemoryReadError, ReadModuleMemory},
         std::borrow::Cow,

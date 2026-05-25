@@ -23,20 +23,30 @@ impl MinidumpWriter {
                 continue;
             }
 
-            let crate::freebsd::module_reader::BuildId(identifier) = self
-                .from_process_memory_for_index(map_idx)
+            log::debug!("retrieving build id for {:?}", &self.mappings[map_idx].name);
+            let identifier = self
+                .build_id_from_process_memory_for_index(map_idx)
                 .or_else(|e| {
-                    use crate::freebsd::module_reader::ReadFromModule;
                     if let Some(path) = &self.mappings[map_idx].name {
                         let path = std::path::Path::new(path);
-                        if path.exists() {
-                            return crate::freebsd::module_reader::BuildId::read_from_file(path)
-                                .map_err(errors::WriterError::ModuleReaderError);
+                        if self.process_inspector.path_exists(path) {
+                            log::debug!(
+                                "failed to get build id from process memory ({e}), attempting to retrieve from {}",
+                                path.display()
+                            );
+                            return crate::module_reader::read_build_id_from_file(
+                                &self.process_inspector,
+                                path,
+                            )
+                            .map_err(errors::WriterError::ModuleReaderError);
                         }
                     }
                     Err(e)
                 })
-                .unwrap_or_else(|_| crate::freebsd::module_reader::BuildId(Vec::new()));
+                .unwrap_or_else(|e| {
+                    log::warn!("failed to get build id for mapping: {e}");
+                    Vec::new()
+                });
 
             if identifier.is_empty() || identifier.iter().all(|&x| x == 0) {
                 continue;
@@ -90,7 +100,7 @@ fn fill_raw_module(
         sig_section.location()
     };
 
-    let name_header = if let Some(name) = &mapping.name {
+    let name_header = if let Some(name) = mapping.so_name() {
         write_string_to_location(buffer, &name.to_string_lossy())?
     } else {
         MDLocationDescriptor {

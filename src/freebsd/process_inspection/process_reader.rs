@@ -1,4 +1,4 @@
-use {super::Pid, super::serializers::serialize_io_error, std::io};
+use {super::super::Pid, super::super::serializers::serialize_io_error, std::io};
 
 /// Handle to a process, which on FreeBSD is simply the process id.
 pub type ProcessHandle = libc::pid_t;
@@ -71,9 +71,6 @@ impl ProcessReader {
             piod_len: dst.len(),
         };
 
-        // SAFETY: ptrace(PT_IO) reads from the traced process's address space
-        // into the buffer described by `desc`. The `piod_addr` points to our
-        // local `dst` buffer and `piod_len` is bounded by its length.
         let res = unsafe {
             libc::ptrace(
                 libc::PT_IO,
@@ -94,7 +91,6 @@ impl ProcessReader {
             });
         }
 
-        let bytes_read = desc.piod_len;
-        Ok(bytes_read)
+        Ok(desc.piod_len)
     }
 }

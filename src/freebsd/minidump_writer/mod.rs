@@ -1,5 +1,5 @@
 use {
-    super::Pid,
+    super::{Pid, ProcessInspector, process_inspection::ProcessStopError},
     crate::{
         auxv::AuxvDumpInfo,
         dir_section::{DirSection, DumpBuf},
@@ -68,6 +68,7 @@ pub struct MinidumpWriter {
     pub crash_context: Option<crate::freebsd::crash_context::CrashContext>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
+    pub process_inspector: ProcessInspector,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +200,7 @@ impl MinidumpWriterConfig {
             crash_context: self.crash_context,
             app_memory: self.app_memory,
             memory_blocks: self.memory_blocks,
+            process_inspector: ProcessInspector::local(self.process_id),
         }
     }
 }
@@ -227,7 +229,7 @@ impl MinidumpWriter {
         }
 
         // 3. Fill missing auxv info
-        if let Err(e) = self.auxv.try_filling_missing_info(self.process_id) {
+        if let Err(e) = self.auxv.try_filling_missing_info(&self.process_inspector) {
             soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
         }
 
@@ -279,16 +281,15 @@ impl MinidumpWriter {
     }
 
     fn enumerate_threads(&mut self) -> Result<(), InitError> {
-        let tids = crate::freebsd::thread_info::get_thread_list(self.process_id).map_err(|e| {
+        let tids = self.process_inspector.get_thread_list().map_err(|e| {
             InitError::IOError(
                 format!("Failed to enumerate threads for PID {}", self.process_id),
-                #[allow(clippy::io_other_error)]
-                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                e,
             )
         })?;
 
         for tid in tids {
-            let name = crate::freebsd::thread_info::get_thread_name(self.process_id, tid);
+            let name = self.process_inspector.get_thread_name(tid);
             self.threads.push(Thread { tid, name });
         }
 
@@ -296,8 +297,9 @@ impl MinidumpWriter {
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
-        self.mappings = crate::freebsd::maps_reader::MappingInfo::for_pid(self.process_id, None)
-            .map_err(InitError::AggregateMappingsFailed)?;
+        self.mappings =
+            crate::freebsd::maps_reader::MappingInfo::for_pid(&self.process_inspector, self.process_id, None)
+                .map_err(InitError::AggregateMappingsFailed)?;
 
         if let Some(entry) = self.auxv.get_entry_address() {
             let entry_usize = entry as usize;
@@ -314,165 +316,64 @@ impl MinidumpWriter {
     }
 
     fn stop_process(&mut self, timeout: Duration) -> Result<(), StopProcessError> {
-        let pid = self.process_id;
-
-        // SAFETY: kill sends a signal to the target pid. We check the return
-        // value and use SIGSTOP which is a standard stop signal.
-        if unsafe { libc::kill(pid, libc::SIGSTOP) } == -1 {
-            return Err(StopProcessError::Stop(std::io::Error::last_os_error()));
-        }
-
-        const POLL_INTERVAL: Duration = Duration::from_millis(1);
-        let end = std::time::Instant::now() + timeout;
-
-        loop {
-            let mut status: libc::c_int = 0;
-            // SAFETY: waitpid waits for state changes in the child. We provide a
-            // valid status pointer and use WNOHANG for non-blocking polling.
-            let ret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-
-            if ret == -1 {
-                let err = std::io::Error::last_os_error();
-                // ECHILD means the process is not a child, which is expected
-                // when sending SIGSTOP to a non-child. In that case, assume stopped.
-                if err.raw_os_error() == Some(libc::ECHILD) {
-                    return Ok(());
-                }
-                return Err(StopProcessError::WaitPidFailed(err));
-            }
-
-            if ret > 0 && libc::WIFSTOPPED(status) {
-                return Ok(());
-            }
-
-            std::thread::sleep(POLL_INTERVAL);
-            if std::time::Instant::now() > end {
-                return Err(StopProcessError::Timeout);
-            }
-        }
+        self.process_inspector
+            .stop_process(timeout)
+            .map_err(|error| match error {
+                ProcessStopError::Stop(error) => StopProcessError::Stop(error),
+                ProcessStopError::Timeout => StopProcessError::Timeout,
+                ProcessStopError::WaitPidFailed(error) => StopProcessError::WaitPidFailed(error),
+            })
     }
 
     fn continue_process(&mut self) -> Result<(), ContinueProcessError> {
-        // SAFETY: kill sends SIGCONT to the target pid to resume it.
-        // We check the return value for errors.
-        if unsafe { libc::kill(self.process_id, libc::SIGCONT) } == -1 {
-            return Err(ContinueProcessError::Continue(
-                std::io::Error::last_os_error(),
-            ));
-        }
-        Ok(())
+        self.process_inspector
+            .continue_process()
+            .map_err(ContinueProcessError)
     }
 
     fn attach_process(&mut self, timeout: Duration) -> std::io::Result<()> {
-        // SAFETY: ptrace(PT_ATTACH) attaches to the target process. We check the
-        // return value and then wait for the kernel-reported ptrace stop.
-        if unsafe {
-            libc::ptrace(
-                libc::PT_ATTACH,
-                self.process_id,
-                std::ptr::null_mut::<libc::c_char>(),
-                0,
-            )
-        } == -1
-        {
-            return Err(std::io::Error::last_os_error());
-        }
-
+        self.process_inspector.attach_process(timeout)?;
         self.process_attached = true;
-
-        const POLL_INTERVAL: Duration = Duration::from_millis(1);
-        let end = std::time::Instant::now() + timeout;
-        let mut status: libc::c_int = 0;
-        loop {
-            // SAFETY: waitpid waits for the attached process to report its
-            // ptrace stop. We provide a valid status pointer and retry EINTR.
-            let ret = unsafe { libc::waitpid(self.process_id, &mut status, libc::WNOHANG) };
-            if ret == -1 {
-                let err = std::io::Error::last_os_error();
-                if err.raw_os_error() == Some(libc::EINTR) {
-                    continue;
-                }
-                let _ = Self::ptrace_detach_inner(self.process_id);
-                self.process_attached = false;
-                return Err(err);
-            }
-            if libc::WIFSTOPPED(status) {
-                return Ok(());
-            }
-
-            std::thread::sleep(POLL_INTERVAL);
-            if std::time::Instant::now() > end {
-                let _ = Self::ptrace_detach_inner(self.process_id);
-                self.process_attached = false;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "timeout waiting for ptrace attach stop",
-                ));
-            }
-        }
-    }
-
-    fn ptrace_detach_inner(child: Pid) -> Result<(), WriterError> {
-        // SAFETY: ptrace operates on the target pid which has been validated.
-        // PT_DETACH detaches from the traced process and resumes it.
-        if unsafe {
-            libc::ptrace(
-                libc::PT_DETACH,
-                child,
-                std::ptr::null_mut::<libc::c_char>(),
-                0,
-            )
-        } == -1
-        {
-            let err = std::io::Error::last_os_error();
-            // ESRCH means the process is gone — not an error
-            if err.raw_os_error() == Some(libc::ESRCH) {
-                Ok(())
-            } else {
-                Err(WriterError::PtraceDetachError(child, err))
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    fn suspend_thread(child: Pid) -> Result<(), WriterError> {
-        // The process has already been stopped and attached. The per-thread
-        // check here only filters threads whose register state is not useful.
-        #[cfg(target_arch = "x86_64")]
-        {
-            use crate::freebsd::thread_info::ThreadInfo;
-            #[allow(clippy::collapsible_if)]
-            if let Ok(regs) = ThreadInfo::getregs(child) {
-                if regs.rsp == 0 {
-                    return Err(WriterError::DetachSkippedThread(child));
-                }
-            }
-        }
-
         Ok(())
     }
 
-    fn resume_thread(child: Pid) -> Result<(), WriterError> {
-        let _ = child;
-        Ok(())
+    fn suspend_thread(process_inspector: &ProcessInspector, child: Pid) -> Result<(), WriterError> {
+        process_inspector
+            .suspend_thread(child)
+            .map_err(|error| match error {
+                super::process_inspection::SuspendResumeThreadError::InvalidStackPointer(tid) => {
+                    WriterError::DetachSkippedThread(tid)
+                }
+            })
+    }
+
+    fn resume_thread(process_inspector: &ProcessInspector, child: Pid) -> Result<(), WriterError> {
+        process_inspector
+            .resume_thread(child)
+            .map_err(|error| match error {
+                super::process_inspection::SuspendResumeThreadError::InvalidStackPointer(tid) => {
+                    WriterError::DetachSkippedThread(tid)
+                }
+            })
     }
 
     fn suspend_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
-        self.threads.retain(|x| match Self::suspend_thread(x.tid) {
-            Ok(()) => true,
-            Err(e) => {
-                soft_errors.push(e);
-                false
-            }
-        });
+        self.threads.retain(
+            |x| match Self::suspend_thread(&self.process_inspector, x.tid) {
+                Ok(()) => true,
+                Err(e) => {
+                    soft_errors.push(e);
+                    false
+                }
+            },
+        );
         self.threads_suspended = true;
     }
 
     fn resume_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
         if self.threads_suspended {
             for thread in &self.threads {
-                if let Err(e) = Self::resume_thread(thread.tid) {
+                if let Err(e) = Self::resume_thread(&self.process_inspector, thread.tid) {
                     soft_errors.push(e);
                 }
             }
@@ -481,21 +382,21 @@ impl MinidumpWriter {
     }
 
     pub fn copy_from_process(
-        pid: Pid,
+        &self,
         src: usize,
         length: usize,
     ) -> Result<Vec<u8>, crate::freebsd::process_reader::CopyFromProcessError> {
         let length = std::num::NonZeroUsize::new(length).ok_or(
             crate::freebsd::process_reader::CopyFromProcessError {
                 src,
-                child: pid,
+                child: self.process_id,
                 offset: 0,
                 length,
                 source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "length is zero"),
             },
         )?;
 
-        let mem = crate::freebsd::process_reader::ProcessReader::new(pid);
+        let mem = self.process_inspector.process_reader();
         mem.read_to_vec(src, length)
     }
 
@@ -512,7 +413,11 @@ impl MinidumpWriter {
                 ),
             );
         }
-        crate::freebsd::thread_info::ThreadInfo::create(self.process_id, self.threads[index].tid)
+        crate::freebsd::thread_info::ThreadInfo::create(
+            &self.process_inspector,
+            self.process_id,
+            self.threads[index].tid,
+        )
     }
 
     pub fn find_mapping(
@@ -647,25 +552,6 @@ impl MinidumpWriter {
                 }
             }
 
-            #[allow(clippy::collapsible_if)]
-            if let Some(last_hit) = last_hit_mapping {
-                if last_hit.contains_address(addr) {
-                    continue;
-                }
-            }
-
-            let test = addr >> shift;
-            #[allow(clippy::collapsible_if)]
-            if could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0 {
-                #[allow(clippy::collapsible_if)]
-                if let Some(hit_mapping) = self.find_mapping_no_bias(addr) {
-                    if hit_mapping.is_executable() {
-                        last_hit_mapping = Some(hit_mapping);
-                        continue;
-                    }
-                }
-            }
-
             sp.copy_from_slice(&defaced);
         }
 
@@ -695,7 +581,7 @@ impl MinidumpWriter {
 
         #[allow(clippy::collapsible_if)]
         if let Ok((valid_sp, stack_len)) = self.get_stack_info(stack_pointer) {
-            if let Ok(stack_copy) = Self::copy_from_process(self.process_id, valid_sp, stack_len) {
+            if let Ok(stack_copy) = self.copy_from_process(valid_sp, stack_len) {
                 let sp_offset = stack_pointer.saturating_sub(valid_sp);
                 return principal_mapping.stack_has_pointer_to_mapping(&stack_copy, sp_offset);
             }
@@ -704,22 +590,34 @@ impl MinidumpWriter {
         false
     }
 
-    pub fn from_process_memory_for_index<T: crate::module_reader::ReadFromModule>(
+    pub fn build_id_from_process_memory_for_index(
         &mut self,
         idx: usize,
-    ) -> Result<T, WriterError> {
+    ) -> Result<Vec<u8>, WriterError> {
         assert!(idx < self.mappings.len());
-        Self::from_process_memory_for_mapping(&self.mappings[idx], self.process_id)
+        let reader = self.process_inspector.process_reader();
+        crate::module_reader::read_build_id_from_module(
+            crate::module_reader::ProcessModuleMemoryReader::new(
+                reader,
+                self.mappings[idx].start_address,
+            ),
+        )
+        .map_err(WriterError::ModuleReaderError)
     }
 
-    pub fn from_process_memory_for_mapping<T: crate::module_reader::ReadFromModule>(
-        mapping: &crate::freebsd::maps_reader::MappingInfo,
-        pid: Pid,
-    ) -> Result<T, WriterError> {
-        let reader = crate::freebsd::process_reader::ProcessReader::new(pid);
-        Ok(T::read_from_module(
-            crate::module_reader::ModuleMemory::from_process(&reader, mapping.start_address),
-        )?)
+    pub fn soname_from_process_memory_for_index(
+        &mut self,
+        idx: usize,
+    ) -> Result<String, WriterError> {
+        assert!(idx < self.mappings.len());
+        let reader = self.process_inspector.process_reader();
+        crate::module_reader::read_soname_from_module(
+            crate::module_reader::ProcessModuleMemoryReader::new(
+                reader,
+                self.mappings[idx].start_address,
+            ),
+        )
+        .map_err(WriterError::ModuleReaderError)
     }
 
     fn write_dump(
@@ -809,9 +707,12 @@ impl Drop for MinidumpWriter {
     fn drop(&mut self) {
         self.resume_threads(error_graph::strategy::DontCare);
         if self.process_attached {
-            let _ = Self::ptrace_detach_inner(self.process_id);
+            // PT_DETACH resumes the process, no need for an additional SIGCONT.
+            let _ = self.process_inspector.detach_process();
             self.process_attached = false;
+        } else {
+            // If we didn't attach, we may have stopped via SIGSTOP; ensure resumed.
+            let _ = self.continue_process();
         }
-        let _ = self.continue_process();
     }
 }

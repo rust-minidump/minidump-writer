@@ -11,8 +11,7 @@ pub enum SectionAppMemoryError {
 impl MinidumpWriter {
     pub fn write_app_memory(&mut self, buffer: &mut DumpBuf) -> Result<(), SectionAppMemoryError> {
         for app_memory in &self.app_memory {
-            let data_copy =
-                Self::copy_from_process(self.process_id, app_memory.ptr, app_memory.length)?;
+            let data_copy = self.copy_from_process(app_memory.ptr, app_memory.length)?;
 
             let section = MemoryArrayWriter::write_bytes(buffer, &data_copy);
             let desc = MDMemoryDescriptor {

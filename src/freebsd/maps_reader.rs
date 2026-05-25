@@ -1,10 +1,7 @@
 use {
-    super::vm_permissions::VmPermissions,
-    goblin::elf,
-    memmap2::{Mmap, MmapOptions},
+    super::{ProcessInspector, vm_permissions::VmPermissions},
     std::{
         ffi::OsString,
-        fs::File,
         os::unix::ffi::{OsStrExt, OsStringExt},
         path::Path,
     },
@@ -43,16 +40,6 @@ pub enum MapsReaderError {
         #[serde(serialize_with = "crate::serializers::serialize_io_error")]
         std::io::Error,
     ),
-    #[error("IO Error")]
-    FileError(
-        #[from]
-        #[serde(serialize_with = "crate::serializers::serialize_io_error")]
-        std::io::Error,
-    ),
-    #[error("Not safe to open mapping {}", .0.to_string_lossy())]
-    NotSafeToOpenMapping(OsString),
-    #[error("Mmapped file empty or not an ELF file")]
-    MmapSanityCheckFailed,
 }
 
 #[repr(C)]
@@ -97,9 +84,12 @@ fn c_path_to_option(buf: &[u8; PATH_MAX]) -> Option<OsString> {
     Some(OsString::from_vec(buf[..len].to_vec()))
 }
 
-#[allow(unused)]
 impl MappingInfo {
-    pub fn for_pid(pid: i32, freebsd_gate_address: Option<u64>) -> Result<Vec<Self>> {
+    pub fn for_pid(
+        process_inspector: &ProcessInspector,
+        pid: i32,
+        freebsd_gate_address: Option<u64>,
+    ) -> Result<Vec<Self>> {
         let mut count: libc::c_int = 0;
 
         // SAFETY: kinfo_getvmmap is a well-defined libutil function that returns
@@ -192,10 +182,6 @@ impl MappingInfo {
         self.name.is_some() && (self.offset == 0 || self.is_executable()) && self.size >= 4096
     }
 
-    pub fn system_mapping_info(&self) -> SystemMappingInfo {
-        self.system_mapping_info.clone()
-    }
-
     pub fn contains_address(&self, address: usize) -> bool {
         self.system_mapping_info.start_address <= address
             && address < self.system_mapping_info.end_address
@@ -203,14 +189,6 @@ impl MappingInfo {
 
     pub fn is_executable(&self) -> bool {
         self.permissions.contains(VmPermissions::EXECUTE)
-    }
-
-    pub fn is_readable(&self) -> bool {
-        self.permissions.contains(VmPermissions::READ)
-    }
-
-    pub fn is_writable(&self) -> bool {
-        self.permissions.contains(VmPermissions::WRITE)
     }
 
     pub fn so_name(&self) -> Option<OsString> {
@@ -230,29 +208,6 @@ impl MappingInfo {
         #[allow(clippy::unnecessary_map_or)]
         name.as_ref()
             .map_or(true, |n| !n.as_bytes().starts_with(b"/dev/"))
-    }
-
-    pub fn get_mmap(&self) -> Result<Mmap> {
-        if !Self::is_mapped_file_safe_to_open(&self.name) {
-            return Err(MapsReaderError::NotSafeToOpenMapping(
-                self.name.clone().unwrap_or_default(),
-            ));
-        }
-
-        let filename = self.name.clone().unwrap_or_default();
-        // SAFETY: We request a valid file mapping with appropriate permissions.
-        // The kernel validates the parameters and File::open ensures a valid fd.
-        let mapped_file = unsafe {
-            MmapOptions::new()
-                .offset(self.offset as u64)
-                .map(&File::open(filename)?)?
-        };
-
-        if mapped_file.is_empty() || mapped_file.len() < elf::header::SELFMAG {
-            return Err(MapsReaderError::MmapSanityCheckFailed);
-        }
-
-        Ok(mapped_file)
     }
 
     pub fn stack_has_pointer_to_mapping(&self, stack_copy: &[u8], sp_offset: usize) -> bool {

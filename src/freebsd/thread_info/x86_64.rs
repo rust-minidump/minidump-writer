@@ -1,6 +1,6 @@
 use {
-    super::x86_64_regs::{Fpregs, Reg, apply_fpregs_to_context, reg_to_minidump_context},
-    super::{Pid, Result, ThreadInfoError},
+    super::x86_64_regs::{Fpregs, apply_fpregs_to_context, reg_to_minidump_context},
+    super::{Pid, ProcessInspector, Result, ThreadInfoError},
     crate::minidump_cpu::RawContextCPU,
 };
 
@@ -13,45 +13,17 @@ pub struct ThreadInfoX86 {
 }
 
 impl ThreadInfoX86 {
-    pub fn getregs(pid: Pid) -> Result<RawContextCPU> {
-        let mut reg = std::mem::MaybeUninit::<Reg>::uninit();
-        // SAFETY: ptrace operates on the target pid which has been validated.
-        // PT_GETREGS fills the provided buffer with register data on success.
-        let res = unsafe {
-            libc::ptrace(
-                libc::PT_GETREGS,
-                pid,
-                reg.as_mut_ptr() as *mut libc::c_char,
-                0,
-            )
-        };
-        if res == -1 {
-            return Err(ThreadInfoError::PtraceError(std::io::Error::last_os_error()));
-        }
-        // SAFETY: ptrace returned success, so the kernel has fully initialized
-        // the Reg struct with valid register data.
-        let reg = unsafe { reg.assume_init() };
+    pub fn getregs(process_inspector: &ProcessInspector, pid: Pid) -> Result<RawContextCPU> {
+        let reg = process_inspector
+            .get_gen_regs(pid)
+            .map_err(ThreadInfoError::PtraceError)?;
         Ok(reg_to_minidump_context(&reg))
     }
 
-    pub fn getfpregs(pid: Pid) -> Result<Fpregs> {
-        let mut fpregs = std::mem::MaybeUninit::<Fpregs>::uninit();
-        // SAFETY: ptrace operates on the target pid which has been validated.
-        // PT_GETFPREGS fills the provided buffer with floating-point register data on success.
-        let res = unsafe {
-            libc::ptrace(
-                libc::PT_GETFPREGS,
-                pid,
-                fpregs.as_mut_ptr() as *mut libc::c_char,
-                0,
-            )
-        };
-        if res == -1 {
-            return Err(ThreadInfoError::PtraceError(std::io::Error::last_os_error()));
-        }
-        // SAFETY: ptrace returned success, so the kernel has fully initialized
-        // the Fpregs struct with valid floating-point register data.
-        Ok(unsafe { fpregs.assume_init() })
+    pub fn getfpregs(process_inspector: &ProcessInspector, pid: Pid) -> Result<Fpregs> {
+        process_inspector
+            .get_fp_regs(pid)
+            .map_err(ThreadInfoError::PtraceError)
     }
 
     pub fn get_stack_pointer(&self) -> usize {

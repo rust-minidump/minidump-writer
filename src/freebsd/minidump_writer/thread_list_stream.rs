@@ -79,9 +79,7 @@ impl MinidumpWriter {
 
                     #[allow(clippy::collapsible_if)]
                     if let Ok((valid_sp, stack_len)) = self.get_stack_info(stack_pointer) {
-                        if let Ok(mut stack_copy) =
-                            Self::copy_from_process(self.process_id, valid_sp, stack_len)
-                        {
+                        if let Ok(mut stack_copy) = self.copy_from_process(valid_sp, stack_len) {
                             let sp_offset = stack_pointer.saturating_sub(valid_sp);
                             if !self.should_skip_stack_for_principal(
                                 instruction_ptr,
@@ -141,9 +139,7 @@ impl MinidumpWriter {
                     } else {
                         stack_len
                     };
-                    if let Ok(mut stack_copy) =
-                        Self::copy_from_process(self.process_id, valid_sp, stack_len)
-                    {
+                    if let Ok(mut stack_copy) = self.copy_from_process(valid_sp, stack_len) {
                         let sp_offset = stack_pointer.saturating_sub(valid_sp);
                         if !self.should_skip_stack_for_principal(
                             instruction_ptr,

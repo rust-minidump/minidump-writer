@@ -54,6 +54,8 @@ bitflags = "2.4"
 # such as wasmtime still use 0.4, so only bump if the ecosystem moves to newer versions
 mach2 = "0.4"
 
+[target.'cfg(target_os = "freebsd")'.dependencies]
+
 [dev-dependencies]
 # We auto-detect what the test binary that is spawned for most tests should be
 # compiled for

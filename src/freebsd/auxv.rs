@@ -1,4 +1,4 @@
-use {super::Pid, crate::serializers::*, thiserror::Error};
+use {super::Pid, super::process_inspection::ProcessInspector, crate::serializers::*, thiserror::Error};
 
 #[cfg(target_pointer_width = "32")]
 pub type AuxvType = u32;
@@ -50,12 +50,12 @@ pub struct AuxvDumpInfo {
 }
 
 impl AuxvDumpInfo {
-    pub fn try_filling_missing_info(&mut self, pid: Pid) -> Result<(), AuxvError> {
+    pub fn try_filling_missing_info(&mut self, process_inspector: &ProcessInspector) -> Result<(), AuxvError> {
         if self.is_complete() {
             return Ok(());
         }
 
-        let auxv_data = read_auxv_via_sysctl(pid)?;
+        let auxv_data = process_inspector.read_auxv()?;
 
         for pair in auxv_data.chunks(2 * std::mem::size_of::<AuxvType>()) {
             if pair.len() != 2 * std::mem::size_of::<AuxvType>() {
@@ -123,60 +123,14 @@ impl AuxvDumpInfo {
 
 #[derive(Debug, Error, serde::Serialize)]
 pub enum AuxvError {
-    #[error("Failed to read auxv for PID {0}")]
+    #[error("Failed to read auxv")]
     ReadError(
-        Pid,
         #[source]
         #[serde(serialize_with = "serialize_io_error")]
         std::io::Error,
     ),
-    #[error("No auxv entry found for PID {0}")]
-    NoAuxvEntryFound(Pid),
+    #[error("No auxv entry found")]
+    NoAuxvEntryFound,
     #[error("Invalid auxv format")]
     InvalidFormat,
-}
-
-#[cfg(target_os = "freebsd")]
-fn read_auxv_via_sysctl(pid: Pid) -> Result<Vec<u8>, AuxvError> {
-    let mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_AUXV, pid];
-
-    let mut len = 0;
-
-    // SAFETY: sysctl is a well-defined kernel interface. We provide valid mib,
-    // pointers, and check the return value. The kernel fills the buffer on success.
-    unsafe {
-        if libc::sysctl(
-            mib.as_ptr(),
-            mib.len() as libc::c_uint,
-            std::ptr::null_mut(),
-            &mut len,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return Err(AuxvError::ReadError(pid, std::io::Error::last_os_error()));
-        }
-
-        if len == 0 {
-            return Err(AuxvError::NoAuxvEntryFound(pid));
-        }
-
-        let mut buffer = vec![0u8; len];
-
-        if libc::sysctl(
-            mib.as_ptr(),
-            mib.len() as libc::c_uint,
-            buffer.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return Err(AuxvError::ReadError(pid, std::io::Error::last_os_error()));
-        }
-
-        buffer.truncate(len);
-
-        Ok(buffer)
-    }
 }

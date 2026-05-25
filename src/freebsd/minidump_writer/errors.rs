@@ -200,7 +200,7 @@ pub enum InitError {
 pub enum StopProcessError {
     #[error("Failed to stop the process")]
     Stop(
-        #[source]
+        #[from]
         #[serde(serialize_with = "serialize_io_error")]
         std::io::Error,
     ),
@@ -215,11 +215,9 @@ pub enum StopProcessError {
 }
 
 #[derive(Debug, Error, serde::Serialize)]
-pub enum ContinueProcessError {
-    #[error("Failed to continue the process")]
-    Continue(
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
-}
+#[error("failed to continue the process")]
+pub struct ContinueProcessError(
+    #[source]
+    #[serde(serialize_with = "serialize_io_error")]
+    pub std::io::Error,
+);

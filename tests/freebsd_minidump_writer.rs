@@ -104,7 +104,8 @@ fn get_crash_context(tid: Pid, pid: Pid) -> CrashContext {
 #[test]
 fn auxv_sysctl_fills_elf_entries() {
     let mut auxv = AuxvDumpInfo::default();
-    auxv.try_filling_missing_info(std::process::id() as Pid)
+    let inspector = minidump_writer::ProcessInspector::local(std::process::id() as Pid);
+    auxv.try_filling_missing_info(&inspector)
         .expect("failed to read auxv for current process");
 
     assert!(auxv.get_program_header_count().unwrap_or_default() > 0);
