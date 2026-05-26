@@ -428,7 +428,11 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
         )?
         .ok_or(Error::NoSectionNote)?;
 
-        match self.find_build_id_note(self.section_offset(&header), header.sh_size, header.sh_addralign) {
+        match self.find_build_id_note(
+            self.section_offset(&header),
+            header.sh_size,
+            header.sh_addralign,
+        ) {
             Ok(Some(v)) => Ok(v),
             Ok(None) => Err(Error::NoSectionNote),
             Err(e) => Err(e),
@@ -447,7 +451,9 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
 
         // Take at most one page of the text section (we assume page size is 4096 bytes).
         let len = std::cmp::min(4096, text_header.sh_size);
-        let text_data = self.module_memory.read(self.section_offset(&text_header), len)?;
+        let text_data = self
+            .module_memory
+            .read(self.section_offset(&text_header), len)?;
         Ok(build_id_from_bytes(&text_data))
     }
 

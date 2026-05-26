@@ -229,7 +229,10 @@ impl MinidumpWriter {
         }
 
         // 3. Fill missing auxv info
-        if let Err(e) = self.auxv.try_filling_missing_info(&self.process_inspector) {
+        if let Err(e) = self.auxv.try_filling_missing_info(
+            &self.process_inspector,
+            soft_errors.subwriter(InitError::FillMissingAuxvInfoErrors),
+        ) {
             soft_errors.push(InitError::FillMissingAuxvInfoFailed(e));
         }
 
@@ -297,9 +300,12 @@ impl MinidumpWriter {
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
-        self.mappings =
-            crate::freebsd::maps_reader::MappingInfo::for_pid(&self.process_inspector, self.process_id, None)
-                .map_err(InitError::AggregateMappingsFailed)?;
+        self.mappings = crate::freebsd::maps_reader::MappingInfo::for_pid(
+            &self.process_inspector,
+            self.process_id,
+            None,
+        )
+        .map_err(InitError::AggregateMappingsFailed)?;
 
         if let Some(entry) = self.auxv.get_entry_address() {
             let entry_usize = entry as usize;

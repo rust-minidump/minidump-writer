@@ -1,4 +1,7 @@
-use {super::CpuInfoError, crate::freebsd::process_inspection::ProcessInspector, crate::minidump_format::*, std::io};
+use {
+    super::CpuInfoError, crate::freebsd::process_inspection::ProcessInspector,
+    crate::minidump_format::*,
+};
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
 

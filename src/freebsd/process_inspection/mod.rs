@@ -387,12 +387,19 @@ impl ProcessInspector {
             }
 
             buffer.truncate(len - 1);
-            String::from_utf8(buffer).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 CPU model string"))
+            String::from_utf8(buffer).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 CPU model string")
+            })
         }
     }
 
     pub fn read_auxv(&self) -> Result<Vec<u8>, AuxvError> {
-        let mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_AUXV, self.pid];
+        let mib = [
+            libc::CTL_KERN,
+            libc::KERN_PROC,
+            libc::KERN_PROC_AUXV,
+            self.pid,
+        ];
 
         let mut len = 0;
 

@@ -1,4 +1,9 @@
-use {super::Pid, super::process_inspection::ProcessInspector, crate::serializers::*, thiserror::Error};
+use {
+    self::reader::AuxvIter, super::process_inspection::ProcessInspector, crate::serializers::*,
+    error_graph::WriteErrorList, std::io::Cursor, thiserror::Error,
+};
+
+mod reader;
 
 #[cfg(target_pointer_width = "32")]
 pub type AuxvType = u32;
@@ -11,7 +16,6 @@ mod consts {
     pub const AT_PHNUM: AuxvType = libc::AT_PHNUM as AuxvType;
     pub const AT_ENTRY: AuxvType = libc::AT_ENTRY as AuxvType;
     pub const AT_BASE: AuxvType = libc::AT_BASE as AuxvType;
-    pub const AT_NULL: AuxvType = libc::AT_NULL as AuxvType;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,37 +54,26 @@ pub struct AuxvDumpInfo {
 }
 
 impl AuxvDumpInfo {
-    pub fn try_filling_missing_info(&mut self, process_inspector: &ProcessInspector) -> Result<(), AuxvError> {
+    pub fn try_filling_missing_info(
+        &mut self,
+        process_inspector: &ProcessInspector,
+        mut soft_errors: impl WriteErrorList<AuxvError>,
+    ) -> Result<(), AuxvError> {
         if self.is_complete() {
             return Ok(());
         }
 
         let auxv_data = process_inspector.read_auxv()?;
+        let cursor = Cursor::new(auxv_data);
 
-        for pair in auxv_data.chunks(2 * std::mem::size_of::<AuxvType>()) {
-            if pair.len() != 2 * std::mem::size_of::<AuxvType>() {
-                continue;
-            }
-
-            let key = if std::mem::size_of::<AuxvType>() == 4 {
-                AuxvType::from(u32::from_ne_bytes([pair[0], pair[1], pair[2], pair[3]]))
-            } else {
-                AuxvType::from(u64::from_ne_bytes([
-                    pair[0], pair[1], pair[2], pair[3], pair[4], pair[5], pair[6], pair[7],
-                ]))
+        for pair_result in AuxvIter::new(cursor) {
+            let AuxvPair { key, value } = match pair_result {
+                Ok(pair) => pair,
+                Err(e) => {
+                    soft_errors.push(e);
+                    continue;
+                }
             };
-
-            let value = if std::mem::size_of::<AuxvType>() == 4 {
-                AuxvType::from(u32::from_ne_bytes([pair[4], pair[5], pair[6], pair[7]]))
-            } else {
-                AuxvType::from(u64::from_ne_bytes([
-                    pair[8], pair[9], pair[10], pair[11], pair[12], pair[13], pair[14], pair[15],
-                ]))
-            };
-
-            if key == consts::AT_NULL {
-                break;
-            }
 
             let dest_field = match key {
                 consts::AT_PHNUM => &mut self.program_header_count,
@@ -131,6 +124,12 @@ pub enum AuxvError {
     ),
     #[error("No auxv entry found")]
     NoAuxvEntryFound,
-    #[error("Invalid auxv format")]
+    #[error("Invalid auxv format (should not hit EOF before AT_NULL)")]
     InvalidFormat,
+    #[error("IO Error")]
+    IOError(
+        #[from]
+        #[serde(serialize_with = "serialize_io_error")]
+        std::io::Error,
+    ),
 }
