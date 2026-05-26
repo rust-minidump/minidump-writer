@@ -305,6 +305,92 @@ impl ProcessInspector {
         None
     }
 
+    pub fn get_vm_mappings(&self) -> io::Result<Vec<KInfoVmEntry>> {
+        let mut count: libc::c_int = 0;
+
+        // SAFETY: kinfo_getvmmap is a well-defined libutil function that returns
+        // a heap-allocated array via malloc. We check for null before use.
+        // from_raw_parts is safe because the pointer is valid and count matches
+        // the array length. free is correct because the pointer came from malloc.
+        // The slice is copied to a Vec before freeing.
+        unsafe {
+            let ptr = kinfo_getvmmap(self.pid, &mut count);
+            if ptr.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            let slice = std::slice::from_raw_parts(ptr, count as usize);
+            let vec = slice.to_vec();
+            libc::free(ptr as *mut libc::c_void);
+            Ok(vec)
+        }
+    }
+
+    pub fn get_hw_ncpu(&self) -> io::Result<i32> {
+        let mib = [libc::CTL_HW, libc::HW_NCPU];
+        let mut ncpu: i32 = 0;
+        let mut len = mem::size_of::<i32>() as libc::size_t;
+
+        // SAFETY: sysctl is a well-defined kernel interface. We provide valid
+        // pointers for mib, output buffer, and size. The kernel fills the
+        // buffer and returns 0 on success, which we check.
+        unsafe {
+            if libc::sysctl(
+                mib.as_ptr(),
+                mib.len() as libc::c_uint,
+                &mut ncpu as *mut i32 as *mut libc::c_void,
+                &mut len,
+                std::ptr::null(),
+                0,
+            ) != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+        }
+
+        Ok(ncpu)
+    }
+
+    pub fn get_hw_model(&self) -> io::Result<String> {
+        let mib = [libc::CTL_HW, libc::HW_MODEL];
+        let mut len = 0;
+
+        // SAFETY: sysctl is a well-defined kernel interface. First call gets the
+        // required buffer size; second call fills the buffer. We check return values.
+        unsafe {
+            if libc::sysctl(
+                mib.as_ptr(),
+                mib.len() as libc::c_uint,
+                std::ptr::null_mut(),
+                &mut len,
+                std::ptr::null(),
+                0,
+            ) != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+
+            if len == 0 {
+                return Ok(String::from("Unknown"));
+            }
+
+            let mut buffer = vec![0u8; len];
+            if libc::sysctl(
+                mib.as_ptr(),
+                mib.len() as libc::c_uint,
+                buffer.as_mut_ptr() as *mut libc::c_void,
+                &mut len,
+                std::ptr::null(),
+                0,
+            ) != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+
+            buffer.truncate(len - 1);
+            String::from_utf8(buffer).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 CPU model string"))
+        }
+    }
+
     pub fn read_auxv(&self) -> Result<Vec<u8>, AuxvError> {
         let mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_AUXV, self.pid];
 
@@ -402,6 +488,42 @@ fn ptrace_process(request: libc::c_int, pid: libc::pid_t) -> io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+const PATH_MAX: usize = 1024;
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct KInfoVmEntry {
+    pub kve_structsize: i32,
+    pub kve_type: i32,
+    pub kve_start: u64,
+    pub kve_end: u64,
+    pub kve_offset: u64,
+    pub kve_vn_fileid: u64,
+    pub kve_vn_fsid_freebsd11: u32,
+    pub kve_flags: i32,
+    pub kve_resident: i32,
+    pub kve_private_resident: i32,
+    pub kve_protection: i32,
+    pub kve_ref_count: i32,
+    pub kve_shadow_count: i32,
+    pub kve_vn_type: i32,
+    pub kve_vn_size: u64,
+    pub kve_vn_rdev_freebsd11: u32,
+    pub kve_vn_mode: u16,
+    pub kve_status: u16,
+    pub kve_type_spec: u64,
+    pub kve_vn_rdev: u64,
+    pub _kve_ispare: [i32; 8],
+    pub kve_path: [u8; PATH_MAX],
+}
+
+const _: () = assert!(std::mem::size_of::<KInfoVmEntry>() == 1160);
+
+#[link(name = "util")]
+unsafe extern "C" {
+    fn kinfo_getvmmap(pid: libc::pid_t, cntp: *mut libc::c_int) -> *mut KInfoVmEntry;
 }
 
 /// Safety: request and T must agree on the size of the returned type.

@@ -663,6 +663,7 @@ impl MinidumpWriter {
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = systeminfo_stream::write_systeminfo_stream(
+            &self.process_inspector,
             buffer,
             soft_errors.subwriter(WriterError::WriteSystemInfoErrors),
         )?;

@@ -1,5 +1,6 @@
 use {
     super::{ProcessInspector, vm_permissions::VmPermissions},
+    crate::freebsd::process_inspection::KInfoVmEntry,
     std::{
         ffi::OsString,
         os::unix::ffi::{OsStrExt, OsStringExt},
@@ -10,8 +11,6 @@ use {
 pub const FREEBSD_GATE_LIBRARY_NAME: &str = "freebsd-gate.so";
 
 type Result<T> = std::result::Result<T, MapsReaderError>;
-
-const PATH_MAX: usize = 1024;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SystemMappingInfo {
@@ -42,41 +41,7 @@ pub enum MapsReaderError {
     ),
 }
 
-#[repr(C)]
-#[derive(Clone)]
-struct KInfoVmEntry {
-    kve_structsize: i32,
-    kve_type: i32,
-    kve_start: u64,
-    kve_end: u64,
-    kve_offset: u64,
-    kve_vn_fileid: u64,
-    kve_vn_fsid_freebsd11: u32,
-    kve_flags: i32,
-    kve_resident: i32,
-    kve_private_resident: i32,
-    kve_protection: i32,
-    kve_ref_count: i32,
-    kve_shadow_count: i32,
-    kve_vn_type: i32,
-    kve_vn_size: u64,
-    kve_vn_rdev_freebsd11: u32,
-    kve_vn_mode: u16,
-    kve_status: u16,
-    kve_type_spec: u64,
-    kve_vn_rdev: u64,
-    _kve_ispare: [i32; 8],
-    kve_path: [u8; PATH_MAX],
-}
-
-const _: () = assert!(std::mem::size_of::<KInfoVmEntry>() == 1160);
-
-#[link(name = "util")]
-unsafe extern "C" {
-    fn kinfo_getvmmap(pid: libc::pid_t, cntp: *mut libc::c_int) -> *mut KInfoVmEntry;
-}
-
-fn c_path_to_option(buf: &[u8; PATH_MAX]) -> Option<OsString> {
+fn c_path_to_option(buf: &[u8; 1024]) -> Option<OsString> {
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     if len == 0 {
         return None;
@@ -90,26 +55,9 @@ impl MappingInfo {
         pid: i32,
         freebsd_gate_address: Option<u64>,
     ) -> Result<Vec<Self>> {
-        let mut count: libc::c_int = 0;
-
-        // SAFETY: kinfo_getvmmap is a well-defined libutil function that returns
-        // a heap-allocated array via malloc. We check for null before use.
-        // from_raw_parts is safe because the pointer is valid and count matches
-        // the array length. free is correct because the pointer came from malloc.
-        // The slice is copied to a Vec before freeing.
-        let entries: Vec<KInfoVmEntry> = unsafe {
-            let ptr = kinfo_getvmmap(pid as libc::pid_t, &mut count);
-            if ptr.is_null() {
-                return Err(MapsReaderError::ReadError(
-                    pid,
-                    std::io::Error::last_os_error(),
-                ));
-            }
-            let slice = std::slice::from_raw_parts(ptr, count as usize);
-            let vec = slice.to_vec();
-            libc::free(ptr as *mut libc::c_void);
-            vec
-        };
+        let entries = process_inspector
+            .get_vm_mappings()
+            .map_err(|e| MapsReaderError::ReadError(pid, e))?;
 
         let mut infos: Vec<Self> = Vec::new();
 

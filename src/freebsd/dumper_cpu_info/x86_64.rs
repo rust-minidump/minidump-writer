@@ -1,16 +1,23 @@
-use {super::CpuInfoError, crate::minidump_format::*, std::io};
+use {super::CpuInfoError, crate::freebsd::process_inspection::ProcessInspector, crate::minidump_format::*, std::io};
 
 type Result<T> = std::result::Result<T, CpuInfoError>;
 
-pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
+pub fn write_cpu_information(
+    process_inspector: &ProcessInspector,
+    sys_info: &mut MDRawSystemInfo,
+) -> Result<()> {
     sys_info.processor_architecture = if cfg!(target_arch = "x86") {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_INTEL
     } else {
         MDCPUArchitecture::PROCESSOR_ARCHITECTURE_AMD64
     } as u16;
 
-    let cpu_count = read_hw_ncpu()?;
-    let cpu_model = read_hw_model()?;
+    let cpu_count = process_inspector
+        .get_hw_ncpu()
+        .map_err(CpuInfoError::ReadError)?;
+    let cpu_model = process_inspector
+        .get_hw_model()
+        .map_err(CpuInfoError::ReadError)?;
 
     sys_info.number_of_processors = cpu_count as u8;
 
@@ -26,73 +33,6 @@ pub fn write_cpu_information(sys_info: &mut MDRawSystemInfo) -> Result<()> {
     sys_info.processor_revision = ((model << 8) | stepping) as u16;
 
     Ok(())
-}
-
-fn read_hw_ncpu() -> Result<i32> {
-    let mib = [libc::CTL_HW, libc::HW_NCPU];
-    let mut ncpu: i32 = 0;
-    let mut len = std::mem::size_of::<i32>() as libc::size_t;
-
-    unsafe {
-        // SAFETY: sysctl is a well-defined kernel interface. We provide valid
-        // pointers for mib, output buffer, and size. The kernel fills the
-        // buffer and returns 0 on success, which we check.
-        if libc::sysctl(
-            mib.as_ptr(),
-            mib.len() as libc::c_uint,
-            &mut ncpu as *mut i32 as *mut libc::c_void,
-            &mut len,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return Err(CpuInfoError::ReadError(io::Error::last_os_error()));
-        }
-    }
-
-    Ok(ncpu)
-}
-
-fn read_hw_model() -> Result<String> {
-    let mib = [libc::CTL_HW, libc::HW_MODEL];
-    let mut len = 0;
-
-    // SAFETY: sysctl is a well-defined kernel interface. First call gets the
-    // required buffer size; second call fills the buffer. We check return values.
-    unsafe {
-        if libc::sysctl(
-            mib.as_ptr(),
-            mib.len() as libc::c_uint,
-            std::ptr::null_mut(),
-            &mut len,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return Err(CpuInfoError::ReadError(io::Error::last_os_error()));
-        }
-
-        if len == 0 {
-            return Ok(String::from("Unknown"));
-        }
-
-        let mut buffer = vec![0u8; len];
-        if libc::sysctl(
-            mib.as_ptr(),
-            mib.len() as libc::c_uint,
-            buffer.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return Err(CpuInfoError::ReadError(io::Error::last_os_error()));
-        }
-
-        buffer.truncate(len - 1);
-
-        String::from_utf8(buffer).map_err(|_| CpuInfoError::ParseError)
-    }
 }
 
 fn parse_cpu_model(model: &str) -> (String, u32, u32, u32) {

@@ -1,6 +1,7 @@
 use {
     super::*,
     crate::freebsd::dumper_cpu_info::{self, CpuInfoError},
+    crate::freebsd::process_inspection::ProcessInspector,
     crate::mem_writer::{MemoryWriterError, write_string_to_location},
     error_graph::WriteErrorList,
 };
@@ -16,6 +17,7 @@ pub enum SectionSystemInfoError {
 }
 
 pub fn write_systeminfo_stream(
+    process_inspector: &ProcessInspector,
     buffer: &mut DumpBuf,
     mut soft_errors: impl WriteErrorList<SectionSystemInfoError>,
 ) -> Result<MDRawDirectory, SectionSystemInfoError> {
@@ -34,7 +36,7 @@ pub fn write_systeminfo_stream(
     info.platform_id = platform_id as u32;
     info.csd_version_rva = os_version_loc.rva;
 
-    if let Err(e) = dumper_cpu_info::write_cpu_information(&mut info) {
+    if let Err(e) = dumper_cpu_info::write_cpu_information(process_inspector, &mut info) {
         soft_errors.push(SectionSystemInfoError::WriteCpuInformationFailed(e));
     }
 
