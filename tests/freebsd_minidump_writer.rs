@@ -11,10 +11,11 @@ use {
         auxv::AuxvDumpInfo,
         crash_context::CrashContext,
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
+        module_reader,
     },
-    serde_json::Value,
     std::{
-        io::{BufRead, BufReader},
+        collections::HashSet,
+        io::{BufRead, BufReader, Seek, SeekFrom},
         process::Stdio,
     },
 };
@@ -105,7 +106,7 @@ fn get_crash_context(tid: Pid, pid: Pid) -> CrashContext {
 fn auxv_sysctl_fills_elf_entries() {
     let mut auxv = AuxvDumpInfo::default();
     let inspector = minidump_writer::ProcessInspector::local(std::process::id() as Pid);
-    auxv.try_filling_missing_info(&inspector)
+    auxv.try_filling_missing_info(&inspector, error_graph::ErrorList::default())
         .expect("failed to read auxv for current process");
 
     assert!(auxv.get_program_header_count().unwrap_or_default() > 0);
@@ -113,53 +114,17 @@ fn auxv_sysctl_fills_elf_entries() {
     assert!(auxv.get_entry_address().unwrap_or_default() > 0);
 }
 
-fn contains_json_string(value: &Value, expected: &str) -> bool {
+fn contains_json_string(value: &serde_json::Value, expected: &str) -> bool {
     match value {
-        Value::String(actual) => actual == expected,
-        Value::Array(items) => items
+        serde_json::Value::String(actual) => actual == expected,
+        serde_json::Value::Array(items) => items
             .iter()
             .any(|item| contains_json_string(item, expected)),
-        Value::Object(entries) => entries
+        serde_json::Value::Object(entries) => entries
             .values()
             .any(|item| contains_json_string(item, expected)),
         _ => false,
     }
-}
-
-#[test]
-fn skip_stacks_if_mapping_unreferenced_omits_thread_stacks() {
-    let mut child = start_child_and_wait_for_threads(1);
-    let pid = child.id() as i32;
-    let main_lwp = get_main_thread_lwp(pid).unwrap_or(pid);
-
-    let mut tmpfile = tempfile::Builder::new()
-        .prefix("skip_stacks_if_mapping_unreferenced")
-        .tempfile()
-        .unwrap();
-
-    let mut tmp = MinidumpWriterConfig::new(pid, main_lwp);
-    tmp.skip_stacks_if_mapping_unreferenced()
-        .set_principal_mapping_address(usize::MAX);
-    tmp.write(&mut tmpfile).expect("Could not write minidump");
-    child.kill().expect("Failed to kill process");
-    let _waitres = child.wait().expect("Failed to wait for child");
-
-    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
-    let soft_errors = read_minidump_soft_errors_or_panic(&dump);
-    assert!(contains_json_string(
-        &soft_errors,
-        "PrincipalMappingNotReferenced"
-    ));
-
-    let threads: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
-    assert!(!threads.threads.is_empty(), "Expected at least one thread");
-    assert!(
-        threads
-            .threads
-            .iter()
-            .all(|thread| thread.raw.stack.memory.data_size == 0),
-        "Expected all thread stacks to be omitted"
-    );
 }
 
 macro_rules! contextual_test {
@@ -198,7 +163,6 @@ contextual_test! {
         let tmp = context.minidump_writer(pid);
         let in_memory_buffer = tmp.write(&mut tmpfile).expect("Could not write minidump");
         child.kill().expect("Failed to kill process");
-
         let _waitres = child.wait().expect("Failed to wait for child");
 
         let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
@@ -263,12 +227,57 @@ contextual_test! {
 
         assert_eq!(region.base_address, memory_addr as u64);
         assert_eq!(region.size, memory_size as u64);
+
+        // Verify memory contents match what the child allocated
+        // (0..memory_size bytes cycling 0..255)
+        let mut values = Vec::<u8>::with_capacity(memory_size);
+        for idx in 0..memory_size {
+            values.push((idx % 255) as u8);
+        }
+        assert_eq!(region.bytes, values);
     }
+}
+
+#[test]
+fn skip_stacks_if_mapping_unreferenced_omits_thread_stacks() {
+    let num_of_threads = 1;
+    let mut child = start_child_and_wait_for_threads(num_of_threads);
+    let pid = child.id() as i32;
+    let main_lwp = get_main_thread_lwp(pid).unwrap_or(pid);
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("skip_stacks_if_mapping_unreferenced")
+        .tempfile()
+        .unwrap();
+
+    let mut tmp = MinidumpWriterConfig::new(pid, main_lwp);
+    tmp.skip_stacks_if_mapping_unreferenced()
+        .set_principal_mapping_address(usize::MAX);
+    tmp.write(&mut tmpfile).expect("Could not write minidump");
+    child.kill().expect("Failed to kill process");
+    let _waitres = child.wait().expect("Failed to wait for child");
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let soft_errors = read_minidump_soft_errors_or_panic(&dump);
+    assert!(contains_json_string(
+        &soft_errors,
+        "PrincipalMappingNotReferenced"
+    ));
+
+    let threads: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
+    assert!(!threads.threads.is_empty(), "Expected at least one thread");
+    assert!(
+        threads
+            .threads
+            .iter()
+            .all(|thread| thread.raw.stack.memory.data_size == 0),
+        "Expected all thread stacks to be omitted"
+    );
 }
 
 contextual_test! {
     fn named_threads(context: Context) {
-        let num_of_threads = 3;
+        let num_of_threads = 5;
         let mut child = start_child_and_wait_for_named_threads(num_of_threads);
         let pid = child.id() as i32;
 
@@ -285,14 +294,23 @@ contextual_test! {
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
 
         let threads: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
-        let thread_names: MinidumpThreadNames = dump.get_stream().expect("Couldn't find MinidumpThreadNames");
+
+        let thread_names: MinidumpThreadNames = dump
+            .get_stream()
+            .expect("Couldn't find MinidumpThreadNames");
 
         let thread_ids: Vec<_> = threads.threads.iter().map(|t| t.raw.thread_id).collect();
-        let named_count = thread_ids
+        let names: HashSet<_> = thread_ids
             .iter()
-            .filter(|id| thread_names.get_name(**id).is_some())
-            .count();
-        assert!(named_count > 0, "Expected at least one named thread");
+            .map(|id| thread_names.get_name(*id).unwrap_or_default())
+            .map(|cow| cow.into_owned())
+            .collect();
+        let mut expected = HashSet::new();
+        expected.insert("test".to_string());
+        for id in 1..num_of_threads {
+            expected.insert(format!("thread_{id}"));
+        }
+        assert_eq!(expected, names);
     }
 }
 
@@ -323,6 +341,31 @@ contextual_test! {
                     handle_data.handles.len() > 0,
                     "Expected file descriptors in handle data stream"
                 );
+
+                // Verify stdin, stdout, stderr (fd 0, 1, 2) are present
+                for i in 0..3 {
+                    let descriptor = handle_data.handles.get(i).expect("Descriptor should be present");
+                    let fd = *descriptor.raw.handle().expect("Handle should be populated");
+                    assert_eq!(fd, i as u64);
+                }
+
+                let non_std_files = &handle_data.handles[3..];
+
+                // Verify that the test files created by the child are present
+                for i in 0..num_of_files {
+                    assert!(
+                        non_std_files.iter().any(|descriptor| {
+                            let Some(name) = &descriptor.object_name else { return false; };
+                            let Some(file_name) = name.rsplit_once('/').map(|(_, fname)| fname) else { return false; };
+                            if !file_name.starts_with("test_file") {
+                                return false;
+                            }
+
+                            file_name.ends_with(&i.to_string())
+                        }),
+                        "unable to locate expected file `test_file{i}` in file handle stream"
+                    );
+                }
             }
             Err(_) if !proc_fd_exists => {}
             Err(e) => panic!("Unexpected error reading handle data stream: {e}"),
@@ -349,49 +392,134 @@ contextual_test! {
 
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
         let mem_info_list: MinidumpMemoryInfoList = dump.get_stream().expect("Couldn't find MinidumpMemoryInfoList");
-        assert!(mem_info_list.iter().count() > 0, "Expected memory info entries");
+        assert!(mem_info_list.iter().count() > 1, "Expected memory info entries");
     }
 }
 
 contextual_test! {
     fn minidump_size_limit(context: Context) {
-        let num_of_threads = 3;
+        let num_of_threads = 40;
         let mut child = start_child_and_wait_for_threads(num_of_threads);
         let pid = child.id() as i32;
 
-        let mut tmpfile_nolimit = tempfile::Builder::new()
-            .prefix("no_limit")
-            .tempfile()
-            .unwrap();
+        let mut total_normal_stack_size = 0;
+        let normal_file_size;
+        // First, write a minidump with no size limit.
+        {
+            let mut tmpfile = tempfile::Builder::new()
+                .prefix("write_dump_unlimited")
+                .tempfile()
+                .unwrap();
 
-        let tmp = context.minidump_writer(pid);
-        tmp.write(&mut tmpfile_nolimit).expect("Could not write minidump");
-        let no_limit_size = std::fs::metadata(tmpfile_nolimit.path()).unwrap().len();
+            context.minidump_writer(pid).write(&mut tmpfile).expect("Could not write minidump");
 
-        let mut tmpfile_limit = tempfile::Builder::new()
-            .prefix("with_limit")
-            .tempfile()
-            .unwrap();
+            let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+            assert!(meta.len() > 0);
 
-        let mut tmp = context.minidump_writer(pid);
-        tmp.set_minidump_size_limit(no_limit_size / 2);
-        tmp.write(&mut tmpfile_limit).expect("Could not write minidump");
-        let limit_size = std::fs::metadata(tmpfile_limit.path()).unwrap().len();
+            normal_file_size = meta.len();
+
+            // Read dump file and check its contents
+            let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+            let thread_list: MinidumpThreadList =
+                dump.get_stream().expect("Couldn't find MinidumpThreadList");
+            for thread in thread_list.threads {
+                assert!(thread.raw.thread_id > 0);
+                assert!(thread.raw.stack.memory.data_size > 0);
+                total_normal_stack_size += thread.raw.stack.memory.data_size;
+            }
+        }
+
+        // Second, write a minidump with a size limit big enough to not trigger anything.
+        {
+            // Set size limit arbitrarily 2MiB larger than the normal file size -- such
+            // that the limiting code will not kick in.
+            let minidump_size_limit = normal_file_size + 2 * 1024 * 1024;
+
+            let mut tmpfile = tempfile::Builder::new()
+                .prefix("write_dump_pseudolimited")
+                .tempfile()
+                .unwrap();
+
+            let mut tmp = context.minidump_writer(pid);
+            tmp.set_minidump_size_limit(minidump_size_limit);
+            tmp.write(&mut tmpfile).expect("Could not write minidump");
+
+            let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+
+            // Make sure limiting wasn't actually triggered.
+            let min = std::cmp::min(meta.len(), normal_file_size);
+            let max = std::cmp::max(meta.len(), normal_file_size);
+
+            // Setting a stack limit limits the size of non-main stacks even before
+            // the limit is reached. This will cause slight variations in size
+            // between a limited and an unlimited minidump.
+            assert!(max - min < 1024, "max = {max:} min = {min:}");
+        }
+
+        // Third, write a minidump with a size limit small enough to be triggered.
+        {
+            // Copied from sections/thread_list_stream.rs
+            const LIMIT_AVERAGE_THREAD_STACK_LENGTH: u64 = 8 * 1024;
+            let mut minidump_size_limit = LIMIT_AVERAGE_THREAD_STACK_LENGTH * 40;
+
+            // If, in reality, each of the threads' stack is *smaller* than
+            // kLimitAverageThreadStackLength, the normal file size could very well be
+            // smaller than the arbitrary limit that was just set. In that case,
+            // either of these numbers should trigger the size-limiting code, but we
+            // might as well pick the smallest.
+            if normal_file_size < minidump_size_limit {
+                minidump_size_limit = normal_file_size;
+            }
+
+            let mut tmpfile = tempfile::Builder::new()
+                .prefix("write_dump_limited")
+                .tempfile()
+                .unwrap();
+
+            let mut tmp = context.minidump_writer(pid);
+            tmp.set_minidump_size_limit(minidump_size_limit);
+            tmp.write(&mut tmpfile).expect("Could not write minidump");
+
+            let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+            assert!(meta.len() > 0);
+            // Make sure the file size is at least smaller than the original. If this
+            // fails because it's the same size, then the size-limit logic didn't kick
+            // in like it was supposed to.
+            assert!(meta.len() < normal_file_size);
+
+            let mut total_limit_stack_size = 0;
+            // Read dump file and check its contents
+            let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+            let thread_list: MinidumpThreadList =
+                dump.get_stream().expect("Couldn't find MinidumpThreadList");
+            for thread in thread_list.threads {
+                assert!(thread.raw.thread_id > 0);
+                assert!(thread.raw.stack.memory.data_size > 0);
+                total_limit_stack_size += thread.raw.stack.memory.data_size;
+            }
+
+            // Make sure stack size shrunk by at least 1KB per extra thread.
+            // Copied from sections/thread_list_stream.rs
+            const LIMIT_BASE_THREAD_COUNT: usize = 20;
+            const MIN_PER_EXTRA_THREAD_STACK_REDUCTION: usize = 1024;
+            let min_expected_reduction =
+                (40 - LIMIT_BASE_THREAD_COUNT) * MIN_PER_EXTRA_THREAD_STACK_REDUCTION;
+            assert!(total_limit_stack_size < total_normal_stack_size - min_expected_reduction as u32);
+        }
 
         child.kill().expect("Failed to kill process");
         let _waitres = child.wait().expect("Failed to wait for child");
-
-        assert!(
-            limit_size <= no_limit_size,
-            "Limited dump ({}) should be <= unlimited ({})",
-            limit_size,
-            no_limit_size
-        );
     }
 }
 
 contextual_test! {
     fn sanitized_stacks(context: Context) {
+        if context == Context::With {
+            // FIXME the context's stack pointer very often doesn't lie in mapped memory, resulting
+            // in the stack memory having 0 size (so no slice will match `defaced` in the
+            // assertion).
+            return;
+        }
         let num_of_threads = 1;
         let mut child = start_child_and_wait_for_threads(num_of_threads);
         let pid = child.id() as i32;
@@ -403,14 +531,251 @@ contextual_test! {
 
         let mut tmp = context.minidump_writer(pid);
         tmp.sanitize_stack();
-        tmp.write(&mut tmpfile).expect("Could not write minidump");
+        tmp.write(&mut tmpfile).expect("Failed to dump minidump");
         child.kill().expect("Failed to kill process");
         let _waitres = child.wait().expect("Failed to wait for child");
 
+        // Read dump file and check its contents
         let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
-        let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
-        let _: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
+        let dump_array = std::fs::read(tmpfile.path()).expect("Failed to read minidump as vec");
+        let thread_list: MinidumpThreadList =
+            dump.get_stream().expect("Couldn't find MinidumpThreadList");
 
-        assert!(std::fs::metadata(tmpfile.path()).unwrap().len() > 0);
+        let defaced;
+        #[cfg(target_pointer_width = "64")]
+        {
+            defaced = 0x0defaced0defacedusize.to_ne_bytes();
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            defaced = 0x0defacedusize.to_ne_bytes()
+        };
+
+        for thread in thread_list.threads {
+            let mem = thread.raw.stack.memory;
+            let start = mem.rva as usize;
+            let end = (mem.rva + mem.data_size) as usize;
+            let slice = &dump_array.as_slice()[start..end];
+            assert!(
+                slice.windows(defaced.len()).any(|window| window == defaced),
+                "Expected sanitized (defaced) pattern in thread stack"
+            );
+        }
     }
+}
+
+contextual_test! {
+    fn write_early_abort(context: Context) {
+        let mut child = start_child_and_return(&["spawn_alloc_wait"]);
+        let pid = child.id() as i32;
+
+        let mut tmpfile = tempfile::Builder::new()
+            .prefix("early_abort")
+            .tempfile()
+            .unwrap();
+
+        let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+        let mut buf = String::new();
+        let _ = f
+            .read_line(&mut buf)
+            .expect("Couldn't read address provided by child");
+        let mut output = buf.split_whitespace();
+        // We do not read the actual memory_address, but use NULL, which
+        // should create an error during dumping and lead to a truncated minidump.
+        let _ = output.next().unwrap().trim_start_matches("0x");
+        let memory_addr: usize = 0;
+        let memory_size: usize = output
+            .next()
+            .unwrap()
+            .parse()
+            .expect("unable to parse memory_size");
+
+        let app_memory = AppMemory {
+            ptr: memory_addr,
+            length: memory_size,
+        };
+
+        let mut tmp = context.minidump_writer(pid);
+        tmp.set_app_memory(vec![app_memory]);
+
+        // This should fail, because during the dump an error is detected (try_from fails)
+        match tmp.write(&mut tmpfile) {
+            Err(WriterError::SectionAppMemoryError(_)) => (),
+            Ok(_) => panic!("Expected an error but write succeeded"),
+            Err(e) => panic!("Wrong kind of error returned: {e:?}"),
+        }
+
+        child.kill().expect("Failed to kill process");
+        let _waitres = child.wait().expect("Failed to wait for child");
+
+        // Read dump file and check its contents. There should be a truncated minidump available
+        let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+        // Should be there
+        let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
+        let _: MinidumpModuleList = dump.get_stream().expect("Couldn't find MinidumpModuleList");
+
+        // Should be missing:
+        assert!(dump.get_stream::<MinidumpMemoryList>().is_err());
+    }
+}
+
+#[test]
+fn with_deleted_binary() {
+    let num_of_threads = 1;
+    let binary_copy_dir = tempfile::Builder::new()
+        .prefix("deleted_binary")
+        .tempdir()
+        .unwrap();
+    let binary_copy = binary_copy_dir.as_ref().join("binary_copy");
+
+    let path: String = if let Ok(p) = std::env::var("TEST_HELPER") {
+        p
+    } else {
+        std::env!("CARGO_BIN_EXE_test").into()
+    };
+
+    std::fs::copy(path, &binary_copy).expect("Failed to copy binary");
+    let mem_slice = std::fs::read(&binary_copy).expect("Failed to read binary");
+
+    let mut child = std::process::Command::new(&binary_copy)
+        .env("RUST_BACKTRACE", "1")
+        .arg("spawn_and_wait")
+        .arg(num_of_threads.to_string())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to execute child");
+    wait_for_threads(&mut child, num_of_threads);
+
+    let pid = child.id() as i32;
+
+    let mut build_id =
+        module_reader::read_build_id_from_module(SliceModuleMemoryReader(mem_slice.as_slice()))
+            .expect("Failed to get build_id");
+
+    std::fs::remove_file(&binary_copy).expect("Failed to remove binary");
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("deleted_binary")
+        .tempfile()
+        .unwrap();
+
+    let main_lwp = get_main_thread_lwp(pid).unwrap_or(pid);
+    MinidumpWriterConfig::new(pid, main_lwp)
+        .write(&mut tmpfile)
+        .expect("Could not write minidump");
+
+    child.kill().expect("Failed to kill process");
+    let _waitres = child.wait().expect("Failed to wait for child");
+
+    // Begin checks on dump
+    let meta = std::fs::metadata(tmpfile.path()).expect("Couldn't get metadata for tempfile");
+    assert!(meta.len() > 0);
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let module_list: MinidumpModuleList = dump
+        .get_stream()
+        .expect("Couldn't find stream MinidumpModuleList");
+    let main_module = module_list
+        .main_module()
+        .expect("Could not get main module");
+
+    let did = main_module
+        .debug_identifier()
+        .expect("expected value debug id");
+    {
+        let uuid = did.uuid();
+        let uuid = uuid.as_bytes();
+
+        // Swap bytes in the original to match the expected uuid
+        if cfg!(target_endian = "little") {
+            build_id[..4].reverse();
+            build_id[4..6].reverse();
+            build_id[6..8].reverse();
+        }
+
+        // The build_id from the binary can be as little as 8 bytes, eg LLD uses
+        // xxhash to calculate the build_id by default from 10+
+        build_id.resize(16, 0);
+
+        assert_eq!(uuid.as_slice(), &build_id);
+    }
+
+    // The 'age'/appendix, always 0 on non-windows targets
+    assert_eq!(did.appendix(), 0);
+}
+
+/// Verify that a minidump with a user-supplied mapping can be written and
+/// read back correctly. This is the FreeBSD equivalent of Linux's
+/// `write_and_read_dump_from_parent` test, adapted for FreeBSD's API
+/// (MappingInfo instead of MappingEntry + SystemMappingInfo).
+#[test]
+#[ignore]
+fn write_with_user_mapping() {
+    let mut child = start_child_and_return(&["spawn_mmap_wait"]);
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("write_with_user_mapping")
+        .tempfile()
+        .unwrap();
+
+    let mut f = BufReader::new(child.stdout.as_mut().expect("Can't open stdout"));
+    let mut buf = String::new();
+    let _ = f
+        .read_line(&mut buf)
+        .expect("Couldn't read address provided by child");
+    let mut output = buf.split_whitespace();
+    let mmap_addr: usize = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse mmap_addr");
+    let memory_size: usize = output
+        .next()
+        .unwrap()
+        .parse()
+        .expect("unable to parse memory_size");
+
+    use minidump_writer::maps_reader::{MappingInfo, SystemMappingInfo};
+    use minidump_writer::vm_permissions::VmPermissions;
+
+    // Add information about the mapped memory.
+    let mapping = MappingInfo {
+        start_address: mmap_addr,
+        size: memory_size,
+        system_mapping_info: SystemMappingInfo {
+            start_address: mmap_addr,
+            end_address: mmap_addr + memory_size,
+        },
+        offset: 0,
+        permissions: VmPermissions::READ | VmPermissions::WRITE,
+        name: Some(std::ffi::OsString::from("a fake mapping")),
+    };
+
+    let main_lwp = get_main_thread_lwp(pid).unwrap_or(pid);
+    let mut tmp = MinidumpWriterConfig::new(pid, main_lwp);
+
+    tmp.set_user_mapping_list(vec![mapping]);
+    tmp.write(&mut tmpfile)
+        .expect("Could not write minidump");
+
+    child.kill().expect("Failed to kill process");
+    let _waitres = child.wait().expect("Failed to wait for child");
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let module_list: MinidumpModuleList = dump
+        .get_stream()
+        .expect("Couldn't find stream MinidumpModuleList");
+    let module = module_list
+        .module_at_address(mmap_addr as u64)
+        .expect("Couldn't find user mapping module");
+    assert_eq!(module.base_address(), mmap_addr as u64);
+    assert_eq!(module.size(), memory_size as u64);
+    assert_eq!(module.code_file(), "a fake mapping");
+
+    let _: MinidumpException = dump.get_stream().expect("Couldn't find MinidumpException");
+    let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
+    let _: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
+    let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
+    let _: MinidumpMemoryInfoList = dump.get_stream().expect("Couldn't find MinidumpMemoryInfoList");
 }
