@@ -407,9 +407,11 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             if header.p_type != elf::program_header::PT_NOTE {
                 continue;
             }
-            if let Ok(Some(result)) =
-                self.find_build_id_note(self.segment_offset(&header), self.segment_size(&header), header.p_align)
-            {
+            if let Ok(Some(result)) = self.find_build_id_note(
+                self.segment_offset(&header),
+                self.segment_size(&header),
+                header.p_align,
+            ) {
                 return Ok(result);
             }
         }
