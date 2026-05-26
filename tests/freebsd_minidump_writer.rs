@@ -756,8 +756,7 @@ fn write_with_user_mapping() {
     let mut tmp = MinidumpWriterConfig::new(pid, main_lwp);
 
     tmp.set_user_mapping_list(vec![mapping]);
-    tmp.write(&mut tmpfile)
-        .expect("Could not write minidump");
+    tmp.write(&mut tmpfile).expect("Could not write minidump");
 
     child.kill().expect("Failed to kill process");
     let _waitres = child.wait().expect("Failed to wait for child");
@@ -777,5 +776,7 @@ fn write_with_user_mapping() {
     let _: MinidumpThreadList = dump.get_stream().expect("Couldn't find MinidumpThreadList");
     let _: MinidumpMemoryList = dump.get_stream().expect("Couldn't find MinidumpMemoryList");
     let _: MinidumpSystemInfo = dump.get_stream().expect("Couldn't find MinidumpSystemInfo");
-    let _: MinidumpMemoryInfoList = dump.get_stream().expect("Couldn't find MinidumpMemoryInfoList");
+    let _: MinidumpMemoryInfoList = dump
+        .get_stream()
+        .expect("Couldn't find MinidumpMemoryInfoList");
 }
