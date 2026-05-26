@@ -601,11 +601,12 @@ impl MinidumpWriter {
         idx: usize,
     ) -> Result<Vec<u8>, WriterError> {
         assert!(idx < self.mappings.len());
+        let mapping = &self.mappings[idx];
         let reader = self.process_inspector.process_reader();
         crate::module_reader::read_build_id_from_module(
             crate::module_reader::ProcessModuleMemoryReader::new(
                 reader,
-                self.mappings[idx].start_address,
+                self.module_base_address(mapping),
             ),
         )
         .map_err(WriterError::ModuleReaderError)
@@ -616,14 +617,19 @@ impl MinidumpWriter {
         idx: usize,
     ) -> Result<String, WriterError> {
         assert!(idx < self.mappings.len());
+        let mapping = &self.mappings[idx];
         let reader = self.process_inspector.process_reader();
         crate::module_reader::read_soname_from_module(
             crate::module_reader::ProcessModuleMemoryReader::new(
                 reader,
-                self.mappings[idx].start_address,
+                self.module_base_address(mapping),
             ),
         )
         .map_err(WriterError::ModuleReaderError)
+    }
+
+    fn module_base_address(&self, mapping: &crate::freebsd::maps_reader::MappingInfo) -> usize {
+        mapping.start_address.saturating_sub(mapping.offset)
     }
 
     fn write_dump(
