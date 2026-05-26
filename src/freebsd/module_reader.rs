@@ -294,8 +294,8 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             }
 
             if let Some(data) = self.find_note(
-                header.p_offset,
-                header.p_filesz,
+                self.segment_offset(&header),
+                self.segment_size(&header),
                 header.p_align,
                 note_type,
                 note_size,
@@ -408,7 +408,7 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
                 continue;
             }
             if let Ok(Some(result)) =
-                self.find_build_id_note(header.p_offset, header.p_filesz, header.p_align)
+                self.find_build_id_note(self.segment_offset(&header), self.segment_size(&header), header.p_align)
             {
                 return Ok(result);
             }
@@ -487,6 +487,22 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             header.sh_addr
         } else {
             header.sh_offset
+        }
+    }
+
+    fn segment_offset(&self, header: &elf::ProgramHeader) -> u64 {
+        if self.module_memory.is_process_memory() {
+            header.p_vaddr
+        } else {
+            header.p_offset
+        }
+    }
+
+    fn segment_size(&self, header: &elf::ProgramHeader) -> u64 {
+        if self.module_memory.is_process_memory() {
+            header.p_memsz
+        } else {
+            header.p_filesz
         }
     }
 

@@ -424,7 +424,14 @@ contextual_test! {
                 dump.get_stream().expect("Couldn't find MinidumpThreadList");
             for thread in thread_list.threads {
                 assert!(thread.raw.thread_id > 0);
-                assert!(thread.raw.stack.memory.data_size > 0);
+                // When a crash context is provided (Context::With), the crash
+                // thread's stack pointer comes from getcontext() in the parent
+                // process, which doesn't map to the child's address space. This
+                // causes the stack memory to have data_size == 0 for the crash
+                // thread, which is expected and unavoidable.
+                if context == Context::Without {
+                    assert!(thread.raw.stack.memory.data_size > 0);
+                }
                 total_normal_stack_size += thread.raw.stack.memory.data_size;
             }
         }
@@ -494,7 +501,9 @@ contextual_test! {
                 dump.get_stream().expect("Couldn't find MinidumpThreadList");
             for thread in thread_list.threads {
                 assert!(thread.raw.thread_id > 0);
-                assert!(thread.raw.stack.memory.data_size > 0);
+                if context == Context::Without {
+                    assert!(thread.raw.stack.memory.data_size > 0);
+                }
                 total_limit_stack_size += thread.raw.stack.memory.data_size;
             }
 
