@@ -30,9 +30,9 @@ pub enum CpuInfoError {
 
 pub fn os_information() -> (PlatformId, String) {
     // Note: PlatformId doesn't have a FreeBSD-specific value.
-    // Using Linux as a generic Unix-like platform identifier,
-    // consistent with how other minidump tools handle non-Windows platforms.
-    let platform_id = PlatformId::Linux;
+    // Use PlatformId::Unix which is the Breakpad extension for generic
+    // Unix-like platforms, rather than incorrectly claiming Linux.
+    let platform_id = PlatformId::Unix;
 
     let mut uname_info = MaybeUninit::<libc::utsname>::zeroed();
 
