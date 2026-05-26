@@ -30,7 +30,7 @@ cfg_if::cfg_if! {
 impl ThreadInfo {
     pub fn create(
         process_inspector: &ProcessInspector,
-        process_id: Pid,
+        _process_id: Pid,
         thread_id: Pid,
     ) -> Result<Self> {
         let mut registers = Self::getregs(process_inspector, thread_id)?;

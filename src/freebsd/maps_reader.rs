@@ -1,6 +1,5 @@
 use {
     super::{ProcessInspector, vm_permissions::VmPermissions},
-    crate::freebsd::process_inspection::KInfoVmEntry,
     std::{
         ffi::OsString,
         os::unix::ffi::{OsStrExt, OsStringExt},

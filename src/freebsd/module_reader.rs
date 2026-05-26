@@ -429,7 +429,7 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
         .ok_or(Error::NoSectionNote)?;
 
         match self.find_build_id_note(
-            self.section_offset(&header),
+            self.section_offset(header),
             header.sh_size,
             header.sh_addralign,
         ) {

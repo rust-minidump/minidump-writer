@@ -198,10 +198,10 @@ impl ProcessInspector {
             return Err(io::Error::last_os_error());
         }
         if num_lwps == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Thread enumeration failed for process {}", self.pid),
-            ));
+            return Err(io::Error::other(format!(
+                "Thread enumeration failed for process {}",
+                self.pid
+            )));
         }
 
         let count = num_lwps as usize;

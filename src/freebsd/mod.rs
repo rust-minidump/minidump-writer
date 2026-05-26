@@ -2,7 +2,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod app_memory;
-pub(crate) mod auxv;
+pub mod auxv;
 pub mod crash_context;
 pub mod dumper_cpu_info;
 pub mod maps_reader;
