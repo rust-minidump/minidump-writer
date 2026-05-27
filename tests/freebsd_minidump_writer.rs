@@ -684,13 +684,32 @@ fn with_deleted_binary() {
     let module_list: MinidumpModuleList = dump
         .get_stream()
         .expect("Couldn't find stream MinidumpModuleList");
+
+    // Debug: print all modules to understand which one is "main"
+    eprintln!("DEBUG: {} modules in minidump:", module_list.iter().count());
+    for module in module_list.iter() {
+        eprintln!(
+            "DEBUG: module: base={:#x}, size={:#x}, code_file={}",
+            module.base_address(),
+            module.size(),
+            module.code_file(),
+        );
+    }
+
     let main_module = module_list
         .main_module()
         .expect("Could not get main module");
+    eprintln!(
+        "DEBUG: main_module: base={:#x}, code_file={}",
+        main_module.base_address(),
+        main_module.code_file(),
+    );
+    eprintln!("DEBUG: file build_id (raw): {:?}", build_id);
 
     let did = main_module
         .debug_identifier()
         .expect("expected value debug id");
+    eprintln!("DEBUG: debug_identifier uuid: {:?}", did.uuid().as_bytes());
     {
         let uuid = did.uuid();
         let uuid = uuid.as_bytes();
@@ -704,6 +723,7 @@ fn with_deleted_binary() {
 
         // The build_id from the binary can be as little as 8 bytes, eg LLD uses
         // xxhash to calculate the build_id by default from 10+
+        eprintln!("DEBUG: file build_id (swapped): {:?}", build_id);
         build_id.resize(16, 0);
 
         assert_eq!(uuid.as_slice(), &build_id);

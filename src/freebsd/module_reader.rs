@@ -447,9 +447,7 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
 
         // Take at most one page of the text section (we assume page size is 4096 bytes).
         let len = std::cmp::min(4096, text_header.sh_size);
-        let text_data = self
-            .module_memory
-            .read(text_header.sh_offset, len)?;
+        let text_data = self.module_memory.read(text_header.sh_offset, len)?;
         Ok(build_id_from_bytes(&text_data))
     }
 
