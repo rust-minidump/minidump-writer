@@ -596,6 +596,23 @@ impl MinidumpWriter {
         false
     }
 
+    fn elf_base_for_index(&self, idx: usize) -> usize {
+        let mapping = &self.mappings[idx];
+        if mapping.offset == 0 {
+            return mapping.start_address;
+        }
+        if let Some(name) = &mapping.name {
+            if let Some(base_mapping) = self
+                .mappings
+                .iter()
+                .find(|m| m.name.as_ref() == Some(name) && m.offset == 0)
+            {
+                return base_mapping.start_address;
+            }
+        }
+        mapping.start_address.saturating_sub(mapping.offset)
+    }
+
     pub fn build_id_from_process_memory_for_index(
         &mut self,
         idx: usize,
@@ -605,7 +622,7 @@ impl MinidumpWriter {
         crate::module_reader::read_build_id_from_module(
             crate::module_reader::ProcessModuleMemoryReader::new(
                 reader,
-                self.mappings[idx].start_address,
+                self.elf_base_for_index(idx),
             ),
         )
         .map_err(WriterError::ModuleReaderError)
@@ -620,7 +637,7 @@ impl MinidumpWriter {
         crate::module_reader::read_soname_from_module(
             crate::module_reader::ProcessModuleMemoryReader::new(
                 reader,
-                self.mappings[idx].start_address,
+                self.elf_base_for_index(idx),
             ),
         )
         .map_err(WriterError::ModuleReaderError)
