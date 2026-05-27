@@ -294,8 +294,8 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             }
 
             if let Some(data) = self.find_note(
-                self.segment_offset(&header),
-                self.segment_size(&header),
+                header.p_offset,
+                header.p_filesz,
                 header.p_align,
                 note_type,
                 note_size,
@@ -407,11 +407,9 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             if header.p_type != elf::program_header::PT_NOTE {
                 continue;
             }
-            if let Ok(Some(result)) = self.find_build_id_note(
-                self.segment_offset(&header),
-                self.segment_size(&header),
-                header.p_align,
-            ) {
+            if let Ok(Some(result)) =
+                self.find_build_id_note(header.p_offset, header.p_filesz, header.p_align)
+            {
                 return Ok(result);
             }
         }
@@ -430,11 +428,7 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
         )?
         .ok_or(Error::NoSectionNote)?;
 
-        match self.find_build_id_note(
-            self.section_offset(header),
-            header.sh_size,
-            header.sh_addralign,
-        ) {
+        match self.find_build_id_note(header.sh_offset, header.sh_size, header.sh_addralign) {
             Ok(Some(v)) => Ok(v),
             Ok(None) => Err(Error::NoSectionNote),
             Err(e) => Err(e),
@@ -455,7 +449,7 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
         let len = std::cmp::min(4096, text_header.sh_size);
         let text_data = self
             .module_memory
-            .read(self.section_offset(&text_header), len)?;
+            .read(text_header.sh_offset, len)?;
         Ok(build_id_from_bytes(&text_data))
     }
 
@@ -489,22 +483,6 @@ impl<MM: ReadModuleMemory> ModuleReader<MM> {
             header.sh_addr
         } else {
             header.sh_offset
-        }
-    }
-
-    fn segment_offset(&self, header: &elf::ProgramHeader) -> u64 {
-        if self.module_memory.is_process_memory() {
-            header.p_vaddr
-        } else {
-            header.p_offset
-        }
-    }
-
-    fn segment_size(&self, header: &elf::ProgramHeader) -> u64 {
-        if self.module_memory.is_process_memory() {
-            header.p_memsz
-        } else {
-            header.p_filesz
         }
     }
 
