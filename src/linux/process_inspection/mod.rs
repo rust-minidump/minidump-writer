@@ -6,12 +6,14 @@ use {
     },
     crate::serializers::*,
     core::{ffi::c_void, mem},
+    failspot::failspot,
     module_reader::MappedModuleMemoryReader,
     nix::{
         errno::Errno,
         sys::{ptrace, signal, wait},
         unistd::Pid as NixPid,
     },
+    process_backend::local,
     process_reader::ProcessReader,
     regs::*,
     std::{
@@ -20,6 +22,7 @@ use {
         io::{self, Read},
         os::unix::ffi::OsStringExt,
         path::{Path, PathBuf},
+        rc::Rc,
     },
 };
 
@@ -38,13 +41,22 @@ type PtraceRequestType = core::ffi::c_int;
 pub struct ProcessInspector {
     pid: libc::pid_t,
     process_reader: ProcessReader,
+    backend: Rc<Backend>,
+}
+
+#[derive(Debug)]
+pub enum Backend {
+    Local(local::Backend),
 }
 
 impl ProcessInspector {
     pub fn local(pid: libc::pid_t) -> Self {
+        let backend = Rc::new(Backend::Local(local::Backend::new(pid)));
+
         ProcessInspector {
             pid,
             process_reader: ProcessReader::new(pid),
+            backend,
         }
     }
 
@@ -52,12 +64,20 @@ impl ProcessInspector {
         &self.process_reader
     }
 
-    pub fn stop_process(&self) -> Result<(), Errno> {
-        signal::kill(NixPid::from_raw(self.pid), Some(signal::SIGSTOP))
+    pub fn stop_process(&self) -> Result<(), Error> {
+        failspot!(if StopProcess {
+            return Err(Error::Local(local::Error::SigStopFailed(libc::EPERM)));
+        });
+
+        match &*self.backend {
+            Backend::Local(l) => l.stop_process().map_err(Error::Local),
+        }
     }
 
-    pub fn continue_process(&self) -> Result<(), Errno> {
-        signal::kill(NixPid::from_raw(self.pid), Some(signal::SIGCONT))
+    pub fn continue_process(&self) -> Result<(), Error> {
+        match &*self.backend {
+            Backend::Local(l) => l.continue_process().map_err(Error::Local),
+        }
     }
 
     pub fn suspend_thread(&self, tid: libc::pid_t) -> Result<(), SuspendResumeThreadError> {
@@ -320,4 +340,10 @@ impl ProcessInspector {
     pub fn force_pr_ptrace(&mut self) {
         self.process_reader = ProcessReader::for_ptrace(self.pid);
     }
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum Error {
+    #[error("an error occurred running a syscall directly")]
+    Local(#[source] local::Error),
 }
