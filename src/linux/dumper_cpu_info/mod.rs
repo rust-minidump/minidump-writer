@@ -1,5 +1,5 @@
 use {
-    super::process_inspection::ProcessInspector,
+    super::process_inspection::{self, ProcessInspector},
     crate::{minidump_format::PlatformId, serializers::*},
     nix::sys::utsname::uname,
 };
@@ -26,9 +26,11 @@ pub use imp::write_cpu_information;
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum CpuInfoError {
-    #[error("IO error for file /proc/cpuinfo")]
-    IOError(
-        #[from]
+    #[error("failed to read /proc/cpuinfo")]
+    ReadFileError(#[source] process_inspection::Error),
+    #[error("I/O error reading /proc/cpuinfo")]
+    FileIOError(
+        #[source]
         #[serde(serialize_with = "serialize_io_error")]
         std::io::Error,
     ),
