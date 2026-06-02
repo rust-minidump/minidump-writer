@@ -58,7 +58,7 @@ fn soft_error_stream_content() {
                     }"
                 }
             ]},
-            {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, "EPERM"]}]}
+            {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, 1]}]}
         ]}),
         json!({"WriteSystemInfoErrors": [
             {"WriteCpuInformationFailed": {

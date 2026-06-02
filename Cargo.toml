@@ -53,14 +53,6 @@ memmap2 = "0.9"
 byteorder = "1.4"
 error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
-nix = { version = "0.30", default-features = false, features = [
-    "mman",
-    "process",
-    "ptrace",
-    "signal",
-    "uio",
-    "user",
-] }
 process-backend = { path = "crates/linux/process-backend", features = ["testing"] }
 # Used for parsing procfs info.
 # default-features is disabled since it pulls in chrono
