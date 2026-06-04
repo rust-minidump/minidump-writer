@@ -1,25 +1,25 @@
 use {
     core::{cell::RefCell, ffi::c_int},
     libc::pid_t,
-    syscall_runner::SyscallRunner,
+    syscall_invoker::SyscallInvoker,
 };
 
 pub use error::Error;
 
 mod error;
-mod syscall_runner;
+mod syscall_invoker;
 
 #[derive(Debug)]
 pub struct Backend {
     pid: pid_t,
-    syscall_runner: RefCell<SyscallRunner>,
+    syscall_invoker: RefCell<SyscallInvoker>,
 }
 
 impl Backend {
     pub fn new(pid: libc::pid_t) -> Self {
         Self {
             pid,
-            syscall_runner: Default::default(),
+            syscall_invoker: Default::default(),
         }
     }
     pub fn stop_process(&self) -> Result<(), Error> {
@@ -39,19 +39,19 @@ impl Backend {
         F: FnOnce() -> T,
         T: From<i8> + core::cmp::PartialEq,
     {
-        self.syscall_runner.borrow_mut().standard(f)
+        self.syscall_invoker.borrow_mut().invoke_standard(f)
     }
 
     pub fn special_syscall<T, F>(&self, f: F) -> Result<T, c_int>
     where
         F: FnOnce() -> Result<T, ()>,
     {
-        self.syscall_runner.borrow_mut().run(f)
+        self.syscall_invoker.borrow_mut().invoke(f)
     }
 
     #[cfg(feature = "testing")]
     pub fn fail_one_syscall_with(&self, errno: c_int) {
-        self.syscall_runner
+        self.syscall_invoker
             .borrow_mut()
             .fail_one_syscall_with(errno);
     }
