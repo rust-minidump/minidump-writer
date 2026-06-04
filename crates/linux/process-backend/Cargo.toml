@@ -1,0 +1,17 @@
+[package]
+name = "process-backend"
+version = "0.0.0"
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+log.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[features]
+testing = []

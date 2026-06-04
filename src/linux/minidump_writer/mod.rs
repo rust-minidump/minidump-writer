@@ -602,9 +602,9 @@ impl MinidumpWriter {
     ///
     /// This will block waiting for the process to stop until `timeout` has passed.
     fn stop_process(&mut self, timeout: Duration) -> Result<(), StopProcessError> {
-        failspot!(StopProcess bail(nix::Error::EPERM));
-
-        self.process_inspector.stop_process()?;
+        self.process_inspector
+            .stop_process()
+            .map_err(StopProcessError::Stop)?;
 
         // Something like waitpid for non-child processes would be better, but we have no such
         // tool, so we poll the status.

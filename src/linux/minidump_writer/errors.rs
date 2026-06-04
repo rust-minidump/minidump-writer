@@ -18,7 +18,6 @@ use {
     },
     crate::{dir_section::FileWriterError, mem_writer::MemoryWriterError, serializers::*},
     error_graph::ErrorList,
-    nix::errno::Errno,
     procfs_core::ProcError,
     std::ffi::OsString,
     thiserror::Error,
@@ -219,11 +218,7 @@ pub enum InitError {
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum StopProcessError {
     #[error("Failed to stop the process")]
-    Stop(
-        #[from]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
+    Stop(#[source] process_inspection::Error),
     #[error("failed to open process file")]
     ReadFileFailed(
         #[source]
@@ -242,4 +237,4 @@ pub enum StopProcessError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to continue the process")]
-pub struct ContinueProcessError(#[source] pub Errno);
+pub struct ContinueProcessError(#[source] pub process_inspection::Error);
