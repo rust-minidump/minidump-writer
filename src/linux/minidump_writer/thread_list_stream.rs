@@ -138,7 +138,6 @@ impl MinidumpWriter {
 
                     let memory_copy = MinidumpWriter::copy_from_process(
                         &self.process_inspector,
-                        thread.thread_id as i32,
                         ip_memory_d.start_of_memory_range as _,
                         ip_memory_d.memory.data_size as usize,
                     )
@@ -214,7 +213,6 @@ impl MinidumpWriter {
 
             let mut stack_bytes = MinidumpWriter::copy_from_process(
                 &self.process_inspector,
-                thread.thread_id.try_into()?,
                 valid_stack_ptr,
                 stack_len,
             )

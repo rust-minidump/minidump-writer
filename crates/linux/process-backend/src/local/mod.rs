@@ -222,7 +222,7 @@ impl Backend {
         self.standard_syscall(|| unsafe {
             libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC, 0)
         })
-        .map(OwnedFd)
+        .map(|fd| unsafe { OwnedFd::new(fd) })
         .map_err(Error::OpenFileFailed)
     }
 
@@ -349,7 +349,7 @@ pub struct FileReader(OwnedFd);
 
 impl FileReader {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
-        let rv = unsafe { libc::read(self.0.0, buf.as_mut_ptr().cast(), buf.len()) };
+        let rv = unsafe { libc::read(self.0.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
         if rv == -1 {
             return Err(Error::ReadFileFailed(errno()));
         }
@@ -358,7 +358,7 @@ impl FileReader {
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize, Error> {
         let rv = unsafe {
             libc::pread(
-                self.0.0,
+                self.0.as_raw_fd(),
                 buf.as_mut_ptr().cast(),
                 buf.len(),
                 offset.try_into().unwrap(),
@@ -422,6 +422,16 @@ impl Drop for DirReader {
 
 #[derive(Debug)]
 struct OwnedFd(c_int);
+
+impl OwnedFd {
+    // SAFETY: Must be a valid fd
+    pub unsafe fn new(fd: c_int) -> Self {
+        Self(fd)
+    }
+    pub fn as_raw_fd(&self) -> c_int {
+        self.0
+    }
+}
 
 impl Drop for OwnedFd {
     fn drop(&mut self) {

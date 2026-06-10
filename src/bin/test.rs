@@ -131,7 +131,6 @@ mod linux {
 
         let stack_res = MinidumpWriter::copy_from_process(
             &dumper.process_inspector,
-            ppid,
             stack_var,
             std::mem::size_of::<usize>(),
         )?;
@@ -140,7 +139,6 @@ mod linux {
 
         let heap_res = MinidumpWriter::copy_from_process(
             &dumper.process_inspector,
-            ppid,
             heap_var,
             std::mem::size_of::<usize>(),
         )?;

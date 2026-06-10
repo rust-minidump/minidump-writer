@@ -293,7 +293,7 @@ impl MinidumpWriter {
 
         #[cfg(target_os = "android")]
         {
-            late_process_mappings(&self.process_inspector, self.process_id, &mut self.mappings)?;
+            late_process_mappings(&self.process_inspector, &mut self.mappings)?;
         }
 
         if self.skip_stacks_if_mapping_unreferenced {
@@ -424,18 +424,14 @@ impl MinidumpWriter {
         file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
         file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
-        let dirent = match dso_debug::write_dso_debug_stream(
-            &self.process_inspector,
-            buffer,
-            self.process_id,
-            &self.auxv,
-        ) {
-            Ok(dirent) => dirent,
-            Err(e) => {
-                soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
-                Default::default()
-            }
-        };
+        let dirent =
+            match dso_debug::write_dso_debug_stream(&self.process_inspector, buffer, &self.auxv) {
+                Ok(dirent) => dirent,
+                Err(e) => {
+                    soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
+                    Default::default()
+                }
+            };
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
@@ -503,7 +499,6 @@ impl MinidumpWriter {
 
         let stack_copy = match MinidumpWriter::copy_from_process(
             &self.process_inspector,
-            self.blamed_thread,
             valid_stack_pointer,
             stack_len,
         ) {
@@ -949,7 +944,6 @@ impl MinidumpWriter {
     #[inline]
     pub fn copy_from_process(
         process_inspector: &ProcessInspector,
-        _pid: Pid,
         src: usize,
         length: usize,
     ) -> Result<Vec<u8>, CopyFromProcessError> {

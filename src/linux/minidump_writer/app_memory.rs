@@ -3,11 +3,9 @@ use super::*;
 impl MinidumpWriter {
     /// Write application-provided memory regions.
     pub fn write_app_memory(&mut self, buffer: &mut DumpBuf) -> Result<(), CopyFromProcessError> {
-        let blamed_thread = self.blamed_thread;
         for app_memory in &self.app_memory {
             let data_copy = Self::copy_from_process(
                 &self.process_inspector,
-                blamed_thread,
                 app_memory.ptr,
                 app_memory.length,
             )?;

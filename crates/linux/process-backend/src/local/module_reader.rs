@@ -71,14 +71,14 @@ impl MappedModuleMemoryReader {
             .invoke_standard(|| unsafe {
                 libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC, 0)
             })
-            .map(OwnedFd)
+            .map(|fd| unsafe { OwnedFd::new(fd) })
             .map_err(Error::OpenFileFailed)
     }
     fn get_file_size(syscall_invoker: &mut SyscallInvoker, fd: &OwnedFd) -> Result<u64, Error> {
         let mut stat: libc::stat = unsafe { mem::zeroed() };
 
         syscall_invoker
-            .invoke_standard(|| unsafe { libc::fstat(fd.0, &mut stat) })
+            .invoke_standard(|| unsafe { libc::fstat(fd.as_raw_fd(), &mut stat) })
             .map_err(Error::StatFailed)?;
 
         Ok(u64::try_from(stat.st_size).unwrap())
@@ -105,6 +105,9 @@ impl MappedModuleMemoryReader {
         //
         // Luckily, we won't be accessing files that are larger than 2GiB, so we can skip all that
         // nastiness by disallowing a mapping larger than `isize::MAX`.
+        //
+        // See https://doc.rust-lang.org/stable/std/ptr/index.html#allocation and
+        // https://doc.rust-lang.org/stable/std/primitive.pointer.html#method.offset
 
         if len > isize::MAX as usize {
             Err(Error::MappingTooLarge)?;
@@ -117,7 +120,7 @@ impl MappedModuleMemoryReader {
                     len,
                     libc::PROT_READ,
                     libc::MAP_SHARED,
-                    fd.0,
+                    fd.as_raw_fd(),
                     page_aligned_start_position.try_into().unwrap(),
                 );
                 if ptr == libc::MAP_FAILED {
