@@ -188,8 +188,8 @@ fn linux_gate_mapping_id() {
 fn merges_mappings() {
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     assert!(page_size > 0);
-    let page_size = std::num::NonZeroUsize::new(page_size as usize).unwrap();
-    let map_size = std::num::NonZeroUsize::new(3 * page_size.get()).unwrap();
+    let page_size = usize::try_from(page_size).unwrap();
+    let map_size = 3 * page_size;
 
     let path: String = if let Ok(p) = std::env::var("TEST_HELPER") {
         p
@@ -203,7 +203,7 @@ fn merges_mappings() {
     let mapped_mem = unsafe {
         let ptr = libc::mmap(
             ptr::null_mut(),
-            map_size.into(),
+            map_size,
             libc::PROT_READ,
             libc::MAP_SHARED,
             std::os::fd::AsRawFd::as_raw_fd(&file),
@@ -218,14 +218,14 @@ fn merges_mappings() {
     // Carve a page out of the first mapping with different permissions.
     let _inside_mapping = unsafe {
         libc::mmap(
-            (mapped + 2 * page_size.get()) as *mut c_void,
-            page_size.into(),
+            (mapped + 2 * page_size) as *mut c_void,
+            page_size,
             libc::PROT_NONE,
             libc::MAP_SHARED | libc::MAP_FIXED,
             std::os::fd::AsRawFd::as_raw_fd(&file),
             // Map a different offset just to
             // better test real-world conditions.
-            page_size.get().try_into().unwrap(),
+            page_size.try_into().unwrap(),
         )
     };
 
