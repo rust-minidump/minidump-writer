@@ -1,6 +1,7 @@
 use {
-    super::{Pid, serializers::*},
-    std::sync::OnceLock,
+    super::{Backend, Error, FileReader},
+    core::{ffi::c_long, mem},
+    std::{ffi::CString, rc::Rc, sync::OnceLock},
 };
 
 #[derive(Debug)]
@@ -15,7 +16,7 @@ enum Style {
     ///
     /// Available on basically all versions of Linux, but could fail if the process
     /// has insufficient privileges, ie ptrace
-    File(std::fs::File),
+    File(FileReader),
     /// Reads the memory with [ptrace (`PTRACE_PEEKDATA`)](https://man7.org/linux/man-pages/man2/ptrace.2.html)
     ///
     /// Reads data one word at a time, so slow, but fairly reliable, as long as
@@ -23,36 +24,44 @@ enum Style {
     Ptrace,
     /// No methods succeeded, generally there isn't a case where failing a syscall
     /// will work if called again
-    Unavailable {
-        vmem: nix::Error,
-        file: nix::Error,
-        ptrace: nix::Error,
+    Unavailable,
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum CopyFromProcessError {
+    #[error("Copy from process {child} failed (source {src}, offset: {offset}, length: {length})")]
+    StrategyFailed {
+        child: libc::pid_t,
+        src: usize,
+        offset: usize,
+        length: usize,
+        source: StrategyError,
     },
+    #[error("all strategies for reading a process failed")]
+    AllStrategiesFailed {
+        vmem: StrategyError,
+        file: StrategyError,
+        ptrace: (StrategyError, usize),
+    },
+    #[error("process reading is unavailable")]
+    Unavailable,
+    #[error("an invalid argument was passed")]
+    InvalidArgument,
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
-#[error("Copy from process {child} failed (source {src}, offset: {offset}, length: {length})")]
-pub struct CopyFromProcessError {
-    pub child: Pid,
-    pub src: usize,
-    pub offset: usize,
-    pub length: usize,
-    #[serde(serialize_with = "serialize_nix_error")]
-    pub source: nix::Error,
-}
-
-#[derive(Debug, thiserror::Error, serde::Serialize)]
-pub enum FindModuleError {
-    #[error("Module not found")]
-    ModuleNotFound,
-    #[error("Failed to read process module mappings")]
-    MappingError(#[from] super::maps_reader::MapsReaderError),
+pub enum StrategyError {
+    #[error(transparent)]
+    Backend(Error),
+    #[error("an unexpected end of file was reached")]
+    UnexpectedEof,
 }
 
 pub struct ProcessReader {
     /// The pid of the child to read
-    pid: nix::unistd::Pid,
+    pid: libc::pid_t,
     style: OnceLock<Style>,
+    backend: Rc<Backend>,
 }
 
 impl std::fmt::Debug for ProcessReader {
@@ -61,12 +70,7 @@ impl std::fmt::Debug for ProcessReader {
             Some(Style::VirtualMem) => "process_vm_readv",
             Some(Style::File(_)) => "/proc/<pid>/mem",
             Some(Style::Ptrace) => "PTRACE_PEEKDATA",
-            Some(Style::Unavailable { vmem, file, ptrace }) => {
-                return write!(
-                    f,
-                    "process_vm_readv: {vmem}, /proc/<pid>/mem: {file}, PTRACE_PEEKDATA: {ptrace}"
-                );
-            }
+            Some(Style::Unavailable) => "Unavailable",
             None => "unknown",
         };
 
@@ -78,39 +82,43 @@ impl ProcessReader {
     /// Creates a [`Self`] for the specified process id, the method used will
     /// be probed for on the first access
     #[inline]
-    pub(super) fn new(pid: libc::pid_t) -> Self {
+    pub(super) fn new(pid: libc::pid_t, backend: Rc<Backend>) -> Self {
         Self {
-            pid: nix::unistd::Pid::from_raw(pid),
+            pid,
             style: OnceLock::default(),
+            backend,
         }
     }
 
     #[inline]
     #[doc(hidden)]
-    pub(super) fn for_virtual_mem(pid: libc::pid_t) -> Self {
+    pub(super) fn for_virtual_mem(pid: libc::pid_t, backend: Rc<Backend>) -> Self {
         Self {
-            pid: nix::unistd::Pid::from_raw(pid),
+            pid,
             style: OnceLock::from(Style::VirtualMem),
+            backend,
         }
     }
 
     #[inline]
     #[doc(hidden)]
-    pub(super) fn for_file(pid: libc::pid_t) -> std::io::Result<Self> {
-        let file = std::fs::File::open(format!("/proc/{pid}/mem"))?;
+    pub(super) fn for_file(pid: libc::pid_t, backend: Rc<Backend>) -> Result<Self, Error> {
+        let file = Self::open_file(&backend, format!("/proc/{pid}/mem"))?;
 
         Ok(Self {
-            pid: nix::unistd::Pid::from_raw(pid),
+            pid,
             style: OnceLock::from(Style::File(file)),
+            backend,
         })
     }
 
     #[inline]
     #[doc(hidden)]
-    pub(super) fn for_ptrace(pid: libc::pid_t) -> Self {
+    pub(super) fn for_ptrace(pid: libc::pid_t, backend: Rc<Backend>) -> Self {
         Self {
-            pid: nix::unistd::Pid::from_raw(pid),
+            pid,
             style: OnceLock::from(Style::Ptrace),
+            backend,
         }
     }
 
@@ -119,15 +127,14 @@ impl ProcessReader {
     /// Returns the number of bytes read.
     pub fn read(&self, src: usize, dst: &mut [u8]) -> Result<usize, CopyFromProcessError> {
         if let Some(rs) = self.style.get() {
-            let res = match rs {
-                Style::VirtualMem => Self::vmem(self.pid, src, dst).map_err(|s| (s, 0)),
-                Style::File(file) => Self::file(file, src, dst).map_err(|s| (s, 0)),
-                Style::Ptrace => Self::ptrace(self.pid, src, dst),
-                Style::Unavailable { ptrace, .. } => Err((*ptrace, 0)),
-            };
-
-            return res.map_err(|(source, offset)| CopyFromProcessError {
-                child: self.pid.as_raw(),
+            return match rs {
+                Style::VirtualMem => Self::vmem(&self.backend, src, dst).map_err(|e| (e, 0)),
+                Style::File(file) => Self::file(file, src, dst).map_err(|e| (e, 0)),
+                Style::Ptrace => Self::ptrace(&self.backend, src, dst),
+                Style::Unavailable => return Err(CopyFromProcessError::Unavailable),
+            }
+            .map_err(|(source, offset)| CopyFromProcessError::StrategyFailed {
+                child: self.pid,
                 src,
                 offset,
                 length: dst.len(),
@@ -138,7 +145,7 @@ impl ProcessReader {
         const DOUBLE_INIT_MSG: &str = "somehow MemReader initialized twice";
 
         // Attempt to read in order of speed
-        let vmem = match Self::vmem(self.pid, src, dst) {
+        let vmem = match Self::vmem(&self.backend, src, dst) {
             Ok(len) => {
                 self.style.set(Style::VirtualMem).expect(DOUBLE_INIT_MSG);
                 return Ok(len);
@@ -146,85 +153,80 @@ impl ProcessReader {
             Err(err) => err,
         };
 
-        let file = match std::fs::File::open(format!("/proc/{}/mem", self.pid)) {
-            Ok(file) => match Self::file(&file, src, dst) {
+        let file = match Self::open_file(&self.backend, format!("/proc/{}/mem", self.pid)) {
+            Ok(fd) => match Self::file(&fd, src, dst) {
                 Ok(len) => {
-                    self.style.set(Style::File(file)).expect(DOUBLE_INIT_MSG);
+                    self.style.set(Style::File(fd)).expect(DOUBLE_INIT_MSG);
                     return Ok(len);
                 }
                 Err(err) => err,
             },
-            Err(err) => nix::Error::from_raw(err.raw_os_error().expect(
-                "failed to open /proc/<pid>/mem and the I/O error doesn't have an OS code",
-            )),
+            Err(err) => StrategyError::Backend(err),
         };
 
-        let ptrace = match Self::ptrace(self.pid, src, dst) {
+        let ptrace = match Self::ptrace(&self.backend, src, dst) {
             Ok(len) => {
                 self.style.set(Style::Ptrace).expect(DOUBLE_INIT_MSG);
                 return Ok(len);
             }
-            Err((err, _)) => err,
+            Err(err) => err,
         };
 
-        self.style
-            .set(Style::Unavailable { vmem, file, ptrace })
-            .expect(DOUBLE_INIT_MSG);
-        Err(CopyFromProcessError {
-            child: self.pid.as_raw(),
-            src,
-            offset: 0,
-            length: dst.len(),
-            source: ptrace,
-        })
+        self.style.set(Style::Unavailable).expect(DOUBLE_INIT_MSG);
+        Err(CopyFromProcessError::AllStrategiesFailed { vmem, file, ptrace })
+    }
+
+    fn open_file(backend: &Backend, path: String) -> Result<FileReader, Error> {
+        let c_path = CString::new(path).unwrap();
+
+        match backend {
+            Backend::Local(l) => l
+                .read_file(&c_path)
+                .map(FileReader::Local)
+                .map_err(Error::Local),
+        }
     }
 
     #[inline]
-    fn vmem(pid: nix::unistd::Pid, src: usize, dst: &mut [u8]) -> Result<usize, nix::Error> {
-        let remote = &[nix::sys::uio::RemoteIoVec {
-            base: src,
-            len: dst.len(),
-        }];
-        nix::sys::uio::process_vm_readv(pid, &mut [std::io::IoSliceMut::new(dst)], remote)
+    fn vmem(backend: &Backend, src: usize, dst: &mut [u8]) -> Result<usize, StrategyError> {
+        match backend {
+            Backend::Local(l) => l.read_process_io_vec(dst, src).map_err(Error::Local),
+        }
+        .map_err(StrategyError::Backend)
     }
 
     #[inline]
-    fn file(file: &std::fs::File, src: usize, dst: &mut [u8]) -> Result<usize, nix::Error> {
-        use std::os::unix::fs::FileExt;
+    fn file(reader: &FileReader, src: usize, dst: &mut [u8]) -> Result<usize, StrategyError> {
+        let mut offset = 0;
 
-        file.read_exact_at(dst, src as u64).map_err(|err| {
-            if let Some(os) = err.raw_os_error() {
-                nix::Error::from_raw(os)
-            } else {
-                nix::Error::E2BIG /* EOF */
+        while offset < dst.len() {
+            let bytes_read = reader
+                .read_at(&mut dst[offset..], (src + offset).try_into().unwrap())
+                .map_err(StrategyError::Backend)?;
+            if bytes_read == 0 {
+                return Err(StrategyError::UnexpectedEof);
             }
-        })?;
+            offset += bytes_read;
+        }
 
         Ok(dst.len())
     }
 
     #[inline]
     fn ptrace(
-        pid: nix::unistd::Pid,
+        backend: &Backend,
         src: usize,
         dst: &mut [u8],
-    ) -> Result<usize, (nix::Error, usize)> {
+    ) -> Result<usize, (StrategyError, usize)> {
         let mut offset = 0;
-        let mut chunks = dst.chunks_exact_mut(std::mem::size_of::<usize>());
 
-        for chunk in chunks.by_ref() {
-            let word = nix::sys::ptrace::read(pid, (src + offset) as *mut std::ffi::c_void)
-                .map_err(|err| (err, offset))?;
-            chunk.copy_from_slice(&word.to_ne_bytes());
-            offset += std::mem::size_of::<usize>();
-        }
-
-        // I don't think there would ever be a case where we would not read on word boundaries, but just in case...
-        let last = chunks.into_remainder();
-        if !last.is_empty() {
-            let word = nix::sys::ptrace::read(pid, (src + offset) as *mut std::ffi::c_void)
-                .map_err(|err| (err, offset))?;
-            last.copy_from_slice(&word.to_ne_bytes()[..last.len()]);
+        for chunk in dst.chunks_mut(mem::size_of::<c_long>()) {
+            let word = match backend {
+                Backend::Local(l) => l.ptrace_peekdata(src + offset).map_err(Error::Local),
+            }
+            .map_err(|e| (StrategyError::Backend(e), offset))?;
+            offset += word.len();
+            chunk.copy_from_slice(&word[0..chunk.len()]);
         }
 
         Ok(dst.len())

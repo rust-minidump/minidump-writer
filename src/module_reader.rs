@@ -72,4 +72,7 @@ pub enum ReadError {
     OutOfBounds,
     #[error(transparent)]
     CopyError(#[from] CopyFromProcessError),
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[error(transparent)]
+    PlatformSpecific(crate::linux::BackendError),
 }

@@ -5,7 +5,7 @@ use {
         dso_debug::SectionDsoDebugError,
         maps_reader::MapsReaderError,
         minidump_writer::{
-            app_memory::SectionAppMemoryError, exception_stream::SectionExceptionStreamError,
+            exception_stream::SectionExceptionStreamError,
             handle_data_stream::SectionHandleDataStreamError, mappings::SectionMappingsError,
             memory_info_list_stream::SectionMemInfoListError,
             memory_list_stream::SectionMemListError, systeminfo_stream::SectionSystemInfoError,
@@ -16,7 +16,10 @@ use {
         process_inspection,
         serializers::*,
     },
-    crate::{dir_section::FileWriterError, mem_writer::MemoryWriterError, serializers::*},
+    crate::{
+        dir_section::FileWriterError, mem_writer::MemoryWriterError,
+        process_reader::CopyFromProcessError, serializers::*,
+    },
     error_graph::ErrorList,
     procfs_core::ProcError,
     std::ffi::OsString,
@@ -31,7 +34,7 @@ pub enum WriterError {
     #[error("Error during init phase")]
     InitError(#[from] InitError),
     #[error("Failed when writing section AppMemory")]
-    SectionAppMemoryError(#[from] SectionAppMemoryError),
+    SectionAppMemoryError(#[source] CopyFromProcessError),
     #[error("Failed when writing section ExceptionStream")]
     SectionExceptionStreamError(#[from] SectionExceptionStreamError),
     #[error("Failed when writing section HandleDataStream")]
@@ -151,9 +154,9 @@ pub enum WriterError {
         std::num::TryFromIntError,
     ),
     #[error("failed to suspend thread")]
-    SuspendThreadFailed(#[source] process_inspection::SuspendResumeThreadError),
+    SuspendThreadFailed(#[source] process_inspection::Error),
     #[error("failed to resume thread")]
-    ResumeThreadFailed(#[source] process_inspection::SuspendResumeThreadError),
+    ResumeThreadFailed(#[source] process_inspection::Error),
 }
 
 #[derive(Debug, Error, serde::Serialize)]
@@ -161,11 +164,7 @@ pub enum InitError {
     #[error("failed to read auxv")]
     ReadAuxvFailed(#[source] super::super::auxv::AuxvError),
     #[error("IO error reading /proc/<pid>/task")]
-    ReadProcTaskFailed(
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
+    ReadProcTaskFailed(#[source] process_inspection::Error),
     #[cfg(target_os = "android")]
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
@@ -184,11 +183,7 @@ pub enum InitError {
     #[error("Failed filling missing Auxv info")]
     FillMissingAuxvInfoFailed(#[source] AuxvError),
     #[error("Failed reading proc/pid/task entry for process")]
-    ReadProcessThreadEntryFailed(
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
+    ReadProcessThreadEntryFailed(#[source] process_inspection::Error),
     #[error("Process task entry `{0:?}` could not be parsed as a TID")]
     ProcessTaskEntryNotTid(OsString),
     #[error("Failed to read thread name")]
@@ -220,11 +215,7 @@ pub enum StopProcessError {
     #[error("Failed to stop the process")]
     Stop(#[source] process_inspection::Error),
     #[error("failed to open process file")]
-    ReadFileFailed(
-        #[source]
-        #[serde(serialize_with = "serialize_io_error")]
-        std::io::Error,
-    ),
+    ReadFileFailed(#[source] process_inspection::Error),
     #[error("Failed to get the process state")]
     State(
         #[from]
