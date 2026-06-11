@@ -22,7 +22,7 @@ use {
     },
     error_graph::ErrorList,
     procfs_core::ProcError,
-    std::ffi::OsString,
+    std::ffi::{OsString, c_int},
     thiserror::Error,
 };
 
@@ -97,38 +97,12 @@ pub enum WriterError {
         #[serde(skip)]
         serde_json::Error,
     ),
-    #[error("nix::ptrace::attach(Pid={0}) failed")]
-    PtraceAttachError(
-        Pid,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
-    #[error("nix::ptrace::detach(Pid={0}) failed")]
-    PtraceDetachError(
-        Pid,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
-    #[error("wait::waitpid(Pid={0}) failed")]
-    WaitPidError(
-        Pid,
-        #[source]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
+    #[error("nix::ptrace::attach(Pid={0}) failed: {1}")]
+    PtraceAttachError(Pid, c_int),
     #[error("Skipped thread {0} due to it being part of the seccomp sandbox's trusted code")]
     DetachSkippedThread(Pid),
     #[error("Maps reader error")]
     MapsReaderError(#[from] MapsReaderError),
-    #[error("Failed to get PAGE_SIZE from system")]
-    SysConfError(
-        #[from]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
-
     #[error("No mapping for stack pointer found")]
     NoStackPointerMapping,
     #[error("Failed slice conversion")]
@@ -168,12 +142,6 @@ pub enum InitError {
     #[cfg(target_os = "android")]
     #[error("Failed Android specific late init")]
     AndroidLateInitError(#[from] AndroidError),
-    #[error("Failed to read the page size")]
-    PageSizeError(
-        #[from]
-        #[serde(serialize_with = "serialize_nix_error")]
-        nix::Error,
-    ),
     #[error("Ptrace does not function within the same process")]
     CannotPtraceSameProcess,
     #[error("Failed to stop the target process")]

@@ -279,9 +279,11 @@ impl MinidumpWriter {
             soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
         }
 
-        self.page_size = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)?
-            .expect("page size apparently unlimited: doesn't make sense.")
-            as usize;
+        self.page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap() };
+        assert!(
+            self.page_size > 0,
+            "somehow we weren't able to get the page size - should never happen"
+        );
 
         let threads_count = self.threads.len();
 
@@ -577,7 +579,7 @@ impl MinidumpWriter {
 
         self.threads_suspended = true;
 
-        failspot::failspot!(<crate::FailSpotName>::SuspendThreads soft_errors.push(WriterError::PtraceAttachError(1234, nix::Error::EPERM)))
+        failspot::failspot!(<crate::FailSpotName>::SuspendThreads soft_errors.push(WriterError::PtraceAttachError(1234, libc::EPERM)))
     }
 
     fn resume_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
