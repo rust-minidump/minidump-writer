@@ -604,6 +604,22 @@ impl<'a> ReadModuleMemory for ProcessModuleMemoryReader<'a> {
     }
 }
 
+impl<'a> ReadModuleMemory for &ProcessModuleMemoryReader<'a> {
+    fn read(&self, offset: u64, length: u64) -> Result<Cow<'a, [u8]>, ModuleMemoryReadError> {
+        ProcessModuleMemoryReader::read(self, offset, length)
+    }
+    fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
+        addr.checked_sub(self.start_address)
+    }
+    /// Calculates the absolute address of the specified relative address
+    fn relative_to_absolute(&self, addr: u64) -> Option<u64> {
+        self.start_address.checked_add(addr)
+    }
+    fn is_process_memory(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

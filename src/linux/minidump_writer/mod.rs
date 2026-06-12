@@ -702,7 +702,7 @@ impl MinidumpWriter {
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
         self.mappings = MappingInfo::for_pid(
-            &self.process_inspector,
+            &self.process_inspector.backend,
             self.process_id,
             self.auxv.get_linux_gate_address(),
         )

@@ -2,7 +2,7 @@ use {
     super::{
         auxv::AuxvType,
         module_reader::ModuleReaderError,
-        process_inspection::{self, ProcessInspector},
+        process_inspection::{self, Backend, ProcessInspector},
         serializers::*,
     },
     crate::serializers::*,
@@ -136,12 +136,12 @@ fn sanitize_path(pathname: OsString) -> OsString {
 impl MappingInfo {
     /// Get the mappings for the given process.
     pub fn for_pid(
-        process_inspector: &ProcessInspector,
+        backend: &Backend,
         pid: i32,
         linux_gate_loc: Option<AuxvType>,
     ) -> Result<Vec<Self>> {
         let maps_path = format!("/proc/{}/maps", pid);
-        let maps_file = process_inspector
+        let maps_file = backend
             .read_file(&maps_path)
             .map_err(MapsReaderError::ReadFileFailed)?;
         let maps = MemoryMaps::from_read(maps_file)?;

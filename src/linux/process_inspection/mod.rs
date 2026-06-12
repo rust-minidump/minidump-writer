@@ -22,12 +22,24 @@ pub mod process_reader;
 pub struct ProcessInspector {
     pid: libc::pid_t,
     process_reader: ProcessReader,
-    backend: Rc<Backend>,
+    pub(crate) backend: Rc<Backend>,
 }
 
 #[derive(Debug)]
 pub enum Backend {
     Local(local::Backend),
+}
+
+impl Backend {
+    pub fn read_file(&self, path: impl Into<PathBuf>) -> Result<FileReader, Error> {
+        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+        match self {
+            Backend::Local(l) => l
+                .read_file(&c_path)
+                .map(FileReader::Local)
+                .map_err(Error::Local),
+        }
+    }
 }
 
 impl ProcessInspector {
@@ -36,7 +48,7 @@ impl ProcessInspector {
 
         ProcessInspector {
             pid,
-            process_reader: ProcessReader::new(pid, Rc::clone(&backend)),
+            process_reader: ProcessReader::new_with_backend(pid, Rc::clone(&backend)),
             backend,
         }
     }
@@ -93,13 +105,7 @@ impl ProcessInspector {
     }
 
     pub fn read_file(&self, path: impl Into<PathBuf>) -> Result<FileReader, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
-        match &*self.backend {
-            Backend::Local(l) => l
-                .read_file(&c_path)
-                .map(FileReader::Local)
-                .map_err(Error::Local),
-        }
+        self.backend.read_file(path)
     }
 
     pub fn read_dir(&self, path: impl Into<PathBuf>) -> Result<DirReader, Error> {
@@ -199,7 +205,7 @@ impl Iterator for DirReader {
 #[doc(hidden)]
 impl ProcessInspector {
     pub fn force_pr_reset(&mut self) {
-        self.process_reader = ProcessReader::new(self.pid, Rc::clone(&self.backend))
+        self.process_reader = ProcessReader::new_with_backend(self.pid, Rc::clone(&self.backend))
     }
     pub fn force_pr_virtual_mem(&mut self) {
         self.process_reader = ProcessReader::for_virtual_mem(self.pid, Rc::clone(&self.backend))

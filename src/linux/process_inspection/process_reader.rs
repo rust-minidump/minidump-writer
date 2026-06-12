@@ -1,8 +1,12 @@
 use {
     super::{Backend, Error, FileReader},
+    crate::linux::maps_reader::{MappingInfo, MapsReaderError},
+    crate::module_reader::ProcessModuleMemoryReader,
     core::{ffi::c_long, mem},
     std::{ffi::CString, rc::Rc, sync::OnceLock},
 };
+
+pub type ProcessHandle = libc::pid_t;
 
 #[derive(Debug)]
 enum Style {
@@ -50,6 +54,14 @@ pub enum CopyFromProcessError {
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum FindModuleError {
+    #[error("Module not found")]
+    ModuleNotFound,
+    #[error("Failed to read process module mappings")]
+    MappingError(#[from] MapsReaderError),
+}
+
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum StrategyError {
     #[error(transparent)]
     Backend(Error),
@@ -82,7 +94,15 @@ impl ProcessReader {
     /// Creates a [`Self`] for the specified process id, the method used will
     /// be probed for on the first access
     #[inline]
-    pub(super) fn new(pid: libc::pid_t, backend: Rc<Backend>) -> Self {
+    pub fn new(pid: ProcessHandle) -> Self {
+        Self::new_with_backend(
+            pid,
+            Rc::new(Backend::Local(super::local::Backend::new(pid))),
+        )
+    }
+
+    #[inline]
+    pub(super) fn new_with_backend(pid: libc::pid_t, backend: Rc<Backend>) -> Self {
         Self {
             pid,
             style: OnceLock::default(),
@@ -230,5 +250,35 @@ impl ProcessReader {
         }
 
         Ok(dst.len())
+    }
+
+    pub fn find_module(
+        &self,
+        module_name: &str,
+    ) -> Result<ProcessModuleMemoryReader<'_>, FindModuleError> {
+        MappingInfo::for_pid(&self.backend, self.pid, None)?
+            .into_iter()
+            .find_map(|m| {
+                let mmem = ProcessModuleMemoryReader::new(self, m.start_address);
+                let name = m.name.as_ref().and_then(|s| s.to_str())?;
+                if name == module_name {
+                    return Some(mmem);
+                }
+                // Check whether the SO_NAME matches the module name.
+                //
+                // For now, only check the SO_NAME of Android APKS, because libraries may be mapped
+                // directly from within an APK. See bug 1982902.
+                #[cfg(target_os = "android")]
+                if name.ends_with(".apk") {
+                    if let Ok(so_name) = crate::module_reader::read_soname_from_module(&mmem) {
+                        if so_name == name {
+                            return Some(mmem);
+                        }
+                    }
+                }
+
+                None
+            })
+            .ok_or(FindModuleError::ModuleNotFound)
     }
 }
