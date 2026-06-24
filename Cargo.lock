@@ -1681,8 +1681,17 @@ version = "0.0.0"
 dependencies = [
  "libc",
  "log",
+ "process-reader",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "process-reader"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "serde",
 ]
 
 [[package]]

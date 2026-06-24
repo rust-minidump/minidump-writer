@@ -48,4 +48,6 @@ pub enum Error {
     ProcessVmReadvFailed(c_int),
     #[error("failed to peek at process data: {0}")]
     PtracePeekDataFailed(c_int),
+    #[error("ProcessReader returned an error")]
+    ProcessReader(#[source] process_reader::ReadError),
 }

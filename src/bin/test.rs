@@ -73,7 +73,7 @@ mod linux {
         use minidump_writer::process_reader::ProcessReader;
 
         let ppid = getppid();
-        let mut dumper = fail_on_soft_error!(
+        let dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
@@ -84,7 +84,7 @@ mod linux {
         let expected_stack = 0x11223344usize.to_ne_bytes();
         let expected_heap = 0x55667788usize.to_ne_bytes();
 
-        let validate = |reader: &ProcessReader| -> Result<()> {
+        let validate = |reader: ProcessReader| -> Result<()> {
             let mut val = [0u8; std::mem::size_of::<usize>()];
             let read = reader.read(stack_var, &mut val)?;
             assert_eq!(read, val.len());
@@ -99,29 +99,22 @@ mod linux {
 
         // virtual mem
         {
-            dumper.process_inspector.force_pr_virtual_mem();
-            validate(dumper.process_inspector.process_reader())
+            validate(ProcessReader::for_virtual_mem(&dumper.process_inspector))
                 .map_err(|err| format!("failed to validate memory: {err}"))?;
         }
 
         // file
         {
-            dumper
-                .process_inspector
-                .force_pr_file()
+            let reader = ProcessReader::for_file(&dumper.process_inspector)
                 .map_err(|err| format!("failed to open `/proc/{ppid}/mem`: {err}"))?;
-            validate(dumper.process_inspector.process_reader())
-                .map_err(|err| format!("failed to validate memory: {err}"))?;
+            validate(reader).map_err(|err| format!("failed to validate memory: {err}"))?;
         }
 
         // ptrace
         {
-            dumper.process_inspector.force_pr_ptrace();
-            validate(dumper.process_inspector.process_reader())
+            validate(ProcessReader::for_ptrace(&dumper.process_inspector))
                 .map_err(|err| format!("failed to validate memory: {err}"))?;
         }
-
-        dumper.process_inspector.force_pr_reset();
 
         let stack_res = MinidumpWriter::copy_from_process(
             &dumper.process_inspector,

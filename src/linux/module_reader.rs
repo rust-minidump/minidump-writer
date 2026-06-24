@@ -589,7 +589,7 @@ pub trait ReadModuleMemory {
 }
 
 impl<'a> ReadModuleMemory for ProcessModuleMemoryReader<'a> {
-    fn read(&self, offset: u64, length: u64) -> Result<Cow<'a, [u8]>, ModuleMemoryReadError> {
+    fn read(&self, offset: u64, length: u64) -> Result<Cow<'_, [u8]>, ModuleMemoryReadError> {
         self.read(offset, length)
     }
     fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
@@ -601,6 +601,21 @@ impl<'a> ReadModuleMemory for ProcessModuleMemoryReader<'a> {
     }
     fn is_process_memory(&self) -> bool {
         true
+    }
+}
+
+impl<T: ReadModuleMemory + ?Sized> ReadModuleMemory for &T {
+    fn read(&self, offset: u64, length: u64) -> Result<Cow<'_, [u8]>, ModuleMemoryReadError> {
+        T::read(self, offset, length)
+    }
+    fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
+        T::absolute_to_relative(self, addr)
+    }
+    fn relative_to_absolute(&self, addr: u64) -> Option<u64> {
+        T::relative_to_absolute(self, addr)
+    }
+    fn is_process_memory(&self) -> bool {
+        T::is_process_memory(self)
     }
 }
 
