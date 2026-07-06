@@ -77,9 +77,6 @@
 //! # }
 //! ```
 
-#![no_std]
-#![cfg(any(target_os = "linux", target_os = "android"))]
-
 use self::{error::*, wrapper::*};
 use core::{
     cell::OnceCell,
@@ -89,7 +86,7 @@ use core::{
     ptr,
 };
 
-pub use error::ReadError;
+pub use error::{ReadError, ReadExactError};
 
 mod error;
 mod wrapper;
@@ -234,6 +231,72 @@ impl ProcessReader {
         Self {
             pid,
             style: OnceCell::from(Style::Ptrace),
+        }
+    }
+
+    /// Reads from another process until `buf` is completely filled.
+    ///
+    /// This is a convenience wrapper around [`ProcessReader::read_at`]. Unlike
+    /// [`read_at`](Self::read_at), this method does not return successful short
+    /// reads. It repeatedly calls [`read_at`](Self::read_at), advancing `address`
+    /// and the output buffer by the number of bytes read, until the entire buffer
+    /// has been filled.
+    ///
+    /// If an underlying read fails before the buffer is filled, this method returns
+    /// [`ReadExactError::Read`]. If an underlying read succeeds but returns `0`
+    /// bytes before the buffer is filled, this method returns
+    /// [`ReadExactError::UnexpectedEof`].
+    ///
+    /// On success, all of `buf` has been filled with bytes read from the target
+    /// process.
+    ///
+    /// # Strategy selection
+    ///
+    /// This method uses [`ProcessReader::read_at`] internally, so it follows the
+    /// same strategy-selection rules. In particular, a reader created with
+    /// [`ProcessReader::new`] caches the first strategy that succeeds for a
+    /// non-empty read, even if that read is short. Later reads performed by this
+    /// method continue using the selected strategy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadExactError::Read`] if [`read_at`](Self::read_at) returns an
+    /// error before the buffer is full.
+    ///
+    /// Returns [`ReadExactError::UnexpectedEof`] if [`read_at`](Self::read_at)
+    /// returns `Ok(0)` before the buffer is full. A zero-length successful read is
+    /// treated as an exact-read failure because this method could not make forward
+    /// progress.
+    ///
+    /// If this method returns an error, `buf` may have been partially overwritten.
+    /// This error type does not report how many bytes were read before the failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a successful partial read leaves bytes remaining in `buf`, but
+    /// advancing the read address by the number of bytes read would wrap past the
+    /// end of the address space.
+    pub fn read_exact_at(
+        &self,
+        mut address: usize,
+        mut buf: &mut [u8],
+    ) -> Result<(), ReadExactError> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+
+        loop {
+            let bytes_read = self.read_at(address, buf).map_err(ReadExactError::Read)?;
+            if bytes_read == 0 {
+                return Err(ReadExactError::UnexpectedEof);
+            }
+            if bytes_read == buf.len() {
+                return Ok(());
+            }
+            address = address
+                .checked_add(bytes_read)
+                .expect("requested read will wrap past end of address space");
+            buf = &mut buf[bytes_read..];
         }
     }
 

@@ -115,6 +115,48 @@ pub(crate) enum ReadErrorInner {
     PtraceStrategy(PtraceError),
 }
 
+/// Error returned by [`ProcessReader::read_exact_at`].
+///
+/// [`ProcessReader::read_exact_at`] is built on top of
+/// [`ProcessReader::read_at`]. It repeatedly performs partial reads until the
+/// caller's buffer is full. This error reports why that exact read could not be
+/// completed.
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum ReadExactError {
+    /// An underlying call to [`ProcessReader::read_at`] failed before the buffer
+    /// was completely filled.
+    ///
+    /// The wrapped [`ReadError`] describes the strategy that failed, or the set
+    /// of strategies that failed if automatic strategy selection had not yet
+    /// chosen a strategy.
+    Read(ReadError),
+    /// The reader stopped making progress before the buffer was completely
+    /// filled.
+    ///
+    /// This occurs when [`ProcessReader::read_at`] returns `Ok(0)` while
+    /// `read_exact_at` still has bytes left to read.
+    UnexpectedEof,
+}
+
+impl Display for ReadExactError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Read(_) => write!(f, "an error occurred before filling entire buffer"),
+            Self::UnexpectedEof => write!(f, "unexpected end-of-file before filling entire buffer"),
+        }
+    }
+}
+
+impl StdError for ReadExactError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Read(e) => Some(e),
+            Self::UnexpectedEof => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub(crate) struct ProcessVmReadvFailed(pub(crate) c_int);

@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/process-reader",
     "crates/linux/process-backend",
-    "crates/linux/process-reader",
 ]
 
 [workspace.package]

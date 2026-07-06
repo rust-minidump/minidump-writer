@@ -1,4 +1,4 @@
-use crate::error::{OpenFailed, ReadAtFailed, ReadExactAtError};
+use super::error::{OpenFailed, ReadAtFailed, ReadExactAtError};
 use core::{
     ffi::{CStr, c_int},
     fmt,
