@@ -923,7 +923,7 @@ impl MinidumpWriter {
     ) -> Result<Vec<u8>, WriterError> {
         let reader = self.process_inspector.process_reader();
         module_reader::read_build_id_from_module(module_reader::ProcessModuleMemoryReader::new(
-            reader,
+            &reader,
             self.mappings[idx].start_address,
         ))
         .map_err(WriterError::ModuleReaderError)
@@ -935,7 +935,7 @@ impl MinidumpWriter {
     ) -> Result<String, WriterError> {
         let reader = self.process_inspector.process_reader();
         module_reader::read_soname_from_module(module_reader::ProcessModuleMemoryReader::new(
-            reader,
+            &reader,
             self.mappings[idx].start_address,
         ))
         .map_err(WriterError::ModuleReaderError)

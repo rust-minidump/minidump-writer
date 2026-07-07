@@ -7,9 +7,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc.workspace = true
 log.workspace = true
+process-reader = { path = "../../process-reader", features = ["serde"] }
 serde.workspace = true
 thiserror.workspace = true
 

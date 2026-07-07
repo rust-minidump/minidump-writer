@@ -1,15 +1,13 @@
-use {
-    crate::regs::*,
-    core::{
-        cell::RefCell,
-        ffi::{CStr, c_int, c_long, c_void},
-        mem, ptr,
-    },
-    libc::pid_t,
-    syscall_invoker::SyscallInvoker,
+use crate::regs::*;
+use core::{
+    cell::RefCell,
+    ffi::{CStr, c_int, c_long, c_void},
+    mem, ptr,
 };
+use libc::pid_t;
+use syscall_invoker::SyscallInvoker;
 
-pub use {error::Error, module_reader::MappedModuleMemoryReader};
+pub use self::{error::Error, module_reader::MappedModuleMemoryReader};
 
 mod error;
 mod module_reader;
@@ -33,6 +31,9 @@ impl Backend {
             pid,
             syscall_invoker: Default::default(),
         }
+    }
+    pub fn process_reader(&self) -> ProcessReader {
+        ProcessReader(process_reader::ProcessReader::new(self.pid))
     }
     pub fn stop_process(&self) -> Result<(), Error> {
         self.standard_syscall(|| unsafe { libc::kill(self.pid, libc::SIGSTOP) })
@@ -138,50 +139,6 @@ impl Backend {
         Ok(bytes_read)
     }
 
-    pub fn read_process_io_vec(&self, buf: &mut [u8], offset: usize) -> Result<usize, Error> {
-        let mut local_iov = [libc::iovec {
-            iov_base: buf.as_mut_ptr().cast(),
-            iov_len: buf.len(),
-        }];
-
-        let mut remote_iov = [libc::iovec {
-            iov_base: offset as *mut _,
-            iov_len: buf.len(),
-        }];
-
-        let bytes_read = self
-            .standard_syscall(|| unsafe {
-                libc::process_vm_readv(
-                    self.pid,
-                    local_iov.as_mut_ptr(),
-                    local_iov.len().try_into().unwrap(),
-                    remote_iov.as_mut_ptr(),
-                    remote_iov.len().try_into().unwrap(),
-                    0,
-                )
-            })
-            .map_err(Error::ProcessVmReadvFailed)?;
-
-        Ok(usize::try_from(bytes_read).unwrap())
-    }
-
-    pub fn ptrace_peekdata(&self, offset: usize) -> Result<[u8; mem::size_of::<c_long>()], Error> {
-        self.special_syscall(|| unsafe {
-            set_errno(0);
-            let rv = ptrace(
-                libc::PTRACE_PEEKDATA,
-                self.pid,
-                offset as *mut _,
-                ptr::null_mut(),
-            );
-            if rv == -1 && errno() != 0 {
-                return Err(());
-            }
-            Ok(rv.to_ne_bytes())
-        })
-        .map_err(Error::PtracePeekDataFailed)
-    }
-
     pub fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs, Error> {
         self.getregset(tid).or_else(|_| self.getregs(tid))
     }
@@ -216,6 +173,20 @@ impl Backend {
             Ok(rv.to_ne_bytes())
         })
         .map_err(Error::PtracePeekUserFailed)
+    }
+
+    pub fn process_reader_for_virtual_mem(&self) -> ProcessReader {
+        ProcessReader(process_reader::ProcessReader::for_virtual_mem(self.pid))
+    }
+
+    pub fn process_reader_for_file(&self) -> Result<ProcessReader, Error> {
+        process_reader::ProcessReader::for_file(self.pid)
+            .map(ProcessReader)
+            .map_err(Error::ProcessReader)
+    }
+
+    pub fn process_reader_for_ptrace(&self) -> ProcessReader {
+        ProcessReader(process_reader::ProcessReader::for_ptrace(self.pid))
     }
 
     fn open_file(&self, path: &CStr) -> Result<OwnedFd, Error> {
@@ -321,7 +292,7 @@ impl Backend {
         Ok(())
     }
 
-    pub fn standard_syscall<T, F>(&self, f: F) -> Result<T, c_int>
+    fn standard_syscall<T, F>(&self, f: F) -> Result<T, c_int>
     where
         F: FnOnce() -> T,
         T: From<i8> + core::cmp::PartialEq,
@@ -329,7 +300,7 @@ impl Backend {
         self.syscall_invoker.borrow_mut().invoke_standard(f)
     }
 
-    pub fn special_syscall<T, F>(&self, f: F) -> Result<T, c_int>
+    fn special_syscall<T, F>(&self, f: F) -> Result<T, c_int>
     where
         F: FnOnce() -> Result<T, ()>,
     {
@@ -417,6 +388,15 @@ impl Drop for DirReader {
         if rv == -1 {
             log::debug!("failed to close directory: {}", errno());
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ProcessReader(process_reader::ProcessReader);
+
+impl ProcessReader {
+    pub fn read_at(&self, address: usize, buf: &mut [u8]) -> Result<usize, Error> {
+        self.0.read_at(address, buf).map_err(Error::ProcessReader)
     }
 }
 
