@@ -30,7 +30,7 @@ impl MinidumpWriter {
             {
                 continue;
             }
-            log::debug!("retrieving build id for {:?}", &self.mappings[map_idx]);
+            log::debug!("retrieving build id for {:?}", self.mappings[map_idx]);
             let identifier = self
             .build_id_from_process_memory_for_index(map_idx)
             .or_else(|e| {

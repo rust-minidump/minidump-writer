@@ -492,7 +492,7 @@ mod mac {
 
     #[inline(never)]
     pub(super) fn real_main(args: Vec<String>) -> Result<()> {
-        let port_name = args.get(0).ok_or("mach port name not specified")?;
+        let port_name = args.first().ok_or("mach port name not specified")?;
         let exception: u32 = args.get(1).ok_or("exception code not specified")?.parse()?;
 
         let client =
