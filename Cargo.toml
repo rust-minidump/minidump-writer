@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/process-reader",
+    "crates/crash-context",
     "crates/linux/process-backend",
+    "crates/process-reader",
 ]
 
 [workspace.package]
@@ -13,6 +14,8 @@ rust-version = "1.88.0"
 license = "MIT"
 
 [workspace.dependencies]
+# Note this functionality is now available in std in 1.95.0
+cfg-if = "1.0"
 libc = "0.2"
 log = "0.4"
 serde = { version = "1.0.208", default-features = false, features = ["derive"] }
@@ -31,8 +34,8 @@ license.workspace = true
 
 [dependencies]
 bitflags = "2.10"
-cfg-if = "1.0"
-crash-context = "0.6"
+cfg-if.workspace = true
+crash-context = { version = "0.7", path = "crates/crash-context" }
 error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
 # goblin >= 0.10 uses scroll 0.13

@@ -1,0 +1,27 @@
+[package]
+name = "crash-context"
+version = "0.7.0"
+description = "Provides portable types containing target specific contextual information at the time of a crash"
+repository.workspace = true
+authors = [
+    "Jake Shadle <jake.shadle@embark-studios.com>",
+]
+edition.workspace = true
+license.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/crash-context"
+homepage = "https://github.com/rust-minidump/minidump-writer/tree/main/crates/crash-context"
+categories = ["external-ffi-bindings"]
+keywords = ["crash", "libc", "getcontext"]
+rust-version.workspace = true
+
+[dependencies]
+# Nicer cfg handling
+cfg-if.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# provides bindings to mach specifics
+mach2 = "0.6"

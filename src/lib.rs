@@ -32,3 +32,6 @@ pub mod module_reader;
 pub mod process_reader;
 
 mod serializers;
+
+/// Re-export of crash-context
+pub use ::crash_context;

@@ -3,7 +3,7 @@ use {
         Pid,
         app_memory::AppMemoryList,
         auxv::AuxvDumpInfo,
-        crash_context::CrashContext,
+        crash_context_ext::CrashContextExt,
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
@@ -71,7 +71,7 @@ pub struct MinidumpWriterConfig {
     memory_blocks: Vec<MDMemoryDescriptor>,
     principal_mapping: Option<MappingInfo>,
     sanitize_stack: bool,
-    crash_context: Option<CrashContext>,
+    crash_context: Option<CrashContextExt>,
     crashing_thread_context: CrashingThreadContext,
     stop_timeout: Duration,
     direct_auxv_dump_info: Option<DirectAuxvDumpInfo>,
@@ -95,7 +95,7 @@ pub struct MinidumpWriter {
     principal_mapping_address: Option<usize>,
     pub principal_mapping: Option<MappingInfo>,
     pub blamed_thread: Pid,
-    pub crash_context: Option<CrashContext>,
+    pub crash_context: Option<CrashContextExt>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
     pub process_inspector: ProcessInspector,
@@ -156,7 +156,7 @@ impl MinidumpWriterConfig {
         self
     }
 
-    pub fn set_crash_context(&mut self, crash_context: CrashContext) -> &mut Self {
+    pub fn set_crash_context(&mut self, crash_context: CrashContextExt) -> &mut Self {
         self.crash_context = Some(crash_context);
         self
     }
