@@ -176,7 +176,7 @@ impl Client {
             let mut task_bootstrap_port = 0;
             kern!(task::task_get_special_port(
                 mach_task_self(),
-                task::TASK_BOOTSTRAP_PORT,
+                task::task_special_ports::TASK_BOOTSTRAP_PORT,
                 &mut task_bootstrap_port
             ));
 
@@ -316,7 +316,7 @@ impl Server {
             let mut task_bootstrap_port = 0;
             kern!(task::task_get_special_port(
                 mach_task_self(),
-                task::TASK_BOOTSTRAP_PORT,
+                task::task_special_ports::TASK_BOOTSTRAP_PORT,
                 &mut task_bootstrap_port
             ));
 

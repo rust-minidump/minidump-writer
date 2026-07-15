@@ -3,7 +3,7 @@ use crate::{
     minidump_format::format,
 };
 
-impl super::CrashContext {
+impl super::CrashContextExt {
     pub fn get_instruction_pointer(&self) -> usize {
         self.inner.context.uc_mcontext.pc as usize
     }
