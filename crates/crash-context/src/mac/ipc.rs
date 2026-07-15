@@ -15,7 +15,7 @@
 use crate::CrashContext;
 use mach2::{
     bootstrap, kern_return::KERN_SUCCESS, mach_port, message as msg, port, task,
-    traps::mach_task_self,
+    task_special_ports::TASK_BOOTSTRAP_PORT, traps::mach_task_self,
 };
 pub use mach2::{kern_return::kern_return_t, message::mach_msg_return_t};
 use std::{ffi::CStr, time::Duration};
@@ -176,7 +176,7 @@ impl Client {
             let mut task_bootstrap_port = 0;
             kern!(task::task_get_special_port(
                 mach_task_self(),
-                task::task_special_ports::TASK_BOOTSTRAP_PORT,
+                TASK_BOOTSTRAP_PORT,
                 &mut task_bootstrap_port
             ));
 
@@ -316,7 +316,7 @@ impl Server {
             let mut task_bootstrap_port = 0;
             kern!(task::task_get_special_port(
                 mach_task_self(),
-                task::task_special_ports::TASK_BOOTSTRAP_PORT,
+                TASK_BOOTSTRAP_PORT,
                 &mut task_bootstrap_port
             ));
 
