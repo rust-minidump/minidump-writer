@@ -24,4 +24,4 @@ libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # provides bindings to mach specifics
-mach2 = "0.6"
+mach2.workspace = true
