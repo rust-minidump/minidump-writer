@@ -6,9 +6,8 @@ use {
     minidump::*,
     minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*},
     minidump_writer::{
-        Pid,
+        CrashContextExt, Pid,
         app_memory::AppMemory,
-        crash_context::CrashContext,
         maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
         module_reader::{self},
@@ -53,12 +52,12 @@ fn get_ucontext() -> Result<crash_context::ucontext_t> {
     }
 }
 
-fn get_crash_context(tid: Pid) -> CrashContext {
+fn get_crash_context(tid: Pid) -> CrashContextExt {
     let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
     let context = get_ucontext().expect("Failed to get ucontext");
     #[cfg(not(target_arch = "arm"))]
     let float_state = unsafe { std::mem::zeroed() };
-    CrashContext {
+    CrashContextExt {
         inner: crash_context::CrashContext {
             siginfo,
             pid: std::process::id() as _,

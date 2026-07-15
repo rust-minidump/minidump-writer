@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/process-reader",
+    "crates/crash-context",
     "crates/linux/process-backend",
+    "crates/process-reader",
 ]
 
 [workspace.package]
@@ -13,8 +14,11 @@ rust-version = "1.88.0"
 license = "MIT"
 
 [workspace.dependencies]
+# Note this functionality is now available in std in 1.95.0
+cfg-if = "1.0"
 libc = "0.2"
 log = "0.4"
+mach2 = "0.6"
 serde = { version = "1.0.208", default-features = false, features = ["derive"] }
 thiserror = "2.0"
 
@@ -31,8 +35,8 @@ license.workspace = true
 
 [dependencies]
 bitflags = "2.10"
-cfg-if = "1.0"
-crash-context = "0.6"
+cfg-if.workspace = true
+crash-context = { version = "0.7", path = "crates/crash-context" }
 error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
 # goblin >= 0.10 uses scroll 0.13
@@ -64,9 +68,7 @@ procfs-core = { version = "0.18", default-features = false, features = ["serde1"
 bitflags = "2.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Binds some additional mac specifics not in libc, note that other dependents
-# such as wasmtime still use 0.4, so only bump if the ecosystem moves to newer versions
-mach2 = "0.4"
+mach2.workspace = true
 
 [dev-dependencies]
 # We auto-detect what the test binary that is spawned for most tests should be

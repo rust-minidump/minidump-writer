@@ -7,7 +7,7 @@ pub use {
 };
 
 pub mod app_memory;
-pub mod crash_context;
+mod crash_context_ext;
 pub mod maps_reader;
 pub mod minidump_writer;
 pub mod module_reader;
@@ -24,3 +24,4 @@ mod serializers;
 mod android;
 
 pub type Pid = i32;
+pub use crash_context_ext::CrashContextExt;
