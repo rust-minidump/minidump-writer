@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Added
+- [PR#113](https://github.com/EmbarkStudios/crash-handling/pull/113) added support for loongarch64 `getcontext`.
+
+### Changed
+- [PR#190](https://github.com/rust-minidump/minidump-writer/pull/190) moved this crate from <https://github.com/EmbarkStudios/crash-handling>.
+
 ## [0.7.0] - 2026-01-13
 ### Added
 - [PR#102](https://github.com/EmbarkStudios/crash-handling/pull/102) added support for RISCV64 `getcontext`.
