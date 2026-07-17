@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.8.0] - 2026-07-17
 ### Added
 - [PR#113](https://github.com/EmbarkStudios/crash-handling/pull/113) added support for loongarch64 `getcontext`.
 
@@ -90,7 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial pass of crash-context, Linux only
 
 <!-- next-url -->
-[Unreleased]: https://github.com/EmbarkStudios/crash-handling/compare/crash-context-0.7.0...HEAD
+[Unreleased]: https://github.com/EmbarkStudios/crash-handling/compare/crash-context-0.8.0...HEAD
+[0.8.0]: https://github.com/EmbarkStudios/crash-handling/compare/crash-context-0.7.0...crash-context-0.8.0
 [0.7.0]: https://github.com/EmbarkStudios/crash-handling/compare/{{tag_name}}...crash-context-0.7.0
 [0.6.3]: https://github.com/EmbarkStudios/crash-handling/compare/crash-context-0.6.2...{{tag_name}}
 [0.6.2]: https://github.com/EmbarkStudios/crash-handling/compare/crash-context-0.6.1...crash-context-0.6.2

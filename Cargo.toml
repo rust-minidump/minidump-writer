@@ -36,7 +36,7 @@ license.workspace = true
 [dependencies]
 bitflags = "2.10"
 cfg-if.workspace = true
-crash-context = { version = "0.7", path = "crates/crash-context" }
+crash-context = { version = "0.8", path = "crates/crash-context" }
 error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
 # goblin >= 0.10 uses scroll 0.13
