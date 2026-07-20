@@ -1,6 +1,7 @@
 [package]
 name = "process-backend"
 version = "0.1.0"
+description = "Providers helpers for reading process memory specialized for minidump-writer"
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
