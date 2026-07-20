@@ -32,11 +32,15 @@ jobs:
     strategy:
       matrix:
         job:
-          - { os: ubuntu-24.04,   target: x86_64-unknown-linux-gnu, release: true }
-          - { os: ubuntu-24.04,   target: x86_64-unknown-linux-musl }
-          - { os: windows-2025,   target: x86_64-pc-windows-msvc }
+          - {
+              os: ubuntu-24.04,
+              target: x86_64-unknown-linux-gnu,
+              release: true,
+            }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc }
           - { os: macos-15-intel, target: x86_64-apple-darwin }
-          - { os: macos-15,       target: aarch64-apple-darwin }
+          - { os: macos-15, target: aarch64-apple-darwin }
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -137,6 +141,31 @@ jobs:
             cargo run --target x86_64-linux-android --bin test -- nop
             # Build and run tests
             cargo test --target x86_64-linux-android
+
+  test-freebsd:
+    name: Test (FreeBSD ${{ matrix.release }} x86_64)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - release: "14.4"
+          - release: "15.0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          usesh: true
+          prepare: |
+            pkg install -y rust
+          run: |
+            sysctl security.bsd.unprivileged_proc_debug=1
+            cargo test --lib
+            cargo test --test freebsd_minidump_writer
+            cargo test --test freebsd_module_reader
+            cargo clippy --all-features --all-targets -- -D warnings
 
   deny-check:
     runs-on: ubuntu-24.04

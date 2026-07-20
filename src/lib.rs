@@ -21,6 +21,10 @@ cfg_if::cfg_if! {
         mod mac;
 
         pub use mac::*;
+    } else if #[cfg(target_os = "freebsd")] {
+        mod freebsd;
+
+        pub use freebsd::*;
     }
 }
 

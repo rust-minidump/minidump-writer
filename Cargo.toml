@@ -70,6 +70,9 @@ bitflags = "2.4"
 [target.'cfg(target_os = "macos")'.dependencies]
 mach2.workspace = true
 
+[target.'cfg(target_os = "freebsd")'.dependencies]
+byteorder = "1.4"
+
 [dev-dependencies]
 # We auto-detect what the test binary that is spawned for most tests should be
 # compiled for

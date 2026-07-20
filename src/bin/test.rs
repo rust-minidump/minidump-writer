@@ -437,6 +437,158 @@ mod linux {
     }
 }
 
+#[cfg(target_os = "freebsd")]
+mod freebsd {
+    use super::*;
+
+    fn spawn_and_wait(num: usize) -> Result<()> {
+        // One less than the requested amount, as the main thread counts as well
+        for _ in 1..num {
+            std::thread::spawn(|| {
+                println!("1");
+                loop {
+                    std::thread::park();
+                }
+            });
+        }
+        println!("1");
+        loop {
+            std::thread::park();
+        }
+    }
+
+    fn spawn_name_wait(num: usize) -> Result<()> {
+        for id in 1..num {
+            let name = format!("thread_{id}");
+            std::thread::Builder::new()
+                .name(name.clone())
+                .spawn(move || {
+                    let cname = std::ffi::CString::new(format!("thread_{id}"))
+                        .expect("thread name contained null");
+                    // SAFETY: pthread_set_name_np takes a valid pthread_t from
+                    // pthread_self() and a valid null-terminated C string from
+                    // CString which lives for the duration of the call.
+                    unsafe {
+                        libc::pthread_set_name_np(libc::pthread_self(), cname.as_ptr());
+                    }
+                    println!("1");
+                    loop {
+                        std::thread::park();
+                    }
+                })?;
+        }
+        println!("1");
+        loop {
+            std::thread::park();
+        }
+    }
+
+    fn spawn_mmap_wait() -> Result<()> {
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
+        let mapped_mem = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                page_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANON,
+                -1,
+                0,
+            )
+        };
+        if mapped_mem == libc::MAP_FAILED {
+            return Err("mmap failed".into());
+        }
+
+        println!("{} {}", mapped_mem as usize, page_size);
+        loop {
+            std::thread::park();
+        }
+    }
+
+    fn spawn_alloc_wait() -> Result<()> {
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
+
+        let mut values = Vec::<u8>::with_capacity(page_size);
+        for idx in 0..page_size {
+            values.push((idx % 255) as u8);
+        }
+
+        println!("{:p} {}", values.as_ptr(), page_size);
+        loop {
+            std::thread::park();
+        }
+    }
+
+    fn create_files_wait(num: usize) -> Result<()> {
+        use std::{fmt::Write, io::Read};
+
+        let mut file_array = Vec::<std::fs::File>::with_capacity(num);
+
+        let mut rand = std::fs::File::open("/dev/urandom").expect("failed to open /dev/urandom");
+        const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        let mut root = std::env::temp_dir();
+        root.push("minidump-writer");
+
+        if !root.exists() {
+            std::fs::create_dir_all(&root).expect("failed to create $TMP/minidump-writer dir");
+        }
+
+        let mut rand_indices = [0u8; 6];
+
+        for id in 0..num {
+            let mut name = String::new();
+            name.push_str("test_file");
+
+            rand.read_exact(&mut rand_indices)
+                .expect("failed to read /dev/urandom");
+
+            for index in rand_indices {
+                name.push(CHARS[index as usize % CHARS.len()] as char);
+            }
+
+            write!(&mut name, "{id}").unwrap();
+
+            let path = root.join(name);
+            file_array.push(std::fs::File::create(&path).expect("failed to create path"));
+            println!("1");
+        }
+        println!("1");
+        loop {
+            std::thread::park();
+            println!("{}", file_array.len());
+        }
+    }
+
+    pub(super) fn real_main(args: Vec<String>) -> Result<()> {
+        match args.len() {
+            1 => match args[0].as_ref() {
+                "nop" => Ok(()),
+                "setup" => Ok(()),
+                "spawn_mmap_wait" => spawn_mmap_wait(),
+                "spawn_alloc_wait" => spawn_alloc_wait(),
+                _ => Err("Len 1: Unknown test option".into()),
+            },
+            2 => match args[0].as_ref() {
+                "spawn_and_wait" => {
+                    let num_of_threads: usize = args[1].parse().unwrap();
+                    spawn_and_wait(num_of_threads)
+                }
+                "spawn_name_wait" => {
+                    let num_of_threads: usize = args[1].parse().unwrap();
+                    spawn_name_wait(num_of_threads)
+                }
+                "create_files_wait" => {
+                    let num_of_files: usize = args[1].parse().unwrap();
+                    create_files_wait(num_of_files)
+                }
+                _ => Err(format!("Len 2: Unknown test option: {}", args[0]).into()),
+            },
+            _ => Err("Unknown test option".into()),
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod windows {
     use super::*;
@@ -549,6 +701,8 @@ fn main() -> Result<()> {
     cfg_if::cfg_if! {
         if #[cfg(any(target_os = "linux", target_os = "android"))] {
             linux::real_main(args)
+        } else if #[cfg(target_os = "freebsd")] {
+            freebsd::real_main(args)
         } else if #[cfg(target_os = "windows")] {
             windows::real_main(args)
         } else if #[cfg(target_os = "macos")] {

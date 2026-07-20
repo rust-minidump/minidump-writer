@@ -13,6 +13,20 @@ pub use crate::windows::module_reader::*;
 #[cfg(target_os = "macos")]
 pub use crate::mac::module_reader::*;
 
+#[cfg(target_os = "freebsd")]
+pub use crate::freebsd::module_reader::*;
+
+/// Module memory, which may either be represented by a slice or by an offset into a process's
+/// address space.
+#[derive(Clone, Copy)]
+pub enum ModuleMemory<'a> {
+    Slice(&'a [u8]),
+    Process {
+        reader: &'a ProcessReader,
+        start_address: u64,
+    },
+}
+
 pub struct ProcessModuleMemoryReader<'a> {
     pub(super) reader: &'a ProcessReader<'a>,
     pub(super) start_address: u64,
