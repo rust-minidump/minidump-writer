@@ -1,6 +1,7 @@
 [package]
 name = "process-reader"
 version = "0.1.0"
+description = "Utilities for reading process memory on Linux"
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
