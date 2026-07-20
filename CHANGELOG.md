@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.13.0] - 2026-07-20
 ### Changed
 - [PR#174](https://github.com/rust-minidump/minidump-writer/pull/174) and [PR#175](https://github.com/rust-minidump/minidump-writer/pull/175) refactored `src/linux/thread_info`.
 - [PR#181](https://github.com/rust-minidump/minidump-writer/pull/181) refactored `src/linux/maps_reader` and `src/linux/module_reader`.
@@ -202,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.12.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.13.0...HEAD
+[0.13.0]: https://github.com/rust-minidump/minidump-writer/compare/0.12.0...0.13.0
 [0.12.0]: https://github.com/rust-minidump/minidump-writer/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/rust-minidump/minidump-writer/compare/0.10.2...0.11.0
 [0.10.2]: https://github.com/rust-minidump/minidump-writer/compare/0.10.1...0.10.2
