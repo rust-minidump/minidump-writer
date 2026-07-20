@@ -1,14 +1,16 @@
 [package]
 name = "process-reader"
-version = "0.0.0"
-edition = "2024"
-rust-version = "1.88.0"
-license = "MIT"
+version = "0.1.0"
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 readme = "README.md"
-
-[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-libc = { version = "0.2.186", default-features = false }
-serde = { version = "1.0.228", default-features = false, features=["derive"], optional = true }
 
 [features]
 serde = ["dep:serde"]
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = { workspace = true, default-features = false }
+serde = { version = "1.0.228", default-features = false, features = ["derive"], optional = true }

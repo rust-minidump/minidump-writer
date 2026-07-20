@@ -16,7 +16,7 @@ license = "MIT"
 [workspace.dependencies]
 # Note this functionality is now available in std in 1.95.0
 cfg-if = "1.0"
-libc = "0.2"
+libc = { version = "0.2", default-features = false }
 log = "0.4"
 mach2 = "0.6"
 serde = { version = "1.0.208", default-features = false, features = ["derive"] }
@@ -58,7 +58,7 @@ memmap2 = "0.9"
 byteorder = "1.4"
 error-graph = { version = "0.1.1", features = ["serde"] }
 failspot = "0.2.0"
-process-backend = { path = "crates/linux/process-backend", features = ["testing"] }
+process-backend = { version = "0.1.0", path = "crates/linux/process-backend", features = ["testing"] }
 
 # Used for parsing procfs info.
 # default-features is disabled since it pulls in chrono

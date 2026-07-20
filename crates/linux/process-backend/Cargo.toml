@@ -1,18 +1,18 @@
 [package]
 name = "process-backend"
-version = "0.0.0"
+version = "0.1.0"
 repository.workspace = true
 homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+testing = []
+
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc.workspace = true
 log.workspace = true
-process-reader = { path = "../../process-reader", features = ["serde"] }
+process-reader = { version = "0.1.0", path = "../../process-reader", features = ["serde"] }
 serde.workspace = true
 thiserror.workspace = true
-
-[features]
-testing = []
