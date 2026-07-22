@@ -1370,6 +1370,7 @@ dependencies = [
  "minidump",
  "minidump-common",
  "minidump-unwind",
+ "plain",
  "process-backend",
  "procfs-core 0.18.0",
  "scroll 0.12.0",
@@ -1686,6 +1687,7 @@ name = "process-reader"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "plain",
  "serde",
 ]
 

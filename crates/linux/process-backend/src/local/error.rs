@@ -50,4 +50,6 @@ pub enum Error {
     PtracePeekDataFailed(c_int),
     #[error("ProcessReader returned an error")]
     ProcessReader(#[source] process_reader::ReadError),
+    #[error("ProcessReader returned an error during an exact read")]
+    ProcessReaderExact(#[source] process_reader::ReadExactError),
 }

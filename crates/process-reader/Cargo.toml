@@ -13,4 +13,5 @@ serde = ["dep:serde"]
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = { workspace = true, default-features = false }
+plain = { version = "0.2.3", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["derive"], optional = true }
