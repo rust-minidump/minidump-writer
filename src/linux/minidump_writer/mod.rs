@@ -295,7 +295,7 @@ impl MinidumpWriter {
         }
 
         // Same with mappings -- Some information is still better than no information!
-        if let Err(e) = self.enumerate_mappings() {
+        if let Err(e) = self.enumerate_mappings(&mut soft_errors) {
             soft_errors.push(InitError::EnumerateMappingsFailed(Box::new(e)));
         }
 
@@ -699,20 +699,14 @@ impl MinidumpWriter {
         Ok(())
     }
 
-    fn enumerate_mappings(&mut self) -> Result<(), InitError> {
-        // linux_gate_loc is the beginning of the kernel's mapping of
-        // linux-gate.so in the process.  It doesn't actually show up in the
-        // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
-        // aux vector entry, which gives the information necessary to special
-        // case its entry when creating the list of mappings.
-        // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
-        // information.
-        self.mappings = MappingInfo::for_pid(
-            &self.process_inspector,
-            self.process_id,
-            self.auxv.get_linux_gate_address(),
-        )
-        .map_err(InitError::AggregateMappingsFailed)?;
+    fn enumerate_mappings(
+        &mut self,
+        mut soft_errors: impl WriteErrorList<InitError>,
+    ) -> Result<(), InitError> {
+        let mut mappings = self.enumerate_mappings_via_proc_maps().or_else(|e| {
+            soft_errors.push(e);
+            self.enumerate_mappings_via_debugger_rendezvous()
+        })?;
 
         // Although the initial executable is usually the first mapping, it's not
         // guaranteed (see http://crosbug.com/25355); therefore, try to use the
@@ -727,14 +721,64 @@ impl MinidumpWriter {
             // format assumes the first module is the one that corresponds to the main
             // executable (as codified in
             // processor/minidump.cc:MinidumpModuleList::GetMainModule()).
-            if let Some(entry_mapping_idx) = self.mappings.iter().position(|mapping| {
+            if let Some(entry_mapping_idx) = mappings.iter().position(|mapping| {
                 (mapping.start_address..mapping.start_address + mapping.size)
                     .contains(&entry_point_loc)
             }) {
-                self.mappings.swap(0, entry_mapping_idx);
+                mappings.swap(0, entry_mapping_idx);
             }
         }
+
+        self.mappings = mappings;
+
         Ok(())
+    }
+
+    fn enumerate_mappings_via_debugger_rendezvous(
+        &mut self,
+    ) -> Result<Vec<MappingInfo>, InitError> {
+        let Some(program_header_table_address) = self
+            .auxv
+            .get_program_header_address()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderTableAddress);
+        };
+
+        let Some(program_header_count) = self
+            .auxv
+            .get_program_header_count()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderCount);
+        };
+
+        let mappings = MappingInfo::from_debugger_rendezvous(
+            &self.process_inspector,
+            program_header_table_address,
+            program_header_count,
+        )
+        .map_err(InitError::MappingsFromDebuggerRendezvousFailed)?;
+
+        Ok(mappings)
+    }
+
+    fn enumerate_mappings_via_proc_maps(&mut self) -> Result<Vec<MappingInfo>, InitError> {
+        // linux_gate_loc is the beginning of the kernel's mapping of
+        // linux-gate.so in the process.  It doesn't actually show up in the
+        // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
+        // aux vector entry, which gives the information necessary to special
+        // case its entry when creating the list of mappings.
+        // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
+        // information.
+        let mappings = MappingInfo::for_pid(
+            &self.process_inspector,
+            self.process_id,
+            self.auxv.get_linux_gate_address(),
+        )
+        .map_err(InitError::AggregateMappingsFailed)?;
+
+        Ok(mappings)
     }
 
     /// Read thread info from /proc/$pid/status.
