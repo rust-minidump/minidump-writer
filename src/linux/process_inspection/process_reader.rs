@@ -4,6 +4,7 @@ use super::{
 };
 use crate::module_reader::ProcessModuleMemoryReader;
 
+use plain::Plain;
 use process_backend::local;
 
 pub type ProcessHandle = libc::pid_t;
@@ -82,6 +83,63 @@ impl<'a> ProcessReader<'a> {
         }
         .map_err(CopyFromProcessError::Backend)
     }
+
+    /// Read a plain-old-data value of type `T` from the process at `address`.
+    pub fn read_pod<T: Plain>(&self, address: usize) -> Result<T, CopyFromProcessError> {
+        if let Some(forced_backend) = &self.forced_backend {
+            match forced_backend {
+                ForcedBackend::Local(process_reader_backend) => {
+                    process_reader_backend.read_pod(address).map_err(Error::Local)
+                }
+            }
+        } else {
+            match &self.process_inspector.backend {
+                Backend::Local {
+                    process_reader_backend,
+                    ..
+                } => process_reader_backend.read_pod(address).map_err(Error::Local),
+            }
+        }
+        .map_err(CopyFromProcessError::Backend)
+    }
+
+    /// Read `count` consecutive plain-old-data values of type `T` starting at
+    /// `address`.
+    pub fn read_pod_vec<T: Plain>(
+        &self,
+        mut address: usize,
+        count: usize,
+    ) -> Result<Vec<T>, CopyFromProcessError> {
+        let mut v = Vec::with_capacity(count);
+        for _ in 0..count {
+            v.push(self.read_pod(address)?);
+            address += std::mem::size_of::<T>();
+        }
+        Ok(v)
+    }
+
+    /// Read bytes from the process starting at `address` into `buf` up to and
+    /// including the first `terminator` byte (or until a read returns no bytes).
+    ///
+    /// Returns the number of bytes appended to `buf`.
+    pub fn read_until(
+        &self,
+        mut address: usize,
+        terminator: u8,
+        buf: &mut Vec<u8>,
+    ) -> Result<usize, CopyFromProcessError> {
+        let start_len = buf.len();
+        let mut b = [0u8];
+        while self.read(address, &mut b)? > 0 {
+            buf.push(b[0]);
+            if b[0] == terminator {
+                break;
+            }
+            address += 1;
+        }
+        Ok(buf.len() - start_len)
+    }
+
     /// Find the address at which a module with the given name is loaded in the process.
     pub fn find_module(
         &self,

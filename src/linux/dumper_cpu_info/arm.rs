@@ -1,6 +1,7 @@
 use {
     super::{CpuInfoError, ProcessInspector},
     crate::minidump_format::*,
+    failspot::failspot,
     scroll::Pwrite,
     std::{
         collections::HashSet,
@@ -191,9 +192,17 @@ pub fn write_cpu_information(
     // readable from regular Android applications on later versions
     // (>= 4.1) of the Android platform.
 
+    if failspot!(CpuInfoFileOpen) {
+        process_inspector.fail_one_syscall_with(libc::EPERM);
+    }
+
     let cpuinfo_file = match process_inspector.read_file("/proc/cpuinfo") {
         Ok(x) => x,
-        Err(_) => {
+        Err(e) => {
+            // Surface a failspot-injected failure as a soft error.
+            if failspot!(CpuInfoFileOpen) {
+                return Err(CpuInfoError::ReadFileError(e));
+            }
             // Do not return Error here to allow the minidump generation
             // to happen properly.
             return Ok(());

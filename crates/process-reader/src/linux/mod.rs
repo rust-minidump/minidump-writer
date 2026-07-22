@@ -87,6 +87,7 @@ use core::{
 };
 
 pub use error::{ReadError, ReadExactError};
+pub use plain::Plain;
 
 mod error;
 mod wrapper;
@@ -298,6 +299,31 @@ impl ProcessReader {
                 .expect("requested read will wrap past end of address space");
             buf = &mut buf[bytes_read..];
         }
+    }
+
+    /// Reads a plain-old-data value of type `T` from the target process at
+    /// `address`.
+    ///
+    /// This reads exactly `size_of::<T>()` bytes into a freshly zeroed `T` using
+    /// [`read_exact_at`](Self::read_exact_at). The [`Plain`] bound guarantees
+    /// that every possible bit pattern is a valid `T`, so the bytes read from the
+    /// target process are always a valid value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReadExactError`] if the underlying exact read cannot fill the
+    /// value.
+    pub fn read_pod<T: Plain>(&self, address: usize) -> Result<T, ReadExactError> {
+        // Safety: `Plain` is an unsafe trait that may only be implemented on
+        // types for which every possible bit pattern is valid, so there is
+        // nothing we could read from the other process that isn't a valid value
+        // for `T`.
+        let mut pod: T = unsafe { core::mem::zeroed() };
+        let bytes = unsafe {
+            core::slice::from_raw_parts_mut(ptr::from_mut(&mut pod).cast::<u8>(), size_of::<T>())
+        };
+        self.read_exact_at(address, bytes)?;
+        Ok(pod)
     }
 
     /// Attempts to read bytes from the target process at `address`.

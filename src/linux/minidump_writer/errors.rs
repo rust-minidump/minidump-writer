@@ -3,7 +3,7 @@ use {
         Pid,
         auxv::AuxvError,
         dso_debug::SectionDsoDebugError,
-        maps_reader::MapsReaderError,
+        maps_reader::{FromDebuggerRendezvousError, MapsReaderError},
         minidump_writer::{
             exception_stream::SectionExceptionStreamError,
             handle_data_stream::SectionHandleDataStreamError, mappings::SectionMappingsError,
@@ -176,6 +176,12 @@ pub enum InitError {
     SuspendNoThreadsLeft(usize),
     #[error("Crash thread does not reference principal mapping")]
     PrincipalMappingNotReferenced,
+    #[error("no program header table address in auxiliary vector")]
+    MissingProgramHeaderTableAddress,
+    #[error("no program header count in auxiliary vector")]
+    MissingProgramHeaderCount,
+    #[error("failed to obtain mappings from debugger rendez-vous")]
+    MappingsFromDebuggerRendezvousFailed(#[source] FromDebuggerRendezvousError),
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]

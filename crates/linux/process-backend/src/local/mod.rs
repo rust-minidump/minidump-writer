@@ -398,6 +398,10 @@ impl ProcessReader {
     pub fn read_at(&self, address: usize, buf: &mut [u8]) -> Result<usize, Error> {
         self.0.read_at(address, buf).map_err(Error::ProcessReader)
     }
+
+    pub fn read_pod<T: process_reader::Plain>(&self, address: usize) -> Result<T, Error> {
+        self.0.read_pod(address).map_err(Error::ProcessReaderExact)
+    }
 }
 
 #[derive(Debug)]
