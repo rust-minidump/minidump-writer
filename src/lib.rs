@@ -11,6 +11,7 @@ cfg_if::cfg_if! {
                 CpuInfoFileOpen,
                 StackPointerMapping,
                 ThreadStackCopy,
+                CrashingThreadIpCopy,
             }
         }
 
