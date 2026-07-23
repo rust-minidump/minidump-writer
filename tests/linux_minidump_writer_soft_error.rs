@@ -101,3 +101,26 @@ fn soft_error_stream_content() {
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
     assert_soft_errors_in_minidump(&dump, &expected_errors);
 }
+
+#[test]
+fn thread_stack_pointer_unmapped_soft_error() {
+    let mut child = start_child_and_wait_for_threads(1);
+    let pid = child.id() as i32;
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("stack_pointer_unmapped")
+        .tempfile()
+        .unwrap();
+
+    let mut fail_client = FailSpotName::testing_client();
+    fail_client.set_enabled(FailSpotName::StackPointerMapping, true);
+
+    MinidumpWriterConfig::new(pid, pid)
+        .write(&mut tmpfile)
+        .expect("could not write minidump");
+    child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait on killed process");
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+    assert_minidump_contains_soft_error(&dump, "GetStackInfoFailed");
+}
