@@ -121,6 +121,12 @@ impl MinidumpWriter {
                 // it's contained within. If it's not in mapped memory,
                 // don't bother trying to write it.
                 for mapping in &self.mappings {
+                    let instruction_ptr = failspot!(if CrashingThreadIpCopy {
+                        // Just use the first mapping since we'll error out anyway
+                        mapping.start_address + mapping.size / 2
+                    } else {
+                        instruction_ptr
+                    });
                     if instruction_ptr < mapping.start_address
                         || instruction_ptr >= mapping.start_address + mapping.size
                     {
@@ -143,12 +149,22 @@ impl MinidumpWriter {
                     ip_memory_d.memory.data_size =
                         (end_of_range - ip_memory_d.start_of_memory_range) as u32;
 
-                    let memory_copy = MinidumpWriter::copy_from_process(
-                        &self.process_inspector,
-                        ip_memory_d.start_of_memory_range as _,
-                        ip_memory_d.memory.data_size as usize,
-                    )
-                    .map_err(SectionThreadListError::CopyFromProcessError)?;
+                    let ip_copy = failspot!(if CrashingThreadIpCopy {
+                        Err(CopyFromProcessError::InvalidArgument)
+                    } else {
+                        MinidumpWriter::copy_from_process(
+                            &self.process_inspector,
+                            ip_memory_d.start_of_memory_range as _,
+                            ip_memory_d.memory.data_size as usize,
+                        )
+                    });
+                    let memory_copy = match ip_copy {
+                        Ok(x) => x,
+                        Err(e) => {
+                            soft_errors.push(SectionThreadListError::CopyFromProcessError(e));
+                            break;
+                        }
+                    };
 
                     let mem_section = MemoryArrayWriter::alloc_from_array(buffer, &memory_copy)?;
                     ip_memory_d.memory = mem_section.location();
