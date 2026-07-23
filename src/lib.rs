@@ -9,6 +9,7 @@ cfg_if::cfg_if! {
                 ThreadName,
                 SuspendThreads,
                 CpuInfoFileOpen,
+                StackPointerMapping,
             }
         }
 

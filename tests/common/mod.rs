@@ -144,6 +144,34 @@ pub fn assert_soft_errors_in_minidump<'a, 'b, T, I>(
     }
 }
 
+/// Asserts that the soft-error stream contains an error named `variant` anywhere
+/// in its (possibly nested) structure. Data-carrying variants appear as object
+/// keys and unit variants as strings, so both forms are matched.
+#[allow(unused)]
+pub fn assert_minidump_contains_soft_error<'a, T>(dump: &minidump::Minidump<'a, T>, variant: &str)
+where
+    T: std::ops::Deref<Target = [u8]> + 'a,
+{
+    let errors = read_minidump_soft_errors_or_panic(dump);
+    assert!(
+        soft_errors_contain(&errors, variant),
+        "soft error list missing expected error `{variant}`\nError_list: {errors:#?}"
+    );
+}
+
+fn soft_errors_contain(value: &serde_json::Value, variant: &str) -> bool {
+    match value {
+        serde_json::Value::String(s) => s == variant,
+        serde_json::Value::Array(items) => {
+            items.iter().any(|item| soft_errors_contain(item, variant))
+        }
+        serde_json::Value::Object(map) => {
+            map.contains_key(variant) || map.values().any(|v| soft_errors_contain(v, variant))
+        }
+        _ => false,
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[allow(unused)]
 pub use linux::*;

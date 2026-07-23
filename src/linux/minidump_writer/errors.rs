@@ -69,6 +69,8 @@ pub enum WriterError {
     ResumeThreadsErrors(#[source] ErrorList<WriterError>),
     #[error("Errors occurred while writing system info")]
     WriteSystemInfoErrors(#[source] ErrorList<SectionSystemInfoError>),
+    #[error("Errors occurred while writing the thread list")]
+    WriteThreadListErrors(#[source] ErrorList<SectionThreadListError>),
     #[error("Failed writing cpuinfo")]
     WriteCpuInfoFailed(#[source] MemoryWriterError),
     #[error("Failed writing thread proc status")]

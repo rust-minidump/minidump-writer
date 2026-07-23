@@ -345,7 +345,10 @@ impl MinidumpWriter {
         // we should have a mostly-intact dump
         dir_section.write_to_file(buffer, None)?;
 
-        let dirent = self.write_thread_list_stream(buffer)?;
+        let dirent = self.write_thread_list_stream(
+            buffer,
+            soft_errors.subwriter(WriterError::WriteThreadListErrors),
+        )?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = self.write_mappings(buffer)?;
