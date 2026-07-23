@@ -232,9 +232,18 @@ impl MinidumpWriter {
             stack_len
         };
 
-        let mut stack_bytes =
+        let stack_copy = failspot!(if ThreadStackCopy {
+            Err(CopyFromProcessError::InvalidArgument)
+        } else {
             MinidumpWriter::copy_from_process(&self.process_inspector, valid_stack_ptr, stack_len)
-                .map_err(SectionThreadListError::CopyFromProcessError)?;
+        });
+        let mut stack_bytes = match stack_copy {
+            Ok(x) => x,
+            Err(e) => {
+                soft_errors.push(SectionThreadListError::CopyFromProcessError(e));
+                return Ok(());
+            }
+        };
         let stack_pointer_offset = stack_ptr.saturating_sub(valid_stack_ptr);
         if self.skip_stacks_if_mapping_unreferenced {
             if let Some(principal_mapping) = &self.principal_mapping {

@@ -10,6 +10,7 @@ cfg_if::cfg_if! {
                 SuspendThreads,
                 CpuInfoFileOpen,
                 StackPointerMapping,
+                ThreadStackCopy,
             }
         }
 
