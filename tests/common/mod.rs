@@ -152,7 +152,10 @@ pub use linux::*;
 #[allow(unused)]
 mod linux {
     use {
-        minidump_writer::module_reader::{self, ModuleMemoryReadError, ReadModuleMemory},
+        minidump_writer::{
+            module_reader::{self, ModuleMemoryReadError, ReadModuleMemory},
+            CrashContextExt, Pid,
+        },
         std::borrow::Cow,
     };
     pub struct SliceModuleMemoryReader<'a>(pub &'a [u8]);
@@ -190,6 +193,23 @@ mod linux {
         }
         fn is_process_memory(&self) -> bool {
             false
+        }
+    }
+
+    pub fn get_dummy_crash_context(tid: Pid) -> CrashContextExt {
+        let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
+        let context = unsafe { std::mem::zeroed() };
+        #[cfg(not(target_arch = "arm"))]
+        let float_state = unsafe { std::mem::zeroed() };
+        CrashContextExt {
+            inner: crash_context::CrashContext {
+                siginfo,
+                pid: std::process::id() as _,
+                tid,
+                context,
+                #[cfg(not(target_arch = "arm"))]
+                float_state,
+            },
         }
     }
 }
