@@ -34,38 +34,10 @@ impl Context {
     pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
         let mut mw = MinidumpWriterConfig::new(pid, pid);
         if self == &Context::With {
-            let crash_context = get_crash_context(pid);
+            let crash_context = get_dummy_crash_context(pid);
             mw.set_crash_context(crash_context);
         }
         mw
-    }
-}
-
-fn get_ucontext() -> Result<crash_context::ucontext_t> {
-    let mut context = std::mem::MaybeUninit::uninit();
-    unsafe {
-        let res = crash_context::crash_context_getcontext(context.as_mut_ptr());
-        if res == -1 {
-            Err(std::io::Error::last_os_error())?;
-        }
-        Ok(context.assume_init())
-    }
-}
-
-fn get_crash_context(tid: Pid) -> CrashContextExt {
-    let siginfo: libc::signalfd_siginfo = unsafe { std::mem::zeroed() };
-    let context = get_ucontext().expect("Failed to get ucontext");
-    #[cfg(not(target_arch = "arm"))]
-    let float_state = unsafe { std::mem::zeroed() };
-    CrashContextExt {
-        inner: crash_context::CrashContext {
-            siginfo,
-            pid: std::process::id() as _,
-            tid,
-            context,
-            #[cfg(not(target_arch = "arm"))]
-            float_state,
-        },
     }
 }
 
