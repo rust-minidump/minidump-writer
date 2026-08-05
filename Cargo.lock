@@ -1664,7 +1664,6 @@ name = "process-backend"
 version = "0.1.0"
 dependencies = [
  "libc",
- "log",
  "process-reader",
  "serde",
  "thiserror 2.0.19",
