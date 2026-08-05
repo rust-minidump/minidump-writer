@@ -12,6 +12,7 @@ use {
         mem::size_of,
         os::unix::process::ExitStatusExt,
         ptr,
+        sync::Mutex,
     },
 };
 
@@ -35,13 +36,22 @@ macro_rules! assert_no_soft_errors(($n: ident, $e: expr) => {{
     __result
 }});
 
+static GLOBAL_LOCK: Mutex<()> = Mutex::new(());
+
+macro_rules! one_at_a_time(() => {
+    let _guard_ = GLOBAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+});
+
 #[test]
 fn setup() {
+    one_at_a_time!();
+
     spawn_child("setup", &[]);
 }
 
 #[test]
 fn thread_list_from_child() {
+    one_at_a_time!();
     // Child spawns and looks in the parent (== this process) for its own thread-ID
 
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -100,6 +110,8 @@ fn thread_list_from_child() {
 
 #[test]
 fn thread_list_from_parent() {
+    one_at_a_time!();
+
     let num_of_threads = 5;
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
@@ -175,17 +187,23 @@ fn thread_list_from_parent() {
 #[test]
 // Ensure that the linux-gate VDSO is included in the mapping list.
 fn mappings_include_linux_gate() {
+    one_at_a_time!();
+
     spawn_child("mappings_include_linux_gate", &[]);
 }
 
 #[test]
 fn linux_gate_mapping_id() {
+    one_at_a_time!();
+
     disabled_on_ci_and_android!();
     spawn_child("linux_gate_mapping_id", &[]);
 }
 
 #[test]
 fn merges_mappings() {
+    one_at_a_time!();
+
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     assert!(page_size > 0);
     let page_size = usize::try_from(page_size).unwrap();
@@ -238,6 +256,8 @@ fn merges_mappings() {
 // Ensure that the linux-gate VDSO is included in the mapping list.
 #[test]
 fn file_id() {
+    one_at_a_time!();
+
     disabled_on_ci_and_android!();
     spawn_child("file_id", &[]);
 }
@@ -245,6 +265,8 @@ fn file_id() {
 #[cfg(not(target_os = "android"))]
 #[test]
 fn finds_mappings() {
+    one_at_a_time!();
+
     spawn_child(
         "find_mappings",
         &[
@@ -256,6 +278,8 @@ fn finds_mappings() {
 
 #[test]
 fn copies_from_process_self() {
+    one_at_a_time!();
+
     disabled_on_ci_and_android!();
 
     let stack_var: libc::c_long = 0x11223344;
@@ -272,6 +296,8 @@ fn copies_from_process_self() {
 // Ensures that we sanitize the stack properly
 #[test]
 fn sanitizes_stack_copies() {
+    one_at_a_time!();
+
     let num_of_threads = 1;
     let mut child = start_child_and_return(&["spawn_alloc_wait"]);
     let pid = child.id() as i32;

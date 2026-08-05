@@ -1,6 +1,6 @@
 use std::{
     error,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader},
     process::{Child, Command, Stdio},
     result,
 };
@@ -47,8 +47,15 @@ pub fn spawn_child(command: &str, args: &[&str]) {
     let child = cmd.output().expect("failed to execute child");
 
     println!("Child output:");
-    std::io::stdout().write_all(&child.stdout).unwrap();
-    std::io::stdout().write_all(&child.stderr).unwrap();
+    println!("===stdout===");
+
+    print_stdio(&child.stdout);
+
+    println!("\n===stderr===");
+
+    print_stdio(&child.stderr);
+
+    println!("\n============");
     assert_eq!(child.status.code().expect("No return value"), 0);
 }
 
@@ -190,6 +197,22 @@ mod linux {
         }
         fn is_process_memory(&self) -> bool {
             false
+        }
+    }
+}
+
+fn print_stdio(bytes: &[u8]) {
+    if let Ok(s) = str::from_utf8(bytes) {
+        print!("{s}");
+    } else {
+        for (idx, b) in bytes.iter().enumerate() {
+            if idx == 0 {
+                print!("{b:02x}");
+            } else if idx % 16 == 0 {
+                print!("\n{b:02x}");
+            } else {
+                print!(" {b:02x}");
+            }
         }
     }
 }

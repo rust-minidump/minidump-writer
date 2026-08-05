@@ -1,22 +1,29 @@
-use super::maps_reader;
+use super as linux;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
-use core::ffi::c_int;
-use failspot::failspot;
-use process_backend::{MAX_PATH_LEN, local, regs::*};
+use linux::maps_reader;
+use process_backend::{local, regs::*};
 use process_reader::ProcessReader;
 use std::{
     borrow::Cow,
-    ffi::{CString, OsString},
+    ffi::{CString, OsString, c_int},
     io,
     os::unix::ffi::OsStringExt,
     path::PathBuf,
 };
 
-pub use process_backend::regs;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use process_backend::PTRACE_DATA_LEN;
+
+pub(crate) use process_backend::regs;
 
 pub use process_backend::ProcessReaderKind;
 
 pub mod process_reader;
+
+pub(crate) type Result<T> = core::result::Result<T, Error>;
+
+// This is an arbitrary choice and may need to be tweaked
+const MAX_PATH_LEN: usize = 65536;
 
 #[derive(Debug)]
 pub struct ProcessInspector {
@@ -25,47 +32,51 @@ pub struct ProcessInspector {
 }
 
 #[derive(Debug)]
-pub enum Backend {
+enum Backend {
     Local { backend: local::Backend },
 }
 
-impl ProcessInspector {
-    pub fn local(pid: libc::pid_t) -> Self {
-        set_process_backend_drop_fail_handler();
+pub(crate) fn local(pid: libc::pid_t) -> ProcessInspector {
+    set_process_backend_drop_fail_handler();
 
-        let backend = local::Backend::new(pid);
+    let backend = local::Backend::new(pid);
 
-        ProcessInspector {
-            pid,
-            backend: Backend::Local { backend },
-        }
+    ProcessInspector {
+        pid,
+        backend: Backend::Local { backend },
     }
+}
+
+impl ProcessInspector {
     pub fn process_reader(&self) -> ProcessReader<'_> {
         ProcessReader::new(self)
     }
-    pub fn stop_process(&self) -> Result<(), Error> {
-        failspot!(if StopProcess {
-            return Err(Error::Local(local::Error::SigStopFailed(libc::EPERM)));
-        });
 
+    pub fn pid(&self) -> Result<libc::pid_t> {
+        match &self.backend {
+            Backend::Local { backend, .. } => Ok(backend.pid()),
+        }
+    }
+
+    pub fn stop_process(&self) -> Result<()> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.stop_process().map_err(Error::Local),
         }
     }
 
-    pub fn continue_process(&self) -> Result<(), Error> {
+    pub fn continue_process(&self) -> Result<()> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.continue_process().map_err(Error::Local),
         }
     }
 
-    pub fn suspend_thread(&self, tid: libc::pid_t) -> Result<(), Error> {
+    pub fn suspend_thread(&self, tid: libc::pid_t) -> Result<()> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.suspend_thread(tid).map_err(Error::Local),
         }
     }
 
-    pub fn resume_thread(&self, tid: libc::pid_t) -> Result<(), Error> {
+    pub fn resume_thread(&self, tid: libc::pid_t) -> Result<()> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.resume_thread(tid).map_err(Error::Local),
         }
@@ -73,10 +84,10 @@ impl ProcessInspector {
 
     pub fn map_module_into_memory(
         &self,
-        path: impl Into<PathBuf>,
+        path: PathBuf,
         offset: u64,
-    ) -> Result<MappedModuleMemoryReader, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+    ) -> Result<MappedModuleMemoryReader> {
+        let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         match &self.backend {
             Backend::Local { backend, .. } => backend
                 .map_module_into_memory(&c_path, offset)
@@ -85,15 +96,15 @@ impl ProcessInspector {
         }
     }
 
-    pub fn stat_file(&self, path: impl Into<PathBuf>) -> Result<libc::stat, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+    pub fn stat_file(&self, path: PathBuf) -> Result<libc::stat> {
+        let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         match &self.backend {
             Backend::Local { backend, .. } => backend.stat_file(&c_path).map_err(Error::Local),
         }
     }
 
-    pub fn read_file(&self, path: impl Into<PathBuf>) -> Result<FileReader, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+    pub fn read_file(&self, path: PathBuf) -> Result<FileReader> {
+        let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         match &self.backend {
             Backend::Local { backend, .. } => backend
                 .read_file(&c_path)
@@ -102,8 +113,8 @@ impl ProcessInspector {
         }
     }
 
-    pub fn read_dir(&self, path: impl Into<PathBuf>) -> Result<DirReader, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+    pub fn read_dir(&self, path: PathBuf) -> Result<DirReader> {
+        let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         match &self.backend {
             Backend::Local { backend, .. } => backend
                 .read_dir(&c_path)
@@ -112,8 +123,8 @@ impl ProcessInspector {
         }
     }
 
-    pub fn read_link(&self, path: impl Into<PathBuf>) -> Result<PathBuf, Error> {
-        let c_path = CString::new(path.into().into_os_string().into_vec()).unwrap();
+    pub fn read_link(&self, path: PathBuf) -> Result<PathBuf> {
+        let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
 
         let mut buf = vec![0u8; MAX_PATH_LEN];
 
@@ -127,43 +138,44 @@ impl ProcessInspector {
         Ok(PathBuf::from(OsString::from_vec(buf)))
     }
 
-    pub fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs, Error> {
+    pub fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.get_gen_regs(tid).map_err(Error::Local),
         }
     }
 
-    pub fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs, Error> {
+    pub fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.get_fp_regs(tid).map_err(Error::Local),
         }
     }
 
     #[cfg(target_arch = "x86")]
-    pub fn get_fpx_regs(&self, tid: libc::pid_t) -> Result<FpxRegs, Error> {
+    pub fn get_fpx_regs(&self, tid: libc::pid_t) -> Result<FpxRegs> {
         match &self.backend {
             Backend::Local { backend, .. } => backend.get_fpx_regs(tid).map_err(Error::Local),
         }
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    pub fn ptrace_peekuser(
-        &self,
-        pid: libc::pid_t,
-        addr: usize,
-    ) -> Result<[u8; core::mem::size_of::<libc::c_long>()], Error> {
+    pub fn ptrace_peekuser(&self, addr: usize) -> Result<[u8; PTRACE_DATA_LEN]> {
         match &self.backend {
-            Backend::Local { backend, .. } => {
-                backend.ptrace_peekuser(pid, addr).map_err(Error::Local)
-            }
+            Backend::Local { backend, .. } => backend.ptrace_peekuser(addr).map_err(Error::Local),
         }
     }
 
-    pub fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> Result<(), Error> {
+    pub fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> Result<()> {
         match &mut self.backend {
             Backend::Local { backend, .. } => backend
                 .force_process_reader_kind(kind)
                 .map_err(Error::Local),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn fail_one_syscall_with(&self, errno: c_int) {
+        match &self.backend {
+            Backend::Local { backend, .. } => backend.fail_one_syscall_with(errno),
         }
     }
 }
@@ -188,23 +200,16 @@ pub enum DirReader {
 }
 
 impl Iterator for DirReader {
-    type Item = Result<OsString, Error>;
+    type Item = Result<OsString>;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Local(l) => match l.read_name().map_err(Error::Local) {
-                Ok(Some(name_bytes)) => Some(Ok(OsString::from_vec(name_bytes.to_vec()))),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
-            },
-        }
-    }
-}
-
-#[doc(hidden)]
-impl ProcessInspector {
-    pub fn fail_one_syscall_with(&self, errno: c_int) {
-        match &self.backend {
-            Backend::Local { backend, .. } => backend.fail_one_syscall_with(errno),
+            Self::Local(l) => Some(
+                l.read_next_name()
+                    .transpose()?
+                    .map(<[u8]>::to_vec)
+                    .map(OsString::from_vec)
+                    .map_err(Error::Local),
+            ),
         }
     }
 }
@@ -215,32 +220,63 @@ pub enum MappedModuleMemoryReader {
 }
 
 impl MappedModuleMemoryReader {
-    pub fn read(&self, offset: u64, length: u64) -> Result<&[u8], Error> {
+    pub fn read_exact_at(&self, mut offset: usize, mut buf: &mut [u8]) -> Result<()> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+
         match self {
-            Self::Local(l) => l.read(offset, length).map_err(Error::Local),
+            Self::Local(l) => loop {
+                let bytes = l.read_at(offset, buf.len()).map_err(Error::Local)?;
+                if bytes.is_empty() {
+                    return Err(Error::UnexpectedEndOfBuffer);
+                }
+                let (dst, tail) = buf.split_at_mut(bytes.len());
+                dst.copy_from_slice(bytes);
+                if tail.is_empty() {
+                    return Ok(());
+                }
+                offset = offset
+                    .checked_add(dst.len())
+                    .ok_or(Error::AddressOverflowed)?;
+                buf = tail;
+            },
         }
     }
-    pub fn len(&self) -> Result<usize, Error> {
+    pub fn len(&self) -> Result<usize> {
         match self {
-            Self::Local(l) => l.len().map_err(Error::Local),
-        }
-    }
-    pub fn is_empty(&self) -> Result<bool, Error> {
-        match self {
-            Self::Local(l) => l.is_empty().map_err(Error::Local),
+            Self::Local(l) => Ok(l.len()),
         }
     }
 }
 
 impl ReadModuleMemory for MappedModuleMemoryReader {
-    fn read(&self, offset: u64, length: u64) -> Result<Cow<'_, [u8]>, ModuleMemoryReadError> {
-        self.read(offset, length)
-            .map(Cow::Borrowed)
-            .map_err(|e| ModuleMemoryReadError {
+    fn read(
+        &self,
+        offset: u64,
+        length: u64,
+    ) -> core::result::Result<Cow<'_, [u8]>, ModuleMemoryReadError> {
+        let result = (|| {
+            let (offset, length) = match (usize::try_from(offset), usize::try_from(length)) {
+                (Ok(o), Ok(l)) => (o, l),
+                _ => return Err(ReadError::OutOfBounds),
+            };
+
+            let mut buf = vec![0u8; length];
+
+            self.read_exact_at(offset, &mut buf)
+                .map_err(ReadError::PlatformSpecific)?;
+
+            Ok(buf)
+        })();
+
+        result
+            .map(Cow::Owned)
+            .map_err(|error| ModuleMemoryReadError {
                 offset,
                 length,
                 start_address: None,
-                error: ReadError::PlatformSpecific(e),
+                error,
             })
     }
     fn absolute_to_relative(&self, addr: u64) -> Option<u64> {
@@ -255,10 +291,14 @@ impl ReadModuleMemory for MappedModuleMemoryReader {
     }
 }
 
-#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum Error {
     #[error("an error occurred running a syscall directly")]
     Local(#[source] local::Error),
+    #[error("an address overflowed")]
+    AddressOverflowed,
+    #[error("unexpected end of buffer reached")]
+    UnexpectedEndOfBuffer,
 }
 
 fn set_process_backend_drop_fail_handler() {

@@ -12,10 +12,6 @@ pub struct ProcessReader<'a> {
 }
 
 impl<'a> ProcessReader<'a> {
-    pub fn new(process_inspector: &'a ProcessInspector) -> Self {
-        Self { process_inspector }
-    }
-
     /// Read memory from the process into the given buffer.
     ///
     /// Returns the number of bytes read.
@@ -58,9 +54,12 @@ impl<'a> ProcessReader<'a> {
             })
             .ok_or(FindModuleError::ModuleNotFound)
     }
+    pub(crate) fn new(process_inspector: &'a ProcessInspector) -> Self {
+        Self { process_inspector }
+    }
 }
 
-#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum CopyFromProcessError {
     #[error("an error occurred calling ProcessReader")]
     Backend(Error),

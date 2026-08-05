@@ -9,9 +9,10 @@ mod drop_fail_handler;
 pub mod local;
 pub mod regs;
 
-/// This is the longest path length we guarantee we can handle, since we won't be able to allocate
-/// in the fork of the crashed process. We can increase if necessary.
-pub const MAX_PATH_LEN: usize = 256;
+mod wrapper;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub const PTRACE_DATA_LEN: usize = core::mem::size_of::<libc::c_long>();
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub enum ProcessReaderKind {

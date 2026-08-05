@@ -1,11 +1,9 @@
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
-use {
-    common::*,
-    minidump::Minidump,
-    minidump_writer::{FailSpotName, minidump_writer::MinidumpWriterConfig},
-    serde_json::json,
-};
+use common::*;
+use minidump::Minidump;
+use minidump_writer::{FailSpotName, minidump_writer::MinidumpWriterConfig};
+use serde_json as json;
 
 mod common;
 
@@ -34,43 +32,29 @@ fn soft_error_stream() {
     read_minidump_soft_errors_or_panic(&dump);
 }
 
+fn visit_json_terminals<V>(json: &json::Value, path: &mut Vec<String>, visit: &mut V)
+where
+    V: FnMut(&[String], &json::Value),
+{
+    if let Some(obj) = json.as_object() {
+        for (key, value) in obj.iter() {
+            path.push(key.clone());
+            visit_json_terminals(value, path, visit);
+            path.pop();
+        }
+        return;
+    }
+    if let Some(arr) = json.as_array() {
+        for value in arr.iter() {
+            visit_json_terminals(value, path, visit);
+        }
+        return;
+    }
+    visit(path, json);
+}
+
 #[test]
 fn soft_error_stream_content() {
-    let expected_errors = vec![
-        json!({"InitErrors": [
-            {"StopProcessFailed":
-                {"Stop":
-                    {"Local":
-                        {"SigStopFailed": 1}
-                    }
-                }
-            },
-            {"FillMissingAuxvInfoErrors": ["InvalidFormat"]},
-            {"EnumerateThreadsErrors": [
-                {"ReadThreadNameFailed": "\
-                    Custom {\n    \
-                        kind: Other,\n    \
-                        error: Local(\n        \
-                            OpenFileFailed(\n            \
-                                1,\n        \
-                            ),\n    \
-                        ),\n\
-                    }"
-                }
-            ]},
-            {"SuspendThreadsErrors": [{"PtraceAttachError": [1234, libc::EPERM]}]}
-        ]}),
-        json!({"WriteSystemInfoErrors": [
-            {"WriteCpuInformationFailed": {
-                "ReadFileError": {
-                    "Local": {
-                        "OpenFileFailed": 1
-                    }
-                }
-            }}
-        ]}),
-    ];
-
     let mut child = start_child_and_wait_for_threads(1);
     let pid = child.id() as i32;
 
@@ -99,5 +83,46 @@ fn soft_error_stream_content() {
 
     // Ensure the MozSoftErrors stream contains the expected errors
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-    assert_soft_errors_in_minidump(&dump, &expected_errors);
+
+    let actual_json = read_minidump_soft_errors_or_panic(&dump);
+
+    let mut stop_process_error_found = false;
+    let mut missing_auxv_error_found = false;
+    let mut thread_name_error_found = false;
+    let mut suspend_thread_error_found = false;
+    let mut cpu_info_error_found = false;
+
+    let mut path = Vec::new();
+
+    visit_json_terminals(&actual_json, &mut path, &mut |path, value| {
+        if value.as_i64() == Some(libc::EPERM.into())
+            && path.contains(&"StopProcessFailed".to_string())
+        {
+            stop_process_error_found = true;
+        }
+        if value.as_str() == Some("InvalidFormat")
+            && path.contains(&"FillMissingAuxvInfoErrors".to_string())
+        {
+            missing_auxv_error_found = true;
+        }
+        if path.contains(&"ReadThreadNameFailed".to_string()) {
+            thread_name_error_found = true;
+        }
+        if value.as_i64() == Some(libc::EPERM.into())
+            && path.contains(&"SuspendThreadsErrors".to_string())
+        {
+            suspend_thread_error_found = true;
+        }
+        if value.as_i64() == Some(libc::EPERM.into())
+            && path.contains(&"WriteCpuInformationFailed".to_string())
+        {
+            cpu_info_error_found = true;
+        }
+    });
+
+    assert!(stop_process_error_found);
+    assert!(missing_auxv_error_found);
+    assert!(thread_name_error_found);
+    assert!(suspend_thread_error_found);
+    assert!(cpu_info_error_found);
 }
