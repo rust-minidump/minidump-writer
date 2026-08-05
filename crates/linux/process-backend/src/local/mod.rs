@@ -1,4 +1,4 @@
-use crate::regs::*;
+use crate::{ProcessReaderKind, regs::*};
 use core::{
     cell::RefCell,
     ffi::{CStr, c_int, c_long, c_void},
@@ -22,6 +22,7 @@ type PtraceRequestType = core::ffi::c_int;
 #[derive(Debug)]
 pub struct Backend {
     pid: pid_t,
+    process_reader: process_reader::ProcessReader,
     syscall_invoker: RefCell<SyscallInvoker>,
 }
 
@@ -29,11 +30,12 @@ impl Backend {
     pub fn new(pid: libc::pid_t) -> Self {
         Self {
             pid,
+            process_reader: process_reader::ProcessReader::new(pid),
             syscall_invoker: Default::default(),
         }
     }
-    pub fn process_reader(&self) -> ProcessReader {
-        ProcessReader(process_reader::ProcessReader::new(self.pid))
+    pub fn process_reader(&self) -> ProcessReader<'_> {
+        ProcessReader(&self.process_reader)
     }
     pub fn stop_process(&self) -> Result<(), Error> {
         self.standard_syscall(|| unsafe { libc::kill(self.pid, libc::SIGSTOP) })
@@ -175,18 +177,17 @@ impl Backend {
         .map_err(Error::PtracePeekUserFailed)
     }
 
-    pub fn process_reader_for_virtual_mem(&self) -> ProcessReader {
-        ProcessReader(process_reader::ProcessReader::for_virtual_mem(self.pid))
-    }
-
-    pub fn process_reader_for_file(&self) -> Result<ProcessReader, Error> {
-        process_reader::ProcessReader::for_file(self.pid)
-            .map(ProcessReader)
-            .map_err(Error::ProcessReader)
-    }
-
-    pub fn process_reader_for_ptrace(&self) -> ProcessReader {
-        ProcessReader(process_reader::ProcessReader::for_ptrace(self.pid))
+    pub fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> Result<(), Error> {
+        use ProcessReaderKind as K;
+        self.process_reader = match kind {
+            K::Unspecified => process_reader::ProcessReader::new(self.pid),
+            K::VirtualMem => process_reader::ProcessReader::for_virtual_mem(self.pid),
+            K::File => {
+                process_reader::ProcessReader::for_file(self.pid).map_err(Error::ProcessReader)?
+            }
+            K::Ptrace => process_reader::ProcessReader::for_ptrace(self.pid),
+        };
+        Ok(())
     }
 
     fn open_file(&self, path: &CStr) -> Result<OwnedFd, Error> {
@@ -392,9 +393,9 @@ impl Drop for DirReader {
 }
 
 #[derive(Debug)]
-pub struct ProcessReader(process_reader::ProcessReader);
+pub struct ProcessReader<'a>(&'a process_reader::ProcessReader);
 
-impl ProcessReader {
+impl<'a> ProcessReader<'a> {
     pub fn read_at(&self, address: usize, buf: &mut [u8]) -> Result<usize, Error> {
         self.0.read_at(address, buf).map_err(Error::ProcessReader)
     }
