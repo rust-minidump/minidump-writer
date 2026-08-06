@@ -21,6 +21,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
+      - name: targets
+        run: rustup target list --installed | grep aarch64
       - name: rustfmt
         run: cargo fmt --all -- --check
       - name: clippy
@@ -43,10 +45,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.job.target }}
+          components: clippy
       - name: Fetch
         run: cargo fetch --target ${{ matrix.job.target }}
       - name: Build
         run: cargo test --target ${{ matrix.job.target }} --no-run
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets --target ${{ matrix.job.target }} -- -D warnings
       - name: Test
         run: cargo test --target ${{ matrix.job.target }}
       - name: Release test
