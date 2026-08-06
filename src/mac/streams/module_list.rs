@@ -372,7 +372,7 @@ mod test {
             let expect_segment_data = unsafe {
                 getsegmentdata(
                     expected_img_hdr,
-                    b"__TEXT\0".as_ptr(),
+                    c"__TEXT".as_ptr().cast(),
                     &mut expect_segment_size,
                 )
             };
