@@ -8,8 +8,8 @@ pub struct ThreadInfoAarch64 {
     pub stack_pointer: usize,
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
-    pub regs: libc::user_regs_struct,
-    pub fpregs: user_fpsimd_struct,
+    pub regs: GenRegs,
+    pub fpregs: FpRegs,
 }
 
 impl ThreadInfoAarch64 {

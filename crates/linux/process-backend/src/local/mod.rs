@@ -1,5 +1,5 @@
 use crate::{
-    ProcessReaderKind,
+    ProcessReaderKind, Stat,
     regs::*,
     wrapper::{OwnedFd, errno, set_errno},
 };
@@ -19,12 +19,6 @@ mod module_reader;
 mod syscall_invoker;
 
 pub type Result<T> = core::result::Result<T, Error>;
-
-#[cfg(target_env = "gnu")]
-type PtraceRequestType = core::ffi::c_uint;
-
-#[cfg(not(target_env = "gnu"))]
-type PtraceRequestType = core::ffi::c_int;
 
 #[derive(Debug)]
 pub struct Backend {
@@ -113,11 +107,13 @@ impl Backend {
         MappedModuleMemoryReader::new(&mut self.syscall_invoker.borrow_mut(), path, offset)
     }
 
-    pub fn stat_file(&self, path: &CStr) -> Result<libc::stat> {
+    pub fn stat_file(&self, path: &CStr) -> Result<Stat> {
         let mut output = unsafe { mem::zeroed::<libc::stat>() };
         self.standard_syscall(|| unsafe { libc::stat(path.as_ptr(), &mut output) })
             .map_err(Error::StatFailed)?;
-        Ok(output)
+        Ok(Stat {
+            st_mode: output.st_mode,
+        })
     }
 
     pub fn read_file(&self, path: &CStr) -> Result<FileReader> {
@@ -152,17 +148,15 @@ impl Backend {
     }
 
     pub fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs> {
-        self.getregset(tid).or_else(|_| self.getregs(tid))
+        self.get_regs::<GenRegsTag>(tid)
     }
-
     pub fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs> {
-        self.getfpregset(tid).or_else(|_| self.getfpregs(tid))
+        self.get_regs::<FpRegsTag>(tid)
     }
 
     #[cfg(target_arch = "x86")]
     pub fn get_fpx_regs(&self, tid: libc::pid_t) -> Result<FpxRegs> {
-        const PTRACE_GETFPXREGS: PtraceRequestType = 18;
-        unsafe { self.ptrace_getregs::<FpxRegs>(PTRACE_GETFPXREGS, tid) }
+        self.get_regs::<FpxRegsTag>(tid)
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -204,87 +198,59 @@ impl Backend {
         .map_err(Error::OpenFileFailed)
     }
 
-    fn getregset(&self, _tid: libc::pid_t) -> Result<GenRegs> {
-        #[cfg(target_arch = "arm")]
-        {
-            Err(Error::NotSupported)
-        }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
-        {
-            const NT_PRSTATUS: usize = 1;
-            self.ptrace_getregset(NT_PRSTATUS, _tid)
-        }
+    fn get_regs<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+        self.ptrace_getregset::<T>(tid).or_else(|e| {
+            if T::LEGACY_REQUEST.is_some() {
+                self.ptrace_getregs::<T>(tid)
+            } else {
+                Err(e)
+            }
+        })
     }
 
-    fn getregs(&self, tid: libc::pid_t) -> Result<GenRegs> {
-        const PTRACE_GETREGS: PtraceRequestType = 12;
-        unsafe { self.ptrace_getregs::<GenRegs>(PTRACE_GETREGS, tid) }
-    }
+    fn ptrace_getregs<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+        let Some(request) = T::LEGACY_REQUEST else {
+            return Err(Error::NotSupported);
+        };
 
-    fn getfpregset(&self, tid: libc::pid_t) -> Result<FpRegs> {
-        #[cfg(target_arch = "arm")]
-        {
-            const NT_ARM_VFP: usize = 0x400;
-            self.ptrace_getregset(NT_ARM_VFP, tid)
-        }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
-        {
-            const NT_PRFPREGSET: usize = 2;
-            self.ptrace_getregset(NT_PRFPREGSET, tid)
-        }
-    }
-
-    fn getfpregs(&self, _tid: libc::pid_t) -> Result<FpRegs> {
-        #[cfg(target_arch = "arm")]
-        {
-            Err(Error::NotSupported)
-        }
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
-        {
-            const PTRACE_GETFPREGS: PtraceRequestType = 14;
-            unsafe { self.ptrace_getregs::<FpRegs>(PTRACE_GETFPREGS, _tid) }
-        }
-    }
-
-    /// Safety: RequestType and T must agree on the size of the returned type
-    unsafe fn ptrace_getregs<T>(&self, request: PtraceRequestType, tid: libc::pid_t) -> Result<T> {
-        let mut output = mem::MaybeUninit::<T>::uninit();
+        let mut output = T::Output::default();
         self.standard_syscall(|| unsafe {
             ptrace(
                 request,
                 tid,
                 core::ptr::null_mut(),
-                output.as_mut_ptr().cast(),
+                (&raw mut output).cast(),
             )
         })
         .map_err(Error::GetRegistersFailed)?;
-        Ok(unsafe { output.assume_init() })
+        Ok(output)
     }
 
-    fn ptrace_getregset<T>(&self, regset_type: usize, tid: libc::pid_t) -> Result<T> {
-        let mut output = mem::MaybeUninit::<T>::uninit();
+    fn ptrace_getregset<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+        let output_size = size_of::<T::Output>();
+        assert!(T::KERNEL_SIZE <= output_size);
+
+        let mut output = T::Output::default();
         let mut io = libc::iovec {
-            iov_base: output.as_mut_ptr().cast(),
-            iov_len: mem::size_of::<T>(),
+            iov_base: (&raw mut output).cast(),
+            iov_len: T::KERNEL_SIZE,
         };
 
         self.standard_syscall(|| unsafe {
             ptrace(
                 libc::PTRACE_GETREGSET,
                 tid,
-                regset_type as *mut _,
+                T::NOTE as *mut _,
                 (&raw mut io).cast(),
             )
         })
         .map_err(Error::GetRegistersFailed)?;
 
-        // PTRACE_GETREGSET returns the number of bytes actually read in iov_len. Need to ensure
-        // all bytes of T are actually initialized
-        if io.iov_len != mem::size_of::<T>() {
-            Err(Error::GetRegistersFailed(libc::EINVAL))?;
+        if T::KERNEL_SIZE != io.iov_len {
+            return Err(Error::UnexpectedRegisterSetSize(T::KERNEL_SIZE, io.iov_len));
         }
 
-        Ok(unsafe { output.assume_init() })
+        Ok(output)
     }
 
     fn ptrace_detach(&self, tid: libc::pid_t) -> Result<()> {
@@ -359,7 +325,7 @@ impl crate::Backend for Backend {
         Backend::map_module_into_memory(self, path, offset).map_err(crate::Error::Local)
     }
 
-    fn stat_file(&self, path: &CStr) -> crate::Result<libc::stat> {
+    fn stat_file(&self, path: &CStr) -> crate::Result<Stat> {
         Backend::stat_file(self, path).map_err(crate::Error::Local)
     }
 

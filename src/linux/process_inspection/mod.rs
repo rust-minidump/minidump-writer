@@ -1,7 +1,7 @@
 use super as linux;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
 use linux::maps_reader;
-use process_backend::{ProcessReader as _, local, regs::*};
+use process_backend::{ProcessReader as _, Stat, local, regs::*};
 use process_reader::{CopyFromProcessError, ProcessReader, ProcessReaderBackend};
 use std::{
     borrow::Cow,
@@ -43,7 +43,7 @@ pub trait ProcessInspector: core::fmt::Debug {
         path: PathBuf,
         offset: u64,
     ) -> Result<MappedModuleMemoryReader<'a>>;
-    fn stat_file(&self, path: PathBuf) -> Result<libc::stat>;
+    fn stat_file(&self, path: PathBuf) -> Result<Stat>;
     fn read_file<'a>(&'a self, path: PathBuf) -> Result<FileReader<'a>>;
     fn read_dir<'a>(&'a self, path: PathBuf) -> Result<DirReader<'a>>;
     fn read_link(&self, path: PathBuf) -> Result<PathBuf>;
@@ -96,7 +96,7 @@ impl<B: process_backend::Backend> ProcessInspector for B {
         Ok(MappedModuleMemoryReader(Box::new(reader)))
     }
 
-    fn stat_file(&self, path: PathBuf) -> Result<libc::stat> {
+    fn stat_file(&self, path: PathBuf) -> Result<Stat> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         B::stat_file(self, &c_path).map_err(Error::Backend)
     }

@@ -1,4 +1,5 @@
 use core::ffi::c_int;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub(crate) struct OwnedFd(c_int);
@@ -20,6 +21,11 @@ impl Drop for OwnedFd {
             report_drop_failed!("failed to close file: {}", errno());
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct Stat {
+    pub st_mode: u32,
 }
 
 pub(crate) fn errno() -> c_int {

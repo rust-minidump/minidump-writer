@@ -8,8 +8,8 @@ pub struct ThreadInfoArm {
     pub stack_pointer: usize,
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
-    pub regs: user_regs_struct,
-    pub fpregs: user_fpregs_struct,
+    pub regs: GenRegs,
+    pub fpregs: FpRegs,
 }
 
 impl ThreadInfoArm {
