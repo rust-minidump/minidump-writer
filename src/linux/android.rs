@@ -49,7 +49,7 @@ struct DynVaddresses {
 }
 
 fn has_android_packed_relocations(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     load_bias: usize,
     vaddrs: DynVaddresses,
 ) -> Result<()> {
@@ -71,7 +71,7 @@ fn has_android_packed_relocations(
 }
 
 fn get_effective_load_bias(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     ehdr: &elf_header::Header,
     address: usize,
 ) -> usize {
@@ -91,7 +91,7 @@ fn get_effective_load_bias(
 }
 
 fn parse_loaded_elf_program_headers(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     ehdr: &elf_header::Header,
     address: usize,
 ) -> DynVaddresses {
@@ -131,7 +131,7 @@ fn parse_loaded_elf_program_headers(
 }
 
 pub fn late_process_mappings(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     mappings: &mut [MappingInfo],
 ) -> Result<()> {
     // Only consider exec mappings that indicate a file path was mapped, and

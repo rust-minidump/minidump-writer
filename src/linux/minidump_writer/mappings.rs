@@ -42,7 +42,7 @@ impl MinidumpWriter {
 
                 log::debug!("failed to get build id from process memory ({e}), attempting to retrieve from {}", path.display());
 
-                module_reader::read_build_id_from_file(&self.process_inspector, path.as_ref()).map_err(errors::WriterError::ModuleReaderError)
+                module_reader::read_build_id_from_file(self.process_inspector.as_ref(), path.as_ref()).map_err(errors::WriterError::ModuleReaderError)
             })
             .unwrap_or_else(|e| {
                 log::warn!("failed to get build id for mapping: {e}");
@@ -59,7 +59,7 @@ impl MinidumpWriter {
             let soname = self.soname_from_process_memory(mapping.start_address).ok();
 
             let module = fill_raw_module(
-                &self.process_inspector,
+                self.process_inspector.as_ref(),
                 buffer,
                 mapping,
                 &identifier,
@@ -72,7 +72,7 @@ impl MinidumpWriter {
         for user in &self.user_mapping_list {
             // GUID was provided by caller.
             let module = fill_raw_module(
-                &self.process_inspector,
+                self.process_inspector.as_ref(),
                 buffer,
                 &user.mapping,
                 &user.identifier,
@@ -97,7 +97,7 @@ impl MinidumpWriter {
     }
 }
 fn fill_raw_module(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     buffer: &mut DumpBuf,
     mapping: &MappingInfo,
     identifier: &[u8],

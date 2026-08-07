@@ -136,7 +136,7 @@ fn parse_features(_val: &str) -> u32 {
 }
 
 pub fn write_cpu_information(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     sys_info: &mut MDRawSystemInfo,
 ) -> Result<()> {
     // The CPUID value is broken up in several entries in /proc/cpuinfo.

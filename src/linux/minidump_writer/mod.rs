@@ -82,7 +82,7 @@ pub struct MinidumpWriterConfig {
     crashing_thread_context: CrashingThreadContext,
     stop_timeout: Duration,
     direct_auxv_dump_info: Option<DirectAuxvDumpInfo>,
-    process_inspector: ProcessInspector,
+    process_inspector: Box<dyn ProcessInspector>,
 }
 
 #[derive(Debug)]
@@ -105,7 +105,7 @@ pub struct MinidumpWriter {
     pub crash_context: Option<CrashContextExt>,
     pub app_memory: AppMemoryList,
     pub memory_blocks: Vec<MDMemoryDescriptor>,
-    pub process_inspector: ProcessInspector,
+    pub process_inspector: Box<dyn ProcessInspector>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +200,7 @@ impl MinidumpWriterConfig {
         self.direct_auxv_dump_info = Some(direct_auxv_dump_info);
         self
     }
+
     /// Generates a minidump and writes to the destination provided. Returns the in-memory
     /// version of the minidump as well.
     pub fn write(self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>, WriterError> {
@@ -266,7 +267,7 @@ impl MinidumpWriter {
         // Even if we completely fail to fill in any additional Auxv info, we can still press
         // forward.
         if let Err(e) = self.auxv.try_filling_missing_info(
-            &self.process_inspector,
+            self.process_inspector.as_ref(),
             self.process_id,
             soft_errors.subwriter(InitError::FillMissingAuxvInfoErrors),
         ) {
@@ -302,7 +303,7 @@ impl MinidumpWriter {
 
         #[cfg(target_os = "android")]
         {
-            late_process_mappings(&self.process_inspector, &mut self.mappings)?;
+            late_process_mappings(self.process_inspector.as_ref(), &mut self.mappings)?;
         }
 
         if self.skip_stacks_if_mapping_unreferenced {
@@ -372,7 +373,7 @@ impl MinidumpWriter {
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         let dirent = systeminfo_stream::write(
-            &self.process_inspector,
+            self.process_inspector.as_ref(),
             buffer,
             soft_errors.subwriter(WriterError::WriteSystemInfoErrors),
         )?;
@@ -406,14 +407,14 @@ impl MinidumpWriter {
                 let trunc = proc_root.len();
                 proc_root.push_str($fname);
 
-                file_entry!(res write_file(&self.process_inspector, buffer, &proc_root), $kind, $err);
+                file_entry!(res write_file(self.process_inspector.as_ref(), buffer, &proc_root), $kind, $err);
 
                 proc_root.truncate(trunc);
             };
         }
 
         file_entry!(
-            res write_file(&self.process_inspector, buffer, "/proc/cpuinfo"),
+            res write_file(self.process_inspector.as_ref(), buffer, "/proc/cpuinfo"),
             LinuxCpuInfo,
             WriteCpuInfoFailed
         );
@@ -424,8 +425,8 @@ impl MinidumpWriter {
         #[cfg(not(target_os = "android"))]
         {
             file_entry!(
-                res write_file(&self.process_inspector, buffer, "/etc/lsb-release")
-                    .or_else(|_| write_file(&self.process_inspector, buffer, "/etc/os-release")),
+                res write_file(self.process_inspector.as_ref(), buffer, "/etc/lsb-release")
+                    .or_else(|_| write_file(self.process_inspector.as_ref(), buffer, "/etc/os-release")),
                 LinuxLsbRelease,
                 WriteOsReleaseInfoFailed
             );
@@ -436,14 +437,17 @@ impl MinidumpWriter {
         file_entry!("auxv", LinuxAuxv, WriteEnvironmentFailed);
         file_entry!("maps", LinuxMaps, WriteMapsFailed);
 
-        let dirent =
-            match dso_debug::write_dso_debug_stream(&self.process_inspector, buffer, &self.auxv) {
-                Ok(dirent) => dirent,
-                Err(e) => {
-                    soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
-                    Default::default()
-                }
-            };
+        let dirent = match dso_debug::write_dso_debug_stream(
+            self.process_inspector.as_ref(),
+            buffer,
+            &self.auxv,
+        ) {
+            Ok(dirent) => dirent,
+            Err(e) => {
+                soft_errors.push(WriterError::WriteDSODebugStreamFailed(e));
+                Default::default()
+            }
+        };
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         file_entry!("limits", MozLinuxLimits, WriteLimitsFailed);
@@ -510,7 +514,7 @@ impl MinidumpWriter {
         };
 
         let stack_copy = match MinidumpWriter::copy_from_process(
-            &self.process_inspector,
+            self.process_inspector.as_ref(),
             valid_stack_pointer,
             stack_len,
         ) {
@@ -528,7 +532,10 @@ impl MinidumpWriter {
     }
 
     /// Suspends a thread by attaching to it.
-    fn suspend_thread(process_inspector: &ProcessInspector, tid: Pid) -> Result<(), WriterError> {
+    fn suspend_thread(
+        process_inspector: &dyn ProcessInspector,
+        tid: Pid,
+    ) -> Result<(), WriterError> {
         process_inspector
             .suspend_thread(tid)
             .map_err(WriterError::SuspendThreadFailed)?;
@@ -566,7 +573,10 @@ impl MinidumpWriter {
     }
 
     /// Resumes a thread by detaching from it.
-    fn resume_thread(process_inspector: &ProcessInspector, tid: Pid) -> Result<(), WriterError> {
+    fn resume_thread(
+        process_inspector: &dyn ProcessInspector,
+        tid: Pid,
+    ) -> Result<(), WriterError> {
         process_inspector
             .resume_thread(tid)
             .map_err(WriterError::ResumeThreadFailed)
@@ -577,15 +587,15 @@ impl MinidumpWriter {
         // If the thread either disappeared before we could attach to it, or if
         // it was part of the seccomp sandbox's trusted code, it is OK to
         // silently drop it from the minidump.
-        self.threads.retain(
-            |x| match Self::suspend_thread(&self.process_inspector, x.tid) {
+        self.threads.retain(|x| {
+            match Self::suspend_thread(self.process_inspector.as_ref(), x.tid) {
                 Ok(()) => true,
                 Err(e) => {
                     soft_errors.push(e);
                     false
                 }
-            },
-        );
+            }
+        });
 
         self.threads_suspended = true;
 
@@ -595,7 +605,7 @@ impl MinidumpWriter {
     fn resume_threads(&mut self, mut soft_errors: impl WriteErrorList<WriterError>) {
         if self.threads_suspended {
             for thread in &self.threads {
-                match Self::resume_thread(&self.process_inspector, thread.tid) {
+                match Self::resume_thread(self.process_inspector.as_ref(), thread.tid) {
                     Ok(()) => (),
                     Err(e) => {
                         soft_errors.push(e);
@@ -716,7 +726,7 @@ impl MinidumpWriter {
         // See http://www.trilithium.com/johan/2005/08/linux-gate/ for more
         // information.
         self.mappings = MappingInfo::for_pid(
-            &self.process_inspector,
+            self.process_inspector.as_ref(),
             self.process_id,
             self.auxv.get_linux_gate_address(),
         )
@@ -754,7 +764,7 @@ impl MinidumpWriter {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        ThreadInfo::create(&self.process_inspector, self.threads[index].tid)
+        ThreadInfo::create(self.process_inspector.as_ref(), self.threads[index].tid)
     }
 
     // Returns a valid stack pointer and the mapping that contains the stack.
@@ -958,7 +968,7 @@ impl MinidumpWriter {
     /// allocated copy
     #[inline]
     pub fn copy_from_process(
-        process_inspector: &ProcessInspector,
+        process_inspector: &dyn ProcessInspector,
         src: usize,
         length: usize,
     ) -> Result<Vec<u8>, CopyFromProcessError> {
@@ -979,7 +989,7 @@ impl Drop for MinidumpWriter {
 }
 
 fn write_file(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     buffer: &mut DumpBuf,
     filename: &str,
 ) -> std::result::Result<MDLocationDescriptor, MemoryWriterError> {

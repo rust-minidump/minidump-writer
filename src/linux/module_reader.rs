@@ -160,7 +160,7 @@ fn section_header_with_name<'sc, MM: ReadModuleMemory>(
 }
 
 pub fn read_build_id_from_file(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     path: &Path,
 ) -> Result<Vec<u8>, Error> {
     let module_memory_reader = process_inspector
@@ -191,7 +191,7 @@ pub fn read_build_id_from_module(module_memory: impl ReadModuleMemory) -> Result
 }
 
 pub fn read_soname_from_file(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     path: &Path,
     offset: usize,
 ) -> Result<String, Error> {

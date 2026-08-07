@@ -136,7 +136,7 @@ fn sanitize_path(pathname: OsString) -> OsString {
 impl MappingInfo {
     /// Get the mappings for the given process.
     pub fn for_pid(
-        process_inspector: &ProcessInspector,
+        process_inspector: &dyn ProcessInspector,
         pid: i32,
         linux_gate_loc: Option<AuxvType>,
     ) -> Result<Vec<Self>> {
@@ -298,7 +298,7 @@ impl MappingInfo {
 
     /// Find the shared object name (SONAME) by examining the ELF information
     /// for the mapping.
-    fn so_name(&self, process_inspector: &ProcessInspector) -> Result<String> {
+    fn so_name(&self, process_inspector: &dyn ProcessInspector) -> Result<String> {
         let path = Path::new(self.name.as_deref().unwrap_or_default());
         super::module_reader::read_soname_from_file(process_inspector, path, self.offset)
             .map_err(MapsReaderError::ReadSoNameFromFileFailed)
@@ -311,7 +311,7 @@ impl MappingInfo {
 
     pub fn get_mapping_effective_path_name_and_version(
         &self,
-        process_inspector: &ProcessInspector,
+        process_inspector: &dyn ProcessInspector,
         soname: Option<String>,
     ) -> Result<(PathBuf, String, Option<SoVersion>)> {
         let mut file_path = PathBuf::from(self.name.clone().unwrap_or_default());
@@ -731,7 +731,7 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         let process_inspector = process_inspection::local(0);
 
         let (file_path, file_name, _version) = mappings[0]
-            .get_mapping_effective_path_name_and_version(&process_inspector, None)
+            .get_mapping_effective_path_name_and_version(process_inspector.as_ref(), None)
             .expect("Couldn't get effective name for mapping");
         assert_eq!(file_name, "libmozgtk.so");
         assert_eq!(

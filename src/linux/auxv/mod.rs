@@ -87,7 +87,7 @@ pub struct AuxvDumpInfo {
 impl AuxvDumpInfo {
     pub fn try_filling_missing_info(
         &mut self,
-        process_inspector: &ProcessInspector,
+        process_inspector: &dyn ProcessInspector,
         pid: Pid,
         mut soft_errors: impl WriteErrorList<AuxvError>,
     ) -> Result<(), AuxvError> {

@@ -153,7 +153,7 @@ impl MinidumpWriter {
                         Err(CopyFromProcessError::InvalidArgument)
                     } else {
                         MinidumpWriter::copy_from_process(
-                            &self.process_inspector,
+                            self.process_inspector.as_ref(),
                             ip_memory_d.start_of_memory_range as _,
                             ip_memory_d.memory.data_size as usize,
                         )
@@ -165,7 +165,6 @@ impl MinidumpWriter {
                             break;
                         }
                     };
-
                     let mem_section = MemoryArrayWriter::alloc_from_array(buffer, &memory_copy)?;
                     ip_memory_d.memory = mem_section.location();
                     self.memory_blocks.push(ip_memory_d);
@@ -251,7 +250,11 @@ impl MinidumpWriter {
         let stack_copy = failspot!(if ThreadStackCopy {
             Err(CopyFromProcessError::InvalidArgument)
         } else {
-            MinidumpWriter::copy_from_process(&self.process_inspector, valid_stack_ptr, stack_len)
+            MinidumpWriter::copy_from_process(
+                self.process_inspector.as_ref(),
+                valid_stack_ptr,
+                stack_len,
+            )
         });
         let mut stack_bytes = match stack_copy {
             Ok(x) => x,
