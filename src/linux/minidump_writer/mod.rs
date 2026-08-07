@@ -726,6 +726,12 @@ impl MinidumpWriter {
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
+        if failspot!(EnumerateMappingsFromProc) {
+            return Err(InitError::AggregateMappingsFailed(
+                std::io::Error::other("fake I/O error reading maps file").into(),
+            ));
+        }
+
         // linux_gate_loc is the beginning of the kernel's mapping of
         // linux-gate.so in the process.  It doesn't actually show up in the
         // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
