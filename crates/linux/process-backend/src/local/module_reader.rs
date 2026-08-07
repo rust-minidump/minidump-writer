@@ -137,6 +137,23 @@ impl MappedModuleMemoryReader {
     }
 }
 
+impl crate::MappedModuleMemoryReader for MappedModuleMemoryReader {
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> core::result::Result<usize, crate::Error> {
+        let bytes = MappedModuleMemoryReader::read_at(self, offset, buf.len())
+            .map_err(crate::Error::Local)?;
+        buf[0..bytes.len()].copy_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn len(&self) -> core::result::Result<usize, crate::Error> {
+        Ok(MappedModuleMemoryReader::len(self))
+    }
+
+    fn is_empty(&self) -> core::result::Result<bool, crate::Error> {
+        Ok(MappedModuleMemoryReader::is_empty(self))
+    }
+}
+
 #[derive(Debug)]
 struct Mapped {
     ptr: *mut c_void,
