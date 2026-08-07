@@ -177,6 +177,10 @@ impl MainExecutable {
 
         Ok((address, entries))
     }
+
+    pub(crate) fn is_pie(&self) -> bool {
+        self.load_bias != 0
+    }
 }
 
 /// Find the DT_DEBUG debugger rendezvous within a dynamic section,
