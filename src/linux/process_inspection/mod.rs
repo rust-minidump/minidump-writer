@@ -1,7 +1,7 @@
 use super as linux;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
 use linux::maps_reader;
-use process_backend::{ProcessReader as _, Stat, local, regs::*};
+use process_backend::{ProcessReader as _, Stat, local, regs::*, remote};
 use process_reader::{CopyFromProcessError, ProcessReader, ProcessReaderBackend};
 use std::{
     borrow::Cow,
@@ -20,6 +20,13 @@ pub use process_backend::ProcessReaderKind;
 
 pub mod process_reader;
 
+pub mod remote_api {
+    pub mod backend {
+        pub use process_backend::remote::backend::{Transport, transport};
+    }
+    pub use process_backend::remote::{executor, io};
+}
+
 pub(crate) type Result<T> = core::result::Result<T, Error>;
 
 // These are both arbitrary choices and may need to be tweaked
@@ -29,6 +36,13 @@ const MAX_DIRECTORY_NAME_LENGTH: usize = 256;
 pub(crate) fn local(pid: libc::pid_t) -> Box<dyn ProcessInspector> {
     set_process_backend_drop_fail_handler();
     Box::new(local::Backend::new(pid))
+}
+
+pub(crate) fn remote<'t, T: remote::backend::Transport + 't>(
+    transport: T,
+) -> Box<dyn ProcessInspector + 't> {
+    set_process_backend_drop_fail_handler();
+    Box::new(remote::backend::Backend::new(transport))
 }
 
 pub trait ProcessInspector: core::fmt::Debug {

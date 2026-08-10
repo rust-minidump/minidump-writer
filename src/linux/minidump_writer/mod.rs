@@ -8,6 +8,7 @@ use {
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList, MapsReaderError},
         process_inspection::{self, ProcessInspector, process_reader::CopyFromProcessError},
+        remote_process_inspection,
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
     },
@@ -198,6 +199,19 @@ impl MinidumpWriterConfig {
         direct_auxv_dump_info: DirectAuxvDumpInfo,
     ) -> &mut Self {
         self.direct_auxv_dump_info = Some(direct_auxv_dump_info);
+        self
+    }
+
+    /// Set the transport used to communicate with the remote executor
+    ///
+    /// The [`MinidumpWriter`] is created in local mode by default. Specifying a remote Transport
+    /// changes it to remote mode, where it will forward all process inspection syscalls to a
+    /// remote process for execution.
+    pub fn set_remote_transport<T: remote_process_inspection::backend::Transport + 'static>(
+        &mut self,
+        transport: T,
+    ) -> &mut Self {
+        self.process_inspector = process_inspection::remote(transport);
         self
     }
 

@@ -10,8 +10,9 @@ mod linux {
         super::*,
         error_graph::ErrorList,
         minidump_writer::{
-            LINUX_GATE_LIBRARY_NAME, ProcessReaderKind,
+            LINUX_GATE_LIBRARY_NAME, Pid, ProcessReaderKind,
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
+            remote_process_inspection::{backend, executor, io::UnixStream},
         },
         std::ptr,
     };
@@ -39,18 +40,20 @@ mod linux {
 
     fn test_setup() -> Result<()> {
         let ppid = getppid();
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         Ok(())
     }
 
     fn test_thread_list() -> Result<()> {
         let ppid = getppid();
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         test!(!dumper.threads.is_empty(), "No threads");
         test!(
@@ -73,9 +76,10 @@ mod linux {
         use minidump_writer::process_reader::ProcessReader;
 
         let ppid = getppid();
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let mut dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
 
         // We support 3 different methods of reading memory from another
@@ -156,9 +160,10 @@ mod linux {
     fn test_find_mappings(addr1: usize, addr2: usize) -> Result<()> {
         let ppid = getppid();
 
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         dumper
             .find_mapping(addr1)
@@ -177,9 +182,10 @@ mod linux {
         let exe_link = format!("/proc/{ppid}/exe");
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
 
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
 
         let exe_mapping = dumper
@@ -198,9 +204,10 @@ mod linux {
 
     fn test_merged_mappings(path: String, mapped_mem: usize, mem_size: usize) -> Result<()> {
         // Now check that PtraceDumper interpreted the mappings properly.
+        let mut provider = RemoteConfigProvider::new(getppid(), getppid());
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(getppid(), getppid()).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         let mut mapping_count = 0;
         for map in &dumper.mappings {
@@ -223,9 +230,10 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid();
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         let linux_gate = dumper
             .mappings
@@ -241,9 +249,10 @@ mod linux {
 
     fn test_mappings_include_linux_gate() -> Result<()> {
         let ppid = getppid();
+        let mut provider = RemoteConfigProvider::new(ppid, ppid);
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            provider.provide().build_for_testing(&mut soft_errors)?
         );
         let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
         test!(linux_gate_loc != 0, "linux_gate_loc == 0");
@@ -441,6 +450,65 @@ mod linux {
                 }
             }
             _ => Err("Unknown test option".into()),
+        }
+    }
+
+    pub struct RemoteConfigProvider {
+        config: Option<MinidumpWriterConfig>,
+        join_handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl RemoteConfigProvider {
+        pub fn new(process_id: Pid, blamed_thread: Pid) -> RemoteConfigProvider {
+            const TEST_BUFFER_LEN: usize = 65536;
+            const MAX_FILE_READERS: usize = 5;
+            const MAX_DIR_READERS: usize = 5;
+            const MAX_MAPPED_MODULE_MEMORY_READERS: usize = 5;
+
+            let (executor_io, backend_io) = UnixStream::pair().unwrap();
+            let join_handle = std::thread::spawn(move || {
+                let mut args_buf = vec![0u8; TEST_BUFFER_LEN];
+                let transport = executor::transport::Postcard::new(executor_io, &mut args_buf);
+
+                let mut file_readers =
+                    Box::new(executor::resources::FileReader::new_array::<MAX_FILE_READERS>());
+                let mut dir_readers =
+                    Box::new(executor::resources::DirReader::new_array::<MAX_DIR_READERS>());
+                let mut mapped_module_memory_readers =
+                    Box::new(executor::resources::MappedModuleMemoryReader::new_array::<
+                        MAX_MAPPED_MODULE_MEMORY_READERS,
+                    >());
+
+                let mut scratch_buf = vec![0u8; TEST_BUFFER_LEN];
+                let resources = executor::resources::Resources {
+                    file_readers: file_readers.as_mut_slice(),
+                    dir_readers: dir_readers.as_mut_slice(),
+                    mapped_module_memory_readers: mapped_module_memory_readers.as_mut_slice(),
+                    scratch_buf: &mut scratch_buf,
+                };
+                executor::run(process_id, transport, resources).unwrap();
+            });
+
+            let output_buf = vec![0u8; TEST_BUFFER_LEN];
+            let transport = backend::transport::Postcard::new(backend_io, output_buf);
+            let mut config = MinidumpWriterConfig::new(process_id, blamed_thread);
+            config.set_remote_transport(transport);
+            RemoteConfigProvider {
+                config: Some(config),
+                join_handle: Some(join_handle),
+            }
+        }
+    }
+
+    impl RemoteConfigProvider {
+        pub fn provide(&mut self) -> MinidumpWriterConfig {
+            self.config.take().unwrap()
+        }
+    }
+
+    impl Drop for RemoteConfigProvider {
+        fn drop(&mut self) {
+            self.join_handle.take().unwrap().join().unwrap();
         }
     }
 }

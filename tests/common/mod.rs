@@ -258,13 +258,11 @@ pub use linux::*;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[allow(unused)]
 mod linux {
-    use {
-        minidump_writer::{
-            CrashContextExt, Pid,
-            module_reader::{self, ModuleMemoryReadError, ReadModuleMemory},
-        },
-        std::borrow::Cow,
-    };
+    use minidump_writer::module_reader::{self, ModuleMemoryReadError, ReadModuleMemory};
+    use minidump_writer::remote_process_inspection::{backend, executor, io::UnixStream};
+    use minidump_writer::{CrashContextExt, Pid, minidump_writer::MinidumpWriterConfig};
+    use std::borrow::Cow;
+
     pub struct SliceModuleMemoryReader<'a>(pub &'a [u8]);
 
     impl<'a> ReadModuleMemory for SliceModuleMemoryReader<'a> {
@@ -317,6 +315,67 @@ mod linux {
                 #[cfg(not(target_arch = "arm"))]
                 float_state,
             },
+        }
+    }
+
+    pub struct RemoteConfigProvider {
+        config: Option<MinidumpWriterConfig>,
+        join_handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl RemoteConfigProvider {
+        pub fn new(process_id: Pid, blamed_thread: Pid) -> RemoteConfigProvider {
+            const TEST_BUFFER_LEN: usize = 65536;
+            const MAX_PATH_LEN: usize = 65536;
+            const MAX_DIRECTORY_NAME_LENGTH: usize = 256;
+            const MAX_FILE_READERS: usize = 5;
+            const MAX_DIR_READERS: usize = 5;
+            const MAX_MAPPED_MODULE_MEMORY_READERS: usize = 5;
+
+            let (executor_io, backend_io) = UnixStream::pair().unwrap();
+            let join_handle = std::thread::spawn(move || {
+                let mut args_buf = vec![0u8; TEST_BUFFER_LEN];
+                let transport = executor::transport::Postcard::new(executor_io, &mut args_buf);
+
+                let mut file_readers =
+                    Box::new(executor::resources::FileReader::new_array::<MAX_FILE_READERS>());
+                let mut dir_readers =
+                    Box::new(executor::resources::DirReader::new_array::<MAX_DIR_READERS>());
+                let mut mapped_module_memory_readers =
+                    Box::new(executor::resources::MappedModuleMemoryReader::new_array::<
+                        MAX_MAPPED_MODULE_MEMORY_READERS,
+                    >());
+
+                let mut scratch_buf = vec![0u8; TEST_BUFFER_LEN];
+                let mut resources = executor::resources::Resources {
+                    file_readers: file_readers.as_mut_slice(),
+                    dir_readers: dir_readers.as_mut_slice(),
+                    mapped_module_memory_readers: mapped_module_memory_readers.as_mut_slice(),
+                    scratch_buf: &mut scratch_buf,
+                };
+                executor::run(process_id, transport, resources).unwrap();
+            });
+
+            let mut output_buf = vec![0u8; TEST_BUFFER_LEN];
+            let transport = backend::transport::Postcard::new(backend_io, output_buf);
+            let mut config = MinidumpWriterConfig::new(process_id, blamed_thread);
+            config.set_remote_transport(transport);
+            RemoteConfigProvider {
+                config: Some(config),
+                join_handle: Some(join_handle),
+            }
+        }
+        pub fn provide(&mut self) -> MinidumpWriterConfig {
+            self.config.take().unwrap()
+        }
+        pub fn borrow_mut(&mut self) -> &mut MinidumpWriterConfig {
+            self.config.as_mut().unwrap()
+        }
+    }
+
+    impl Drop for RemoteConfigProvider {
+        fn drop(&mut self) {
+            self.join_handle.take().unwrap().join().unwrap();
         }
     }
 }
