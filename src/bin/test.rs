@@ -10,7 +10,7 @@ mod linux {
         super::*,
         error_graph::ErrorList,
         minidump_writer::{
-            LINUX_GATE_LIBRARY_NAME,
+            LINUX_GATE_LIBRARY_NAME, ProcessReaderKind,
             minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
         },
         std::ptr,
@@ -73,7 +73,7 @@ mod linux {
         use minidump_writer::process_reader::ProcessReader;
 
         let ppid = getppid();
-        let dumper = fail_on_soft_error!(
+        let mut dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
@@ -99,22 +99,38 @@ mod linux {
 
         // virtual mem
         {
-            validate(ProcessReader::for_virtual_mem(&dumper.process_inspector))
+            dumper
+                .process_inspector
+                .force_process_reader_kind(ProcessReaderKind::VirtualMem)
+                .unwrap();
+            validate(dumper.process_inspector.process_reader())
                 .map_err(|err| format!("failed to validate memory: {err}"))?;
         }
 
         // file
         {
-            let reader = ProcessReader::for_file(&dumper.process_inspector)
-                .map_err(|err| format!("failed to open `/proc/{ppid}/mem`: {err}"))?;
-            validate(reader).map_err(|err| format!("failed to validate memory: {err}"))?;
+            dumper
+                .process_inspector
+                .force_process_reader_kind(ProcessReaderKind::File)
+                .unwrap();
+            validate(dumper.process_inspector.process_reader())
+                .map_err(|err| format!("failed to validate memory: {err}"))?;
         }
 
         // ptrace
         {
-            validate(ProcessReader::for_ptrace(&dumper.process_inspector))
+            dumper
+                .process_inspector
+                .force_process_reader_kind(ProcessReaderKind::Ptrace)
+                .unwrap();
+            validate(dumper.process_inspector.process_reader())
                 .map_err(|err| format!("failed to validate memory: {err}"))?;
         }
+
+        dumper
+            .process_inspector
+            .force_process_reader_kind(ProcessReaderKind::Unspecified)
+            .unwrap();
 
         let stack_res = MinidumpWriter::copy_from_process(
             &dumper.process_inspector,

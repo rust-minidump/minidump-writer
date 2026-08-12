@@ -4,81 +4,27 @@ use super::{
 };
 use crate::module_reader::ProcessModuleMemoryReader;
 
-use process_backend::local;
-
 pub type ProcessHandle = libc::pid_t;
 
 #[derive(Debug)]
 pub struct ProcessReader<'a> {
     process_inspector: &'a ProcessInspector,
-    forced_backend: Option<ForcedBackend>,
-}
-
-#[derive(Debug)]
-enum ForcedBackend {
-    Local(local::ProcessReader),
 }
 
 impl<'a> ProcessReader<'a> {
     pub fn new(process_inspector: &'a ProcessInspector) -> Self {
-        Self {
-            process_inspector,
-            forced_backend: None,
-        }
-    }
-    pub fn for_virtual_mem(process_inspector: &'a ProcessInspector) -> Self {
-        let forced_backend = match &process_inspector.backend {
-            Backend::Local { backend, .. } => {
-                ForcedBackend::Local(backend.process_reader_for_virtual_mem())
-            }
-        };
-        Self {
-            process_inspector,
-            forced_backend: Some(forced_backend),
-        }
-    }
-    pub fn for_file(process_inspector: &'a ProcessInspector) -> Result<Self, Error> {
-        let forced_backend = match &process_inspector.backend {
-            Backend::Local { backend, .. } => {
-                ForcedBackend::Local(backend.process_reader_for_file().map_err(Error::Local)?)
-            }
-        };
-        Ok(Self {
-            process_inspector,
-            forced_backend: Some(forced_backend),
-        })
-    }
-    pub fn for_ptrace(process_inspector: &'a ProcessInspector) -> Self {
-        let forced_backend = match &process_inspector.backend {
-            Backend::Local { backend, .. } => {
-                ForcedBackend::Local(backend.process_reader_for_ptrace())
-            }
-        };
-        Self {
-            process_inspector,
-            forced_backend: Some(forced_backend),
-        }
+        Self { process_inspector }
     }
 
     /// Read memory from the process into the given buffer.
     ///
     /// Returns the number of bytes read.
     pub fn read(&self, src: usize, dst: &mut [u8]) -> Result<usize, CopyFromProcessError> {
-        if let Some(forced_backend) = &self.forced_backend {
-            match forced_backend {
-                ForcedBackend::Local(process_reader_backend) => process_reader_backend
-                    .read_at(src, dst)
-                    .map_err(Error::Local),
-            }
-        } else {
-            match &self.process_inspector.backend {
-                Backend::Local {
-                    process_reader_backend,
-                    ..
-                } => process_reader_backend
-                    .read_at(src, dst)
-                    .map_err(Error::Local),
-            }
+        match &self.process_inspector.backend {
+            Backend::Local { backend } => backend
+                .process_reader()
+                .read_at(src, dst)
+                .map_err(Error::Local),
         }
         .map_err(CopyFromProcessError::Backend)
     }

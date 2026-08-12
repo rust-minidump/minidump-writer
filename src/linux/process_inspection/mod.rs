@@ -1,9 +1,9 @@
-use self::process_reader::ProcessReader;
 use super::maps_reader;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
 use core::ffi::c_int;
 use failspot::failspot;
 use process_backend::{MAX_PATH_LEN, local, regs::*};
+use process_reader::ProcessReader;
 use std::{
     borrow::Cow,
     ffi::{CString, OsString},
@@ -13,6 +13,8 @@ use std::{
 };
 
 pub use process_backend::regs;
+
+pub use process_backend::ProcessReaderKind;
 
 pub mod process_reader;
 
@@ -24,23 +26,16 @@ pub struct ProcessInspector {
 
 #[derive(Debug)]
 pub enum Backend {
-    Local {
-        backend: local::Backend,
-        process_reader_backend: local::ProcessReader,
-    },
+    Local { backend: local::Backend },
 }
 
 impl ProcessInspector {
     pub fn local(pid: libc::pid_t) -> Self {
         let backend = local::Backend::new(pid);
-        let process_reader_backend = backend.process_reader();
 
         ProcessInspector {
             pid,
-            backend: Backend::Local {
-                backend,
-                process_reader_backend,
-            },
+            backend: Backend::Local { backend },
         }
     }
     pub fn process_reader(&self) -> ProcessReader<'_> {
@@ -159,6 +154,14 @@ impl ProcessInspector {
             Backend::Local { backend, .. } => {
                 backend.ptrace_peekuser(pid, addr).map_err(Error::Local)
             }
+        }
+    }
+
+    pub fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> Result<(), Error> {
+        match &mut self.backend {
+            Backend::Local { backend, .. } => backend
+                .force_process_reader_kind(kind)
+                .map_err(Error::Local),
         }
     }
 }
