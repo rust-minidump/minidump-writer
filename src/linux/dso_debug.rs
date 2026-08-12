@@ -17,6 +17,7 @@ use {
         },
         minidump_format::*,
     },
+    failspot::failspot,
     plain::Plain,
     std::{ffi::OsString, os::unix::ffi::OsStringExt},
 };
@@ -86,6 +87,8 @@ pub enum RendezvousError {
     ReadDebuggerRendezvousAddressFailed(#[source] CopyFromProcessError),
     #[error("unexpected debugger rendezvous version '{0}'")]
     UnexpectedDebuggerRendezvousVersion(i32),
+    #[error("the dynamic linker was mid-update (r_state = {0})")]
+    DebuggerRendezvousNotConsistent(i32),
     #[error("failed reading link_map entry")]
     ReadLinkMapEntryFailed(#[source] CopyFromProcessError),
     #[error("failed reading the name a link_map entry points at")]
@@ -236,6 +239,11 @@ pub struct LinkMap {
     pub(crate) l_prev: usize,
 }
 
+/// The [`RDebug::r_state`] value stating that the mapping data is reliable.
+///
+/// <https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/link.h;h=b645760402514c4839686aaeade20dd5bb7725dd;hb=HEAD#l52>
+pub(crate) const RT_CONSISTENT: libc::c_int = 0;
+
 /// Shared object loading information for the debugger.
 ///
 /// The Linux dynamic linker fills this in and points the main program's
@@ -302,11 +310,21 @@ impl RDebug {
         let debugger_rendezvous: RDebug = reader
             .read_pod(address)
             .map_err(RendezvousError::ReadDebuggerRendezvousAddressFailed)?;
+
         if debugger_rendezvous.r_version != 1 {
             return Err(RendezvousError::UnexpectedDebuggerRendezvousVersion(
                 debugger_rendezvous.r_version,
             ));
         }
+
+        if debugger_rendezvous.r_state != RT_CONSISTENT
+            || failspot!(DebuggerRendezvousNotConsistent)
+        {
+            return Err(RendezvousError::DebuggerRendezvousNotConsistent(
+                debugger_rendezvous.r_state,
+            ));
+        }
+
         Ok(debugger_rendezvous)
     }
 

@@ -13,6 +13,7 @@ cfg_if::cfg_if! {
                 ThreadStackCopy,
                 CrashingThreadIpCopy,
                 EnumerateMappingsFromProc,
+                DebuggerRendezvousNotConsistent,
             }
         }
 
