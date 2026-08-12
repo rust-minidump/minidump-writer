@@ -273,10 +273,10 @@ pub fn write_cpu_information(
         }
 
         // Rebuild the ELF hwcaps from the 'Features' field.
-        if field == "Features" {
-            if let Some(val) = value {
-                elf_hwcaps = parse_features(val);
-            }
+        if field == "Features"
+            && let Some(val) = value
+        {
+            elf_hwcaps = parse_features(val);
         }
     }
 
