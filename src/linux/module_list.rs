@@ -584,7 +584,6 @@ mod tests {
 /// headers, hence the need for `process_inspector`, `program_header_table_address`
 /// and `program_header_count`, while `pid` is there in order to get a name for the
 /// main program's module, which isn't necessarily given in the DT_DEBUG data (glibc).
-#[expect(unused)]
 pub(crate) fn from_debugger_rendezvous(
     process_inspector: &dyn ProcessInspector,
     pid: Pid,
