@@ -75,6 +75,9 @@ pub struct MinidumpWriter {
     exception_code: i32,
     /// Whether we are dumping the current process or not
     is_external_process: bool,
+    /// Whether this struct owns the crashing_process handle and should close it on drop.
+    /// False when the handle was provided by the caller.
+    owns_handle: bool,
 }
 
 impl MinidumpWriter {
@@ -183,7 +186,7 @@ impl MinidumpWriter {
                 exception_code,
             };
 
-            Self::dump_crash_context(cc, minidump_type, out_vec)
+            Self::dump_crash_context(cc, None, minidump_type, out_vec)
         }
     }
 
@@ -203,14 +206,17 @@ impl MinidumpWriter {
     /// for the duration of this function call.
     pub fn dump_crash_context(
         crash_context: crash_context::CrashContext,
+        process_handle: Option<HANDLE>,
         minidump_type: Option<MinidumpType>,
         out_vec: Option<Vec<u8>>,
     ) -> Result<Vec<u8>, Error> {
         let pid = crash_context.process_id;
 
         // SAFETY: syscalls
-        let (crashing_process, is_external_process) = unsafe {
-            if pid != std::process::id() {
+        let (crashing_process, is_external_process, owns_handle) = unsafe {
+            if let Some(handle) = process_handle {
+                (handle, true, false)
+            } else if pid != std::process::id() {
                 let proc = OpenProcess(
                     PROCESS_ALL_ACCESS, // desired access
                     FALSE,              // inherit handles
@@ -221,9 +227,9 @@ impl MinidumpWriter {
                     return Err(std::io::Error::last_os_error().into());
                 }
 
-                (proc, true)
+                (proc, true, true)
             } else {
-                (GetCurrentProcess(), false)
+                (GetCurrentProcess(), false, true)
             }
         };
 
@@ -256,6 +262,7 @@ impl MinidumpWriter {
             tid,
             exception_code,
             is_external_process,
+            owns_handle,
         };
 
         mdw.dump(minidump_type, out_vec)
@@ -300,7 +307,7 @@ impl MinidumpWriter {
             MiniDumpWriteDump(
                 self.crashing_process, // HANDLE to the process with the crash we want to capture
                 self.pid,              // process id
-                0,                     // writing to memory, no file handle needed
+                -1isize as HANDLE,     // INVALID_HANDLE_VALUE: writing to memory via callback
                 minidump_type.unwrap_or(MinidumpType::Normal),
                 exc_info
                     .as_ref()
@@ -357,12 +364,14 @@ impl MinidumpWriter {
 
 impl Drop for MinidumpWriter {
     fn drop(&mut self) {
-        // Note we close the handle regardless of whether it is the local handle
-        // or an external one, as noted in the docs
-        //
-        // > The pseudo handle need not be closed when it is no longer needed.
-        // > Calling the CloseHandle function with a pseudo handle has no effect.
-        // SAFETY: syscall
-        unsafe { CloseHandle(self.crashing_process) };
+        if self.owns_handle {
+            // Note we close the handle regardless of whether it is the local handle
+            // or an external one, as noted in the docs
+            //
+            // > The pseudo handle need not be closed when it is no longer needed.
+            // > Calling the CloseHandle function with a pseudo handle has no effect.
+            // SAFETY: syscall
+            unsafe { CloseHandle(self.crashing_process) };
+        }
     }
 }
