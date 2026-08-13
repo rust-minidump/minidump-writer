@@ -23,28 +23,12 @@ pub const DELETED_SUFFIX: &[u8] = b" (deleted)";
 
 type Result<T> = std::result::Result<T, MapsReaderError>;
 
-#[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
-pub struct SystemMappingInfo {
-    pub start_address: usize,
-    pub end_address: usize,
-}
-
 // One of these is produced for each mapping in the process (i.e. line in
 // /proc/$x/maps).
 #[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
 pub struct MappingInfo {
-    // On Android, relocation packing can mean that the reported start
-    // address of the mapping must be adjusted by a bias in order to
-    // compensate for the compression of the relocation section. The
-    // following two members hold (after LateInit) the adjusted mapping
-    // range. See crbug.com/606972 for more information.
     pub start_address: usize,
     pub size: usize,
-    // When Android relocation packing causes |start_addr| and |size| to
-    // be modified with a load bias, we need to remember the unbiased
-    // address range. The following structure holds the original mapping
-    // address range as reported by the operating system.
-    pub system_mapping_info: SystemMappingInfo,
     pub offset: usize,              // offset into the backed file.
     pub permissions: MMPermissions, // read, write and execute permissions.
     pub name: Option<OsString>,
@@ -211,7 +195,6 @@ impl MappingInfo {
                 {
                     // Merge adjacent mappings into one module, assuming they're a single
                     // library mapped by the dynamic linker.
-                    prev_module.system_mapping_info.end_address = end_address;
                     prev_module.size = end_address - prev_module.start_address;
                     prev_module.permissions |= mm.perms;
                     continue;
@@ -248,7 +231,6 @@ impl MappingInfo {
                     let prev_prev_module = previous_modules.first_mut().unwrap();
 
                     if pathname == prev_prev_module.name {
-                        prev_prev_module.system_mapping_info.end_address = end_address;
                         prev_prev_module.size = end_address - prev_prev_module.start_address;
                         prev_prev_module.permissions |= mm.perms;
                         infos.pop();
@@ -260,10 +242,6 @@ impl MappingInfo {
             infos.push(MappingInfo {
                 start_address,
                 size: end_address - start_address,
-                system_mapping_info: SystemMappingInfo {
-                    start_address,
-                    end_address,
-                },
                 offset,
                 permissions: mm.perms,
                 name: pathname,
@@ -278,8 +256,8 @@ impl MappingInfo {
         // the stack pointer).  Regardless of the alignment of |stack_copy|,
         // the memory starting at |stack_copy| + |offset| represents an
         // aligned word in the target process.
-        let low_addr = self.system_mapping_info.start_address;
-        let high_addr = self.system_mapping_info.end_address;
+        let low_addr = self.start_address;
+        let high_addr = self.start_address + self.size;
         let mut offset = (sp_offset + size_of::<usize>() - 1) & !(size_of::<usize>() - 1);
         while offset <= stack_copy.len() - size_of::<usize>() {
             let addr = match std::mem::size_of::<usize>() {
@@ -316,8 +294,7 @@ impl MappingInfo {
     }
 
     pub fn contains_address(&self, address: usize) -> bool {
-        self.system_mapping_info.start_address <= address
-            && address < self.system_mapping_info.end_address
+        self.start_address <= address && address < self.start_address + self.size
     }
 
     pub fn is_executable(&self) -> bool {
@@ -401,10 +378,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
         let cat_map = MappingInfo {
             start_address: 0x5597483fc000,
             size: 40960,
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x5597483fc000,
-                end_address: 0x559748406000,
-            },
             offset: 0,
             permissions: MMPermissions::READ
                 | MMPermissions::WRITE
@@ -418,10 +391,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
         let heap_map = MappingInfo {
             start_address: 0x559749b0e000,
             size: 135168,
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x559749b0e000,
-                end_address: 0x559749b2f000,
-            },
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: Some("[heap]".into()),
@@ -432,10 +401,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
         let empty_map = MappingInfo {
             start_address: 0x7efd968d3000,
             size: 139264,
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x7efd968d3000,
-                end_address: 0x7efd968f5000,
-            },
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::WRITE | MMPermissions::PRIVATE,
             name: None,
@@ -451,10 +416,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
         let gate_map = MappingInfo {
             start_address: 0x7ffc6e0f7000,
             size: 8192,
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x7ffc6e0f7000,
-                end_address: 0x7ffc6e0f9000,
-            },
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::EXECUTE | MMPermissions::PRIVATE,
             name: Some("linux-gate.so".into()),
@@ -511,10 +472,6 @@ ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsysca
         let gate_map = MappingInfo {
             start_address: 0x7efd96bc4000,
             size: 1892352, // Merged the anonymous area after in this mapping, so its bigger..
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x7efd96bc4000,
-                end_address: 0x7efd96d8c000, // ..but this is not visible here
-            },
             offset: 0,
             permissions: MMPermissions::READ
                 | MMPermissions::WRITE
@@ -543,10 +500,6 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         let gate_map = MappingInfo {
             start_address: 0x9b4a0000,
             size: 155004928, // Merged the anonymous area after in this mapping, so its bigger..
-            system_mapping_info: SystemMappingInfo {
-                start_address: 0x9b4a0000,
-                end_address: 0xa4873000,
-            },
             offset: 0,
             permissions: MMPermissions::READ
                 | MMPermissions::WRITE

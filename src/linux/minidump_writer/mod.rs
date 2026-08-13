@@ -310,7 +310,7 @@ impl MinidumpWriter {
 
         if self.skip_stacks_if_mapping_unreferenced {
             if let Some(address) = self.principal_mapping_address {
-                self.principal_mapping = self.find_mapping_no_bias(address).cloned();
+                self.principal_mapping = self.find_mapping(address).cloned();
             }
 
             if !self.crash_thread_references_principal_mapping() {
@@ -483,34 +483,17 @@ impl MinidumpWriter {
     }
 
     fn crash_thread_references_principal_mapping(&self) -> bool {
-        if self.crash_context.is_none() || self.principal_mapping.is_none() {
+        let (Some(crash_context), Some(mapping)) =
+            (self.crash_context.as_ref(), self.principal_mapping.as_ref())
+        else {
             return false;
-        }
+        };
 
-        let low_addr = self
-            .principal_mapping
-            .as_ref()
-            .unwrap()
-            .system_mapping_info
-            .start_address;
-        let high_addr = self
-            .principal_mapping
-            .as_ref()
-            .unwrap()
-            .system_mapping_info
-            .end_address;
-
-        let pc = self
-            .crash_context
-            .as_ref()
-            .unwrap()
-            .get_instruction_pointer();
-        let stack_pointer = self.crash_context.as_ref().unwrap().get_stack_pointer();
-
-        if pc >= low_addr && pc < high_addr {
+        if mapping.contains_address(crash_context.get_instruction_pointer()) {
             return true;
         }
 
+        let stack_pointer = crash_context.get_stack_pointer();
         let (valid_stack_pointer, stack_len) = match self.get_stack_info(stack_pointer) {
             Ok(x) => x,
             Err(_) => {
@@ -860,7 +843,7 @@ impl MinidumpWriter {
         let shift = 32 - 11;
         // let MappingInfo* last_hit_mapping = nullptr;
         // let MappingInfo* hit_mapping = nullptr;
-        let stack_mapping = self.find_mapping_no_bias(stack_pointer);
+        let stack_mapping = self.find_mapping(stack_pointer);
         let mut last_hit_mapping: Option<&MappingInfo> = None;
         // The magnitude below which integers are considered to be to be
         // 'small', and not constitute a PII risk. These are included to
@@ -918,7 +901,7 @@ impl MinidumpWriter {
 
             let test = addr >> shift;
             if (could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0)
-                && let Some(hit_mapping) = self.find_mapping_no_bias(addr)
+                && let Some(hit_mapping) = self.find_mapping(addr)
                 && hit_mapping.is_executable()
             {
                 last_hit_mapping = Some(hit_mapping);
@@ -939,16 +922,6 @@ impl MinidumpWriter {
         self.mappings
             .iter()
             .find(|map| address >= map.start_address && address - map.start_address < map.size)
-    }
-
-    // Find the mapping which the given memory address falls in. Uses the
-    // unadjusted mapping address range from the kernel, rather than the
-    // biased range.
-    pub fn find_mapping_no_bias(&self, address: usize) -> Option<&MappingInfo> {
-        self.mappings.iter().find(|map| {
-            address >= map.system_mapping_info.start_address
-                && address < map.system_mapping_info.end_address
-        })
     }
 
     /// Reads the build ID out of the ELF object loaded at `start_address`.

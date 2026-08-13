@@ -8,7 +8,7 @@ use {
     minidump_writer::{
         CrashContextExt, Pid,
         app_memory::AppMemory,
-        maps_reader::{MappingEntry, MappingInfo, SystemMappingInfo},
+        maps_reader::{MappingEntry, MappingInfo},
         minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
         module_reader::{self},
     },
@@ -127,10 +127,6 @@ contextual_test! {
             offset: 0,
             permissions: MMPermissions::READ | MMPermissions::WRITE,
             name: Some("a fake mapping".into()),
-            system_mapping_info: SystemMappingInfo {
-                start_address: mmap_addr,
-                end_address: mmap_addr + memory_size,
-            },
         };
 
         let identifier = vec![
