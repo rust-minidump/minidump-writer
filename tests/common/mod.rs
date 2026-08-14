@@ -5,6 +5,8 @@ use std::{
     result,
 };
 
+use serde::Serialize;
+
 #[allow(unused)]
 type Error = Box<dyn error::Error + std::marker::Send + std::marker::Sync>;
 #[allow(unused)]
@@ -129,25 +131,84 @@ where
     serde_json::from_str(contents).expect("expected json")
 }
 
+pub fn visit_json_objects<V>(json: &serde_json::Value, path: &mut Vec<String>, visit: &mut V)
+where
+    V: FnMut(&[String], &serde_json::Value),
+{
+    if let Some(obj) = json.as_object() {
+        for (key, value) in obj.iter() {
+            // visiting the key is useful if you're matching against a complex enum member
+            // but don't really care about its contents
+            visit(path, &serde_json::Value::String(key.clone()));
+            path.push(key.clone());
+            visit_json_objects(value, path, visit);
+            path.pop();
+        }
+    }
+    if let Some(arr) = json.as_array() {
+        for value in arr.iter() {
+            visit_json_objects(value, path, visit);
+        }
+        return;
+    }
+    visit(path, json);
+}
+
 #[allow(unused)]
-pub fn assert_soft_errors_in_minidump<'a, 'b, T, I>(
+#[derive(Debug)]
+pub struct ErrorPattern {
+    value: serde_json::Value,
+    ancestor: Option<String>,
+}
+
+#[allow(unused)]
+impl ErrorPattern {
+    pub fn value(value: impl Serialize) -> Self {
+        Self {
+            value: serde_json::to_value(value).unwrap(),
+            ancestor: None,
+        }
+    }
+    pub fn with_ancestor(mut self, ancestor: impl ToString) -> Self {
+        self.ancestor = Some(ancestor.to_string());
+        self
+    }
+
+    fn matches(&self, value: &serde_json::Value, path: &[String]) -> bool {
+        &self.value == value
+            && match &self.ancestor {
+                None => true,
+                Some(ancestor) => path.contains(ancestor),
+            }
+    }
+}
+
+#[allow(unused)]
+pub(crate) fn assert_minidump_soft_errors_match_all<'a, T>(
     dump: &minidump::Minidump<'a, T>,
-    expected_errors: I,
+    patterns: &[ErrorPattern],
 ) where
     T: std::ops::Deref<Target = [u8]> + 'a,
-    I: IntoIterator<Item = &'b serde_json::Value>,
 {
     let actual_json = read_minidump_soft_errors_or_panic(dump);
-    let actual_errors = actual_json.as_array().unwrap();
 
-    // Ensure that every error we expect is in the actual list somewhere
-    for expected_error in expected_errors {
-        assert!(
-            actual_errors
-                .iter()
-                .any(|actual_error| actual_error == expected_error),
-            "soft error list missing expected error `{expected_error:#?}`\nError_list: {actual_errors:#?}"
-        );
+    let mut path = vec![];
+    // We can't use a HashSet because remove() is too greedy in terms of
+    // lifetime.
+    let mut expected: Vec<_> = patterns.iter().collect();
+
+    visit_json_objects(&actual_json, &mut path, &mut |path, value| {
+        for i in 0..expected.len() {
+            let pattern = &expected[i];
+            if pattern.matches(value, path) {
+                expected.remove(i);
+                return;
+            }
+        }
+    });
+
+    if !expected.is_empty() {
+        panic!("Soft errors patterns not found: {:?}", expected);
     }
 }
 

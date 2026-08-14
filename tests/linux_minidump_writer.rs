@@ -316,9 +316,7 @@ contextual_test! {
 contextual_test! {
     fn skip_if_requested(context: Context) {
         let expected_errors = vec![
-            json!({
-                "InitErrors": ["PrincipalMappingNotReferenced"]
-            }),
+            ErrorPattern::value("PrincipalMappingNotReferenced").with_ancestor("InitErrors")
         ];
 
         let num_of_threads = 1;
@@ -356,7 +354,7 @@ contextual_test! {
 
         // Ensure the MozSoftErrors stream contains the expected errors
         let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
-        assert_soft_errors_in_minidump(&dump, &expected_errors);
+        assert_minidump_soft_errors_match_all(&dump, &expected_errors);
     }
 }
 
