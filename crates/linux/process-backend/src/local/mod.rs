@@ -387,7 +387,7 @@ impl Drop for DirReader {
     fn drop(&mut self) {
         let rv = unsafe { libc::closedir(self.dirp) };
         if rv == -1 {
-            log::debug!("failed to close directory: {}", errno());
+            report_drop_failed!("failed to close directory: {}", errno());
         }
     }
 }
@@ -418,7 +418,7 @@ impl Drop for OwnedFd {
     fn drop(&mut self) {
         let rv = unsafe { libc::close(self.0) };
         if rv == -1 {
-            log::error!("failed to close file: {}", errno());
+            report_drop_failed!("failed to close file: {}", errno());
         }
     }
 }

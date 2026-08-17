@@ -31,6 +31,8 @@ pub enum Backend {
 
 impl ProcessInspector {
     pub fn local(pid: libc::pid_t) -> Self {
+        set_process_backend_drop_fail_handler();
+
         let backend = local::Backend::new(pid);
 
         ProcessInspector {
@@ -257,4 +259,13 @@ impl ReadModuleMemory for MappedModuleMemoryReader {
 pub enum Error {
     #[error("an error occurred running a syscall directly")]
     Local(#[source] local::Error),
+}
+
+fn set_process_backend_drop_fail_handler() {
+    fn drop_fail_handler(args: core::fmt::Arguments<'_>) {
+        log::error!("a drop() error occurred in process-backend: {args}");
+    }
+    const HANDLER: process_backend::DropFailHandler =
+        process_backend::DropFailHandler::new(drop_fail_handler);
+    HANDLER.install_global();
 }

@@ -1,6 +1,11 @@
 #![no_std]
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
+pub use drop_fail_handler::Handler as DropFailHandler;
+
+#[macro_use]
+mod drop_fail_handler;
+
 pub mod local;
 pub mod regs;
 

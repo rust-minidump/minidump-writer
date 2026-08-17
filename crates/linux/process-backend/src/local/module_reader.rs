@@ -149,7 +149,7 @@ impl Drop for Mapped {
     fn drop(&mut self) {
         let rv = unsafe { libc::munmap(self.ptr, self.len) };
         if rv == -1 {
-            log::error!("failed to unmap memory: {}", errno());
+            report_drop_failed!("failed to unmap memory: {}", errno());
         }
     }
 }
