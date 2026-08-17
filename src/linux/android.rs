@@ -148,19 +148,18 @@ pub fn late_process_mappings(
         .ok()
         .and_then(|x| elf_header::Header::parse(&x).ok());
 
-        if let Some(ehdr) = ehdr_opt {
-            if ehdr.e_type == elf_header::ET_DYN {
-                // Compute the effective load bias for this mapped library, and update
-                // the mapping to hold that rather than |start_addr|, at the same time
-                // adjusting |size| to account for the change in |start_addr|. Where
-                // the library does not contain Android packed relocations,
-                // GetEffectiveLoadBias() returns |start_addr| and the mapping entry
-                // is not changed.
-                let load_bias =
-                    get_effective_load_bias(process_inspector, &ehdr, map.start_address);
-                map.size += map.start_address - load_bias;
-                map.start_address = load_bias;
-            }
+        if let Some(ehdr) = ehdr_opt
+            && ehdr.e_type == elf_header::ET_DYN
+        {
+            // Compute the effective load bias for this mapped library, and update
+            // the mapping to hold that rather than |start_addr|, at the same time
+            // adjusting |size| to account for the change in |start_addr|. Where
+            // the library does not contain Android packed relocations,
+            // GetEffectiveLoadBias() returns |start_addr| and the mapping entry
+            // is not changed.
+            let load_bias = get_effective_load_bias(process_inspector, &ehdr, map.start_address);
+            map.size += map.start_address - load_bias;
+            map.start_address = load_bias;
         }
     }
     Ok(())

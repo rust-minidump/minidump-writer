@@ -140,6 +140,7 @@ jobs:
             cargo run --target x86_64-linux-android --bin test -- nop
             # Build and run tests
             cargo test --target x86_64-linux-android
+            cargo clippy --all-features --all-targets --target x86_64-linux-android -- -D warnings
 
   deny-check:
     runs-on: ubuntu-24.04
