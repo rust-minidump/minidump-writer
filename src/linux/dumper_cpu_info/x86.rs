@@ -50,7 +50,7 @@ pub fn write_cpu_information(
     }
 
     let cpuinfo_file = process_inspector
-        .read_file("/proc/cpuinfo")
+        .read_file("/proc/cpuinfo".into())
         .map_err(CpuInfoError::ReadFileError)?;
 
     let mut vendor_id = String::new();

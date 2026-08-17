@@ -97,7 +97,7 @@ impl AuxvDumpInfo {
 
         let auxv_path = format!("/proc/{pid}/auxv");
         let auxv_file = process_inspector
-            .read_file(&auxv_path)
+            .read_file(auxv_path.clone().into())
             .map_err(|e| AuxvError::OpenError(auxv_path, e))?;
 
         for pair_result in ProcfsAuxvIter::new(BufReader::new(auxv_file)) {

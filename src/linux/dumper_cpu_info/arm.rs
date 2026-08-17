@@ -171,12 +171,14 @@ pub fn write_cpu_information(
     // because the content of /proc/cpuinfo will only mirror the number
     // of 'online' cores, and thus will vary with time.
     // See http://www.kernel.org/doc/Documentation/cputopology.txt
-    if let Ok(mut present_file) = process_inspector.read_file("/sys/devices/system/cpu/present") {
+    if let Ok(mut present_file) =
+        process_inspector.read_file("/sys/devices/system/cpu/present".into())
+    {
         // Ignore unparsable content
         let cpus_present = parse_cpus_from_sysfile(&mut present_file).unwrap_or_default();
 
         if let Ok(mut possible_file) =
-            process_inspector.read_file("/sys/devices/system/cpu/possible")
+            process_inspector.read_file("/sys/devices/system/cpu/possible".into())
         {
             // Ignore unparsable content
             let cpus_possible = parse_cpus_from_sysfile(&mut possible_file).unwrap_or_default();
@@ -197,7 +199,7 @@ pub fn write_cpu_information(
     }
 
     let cpuinfo_file = process_inspector
-        .read_file("/proc/cpuinfo")
+        .read_file("/proc/cpuinfo".into())
         .map_err(CpuInfoError::ReadFileError)?;
 
     let mut cpuid = 0;

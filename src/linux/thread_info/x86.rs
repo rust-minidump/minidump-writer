@@ -42,7 +42,7 @@ impl ThreadInfoX86 {
         let debug_offset = mem::offset_of!(user, u_debugreg);
         for (idx, dreg) in dregs.iter_mut().enumerate() {
             let chunk = process_inspector
-                .ptrace_peekuser(tid, debug_offset + idx * mem::size_of::<RegType>())
+                .ptrace_peekuser(debug_offset + idx * mem::size_of::<RegType>())
                 .map_err(ThreadInfoError::PtraceError)?;
 
             *dreg = RegType::from_ne_bytes(chunk[0..mem::size_of::<RegType>()].try_into().unwrap());

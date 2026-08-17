@@ -29,6 +29,7 @@ use {
     },
     std::{
         io::{Read, Seek, Write},
+        path::PathBuf,
         time::{Duration, Instant},
     },
     thiserror::Error,
@@ -132,7 +133,7 @@ impl MinidumpWriterConfig {
             crashing_thread_context: Default::default(),
             stop_timeout: STOP_TIMEOUT,
             direct_auxv_dump_info: Default::default(),
-            process_inspector: ProcessInspector::local(process_id),
+            process_inspector: process_inspection::local(process_id),
         }
     }
 
@@ -600,6 +601,10 @@ impl MinidumpWriter {
     ///
     /// This will block waiting for the process to stop until `timeout` has passed.
     fn stop_process(&mut self, timeout: Duration) -> Result<(), StopProcessError> {
+        failspot!(if StopProcess {
+            self.process_inspector.fail_one_syscall_with(libc::EPERM);
+        });
+
         self.process_inspector
             .stop_process()
             .map_err(StopProcessError::Stop)?;
@@ -607,13 +612,13 @@ impl MinidumpWriter {
         // Something like waitpid for non-child processes would be better, but we have no such
         // tool, so we poll the status.
         const POLL_INTERVAL: Duration = Duration::from_millis(1);
-        let proc_file = format!("/proc/{}/stat", self.process_id);
+        let proc_file = PathBuf::from(format!("/proc/{}/stat", self.process_id));
         let end = Instant::now() + timeout;
 
         loop {
             let stat_file = self
                 .process_inspector
-                .read_file(&proc_file)
+                .read_file(proc_file.clone())
                 .map_err(StopProcessError::ReadFileFailed)?;
             if let Ok(ProcState::Stopped) = Stat::from_read(stat_file)?.state() {
                 return Ok(());
@@ -646,7 +651,7 @@ impl MinidumpWriter {
 
         for file_name in self
             .process_inspector
-            .read_dir(&task_path)
+            .read_dir(task_path.into())
             .map_err(InitError::ReadProcTaskFailed)?
         {
             let file_name = match file_name {
@@ -671,7 +676,7 @@ impl MinidumpWriter {
             // Read the thread-name (if there is any)
             let name_result = self
                 .process_inspector
-                .read_file(format!("/proc/{pid}/task/{tid}/comm"))
+                .read_file(format!("/proc/{pid}/task/{tid}/comm").into())
                 .map_err(std::io::Error::other)
                 .and_then(|mut file| {
                     let mut s = String::new();
@@ -971,7 +976,7 @@ fn write_file(
     filename: &str,
 ) -> std::result::Result<MDLocationDescriptor, MemoryWriterError> {
     let content = process_inspector
-        .read_file(filename)
+        .read_file(filename.into())
         .map_err(std::io::Error::other)
         .and_then(|mut file| {
             let mut v = Vec::new();

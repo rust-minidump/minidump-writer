@@ -142,7 +142,7 @@ impl MappingInfo {
     ) -> Result<Vec<Self>> {
         let maps_path = format!("/proc/{}/maps", pid);
         let maps_file = process_inspector
-            .read_file(&maps_path)
+            .read_file(maps_path.into())
             .map_err(MapsReaderError::ReadFileFailed)?;
         let maps = MemoryMaps::from_read(maps_file)?;
         Self::aggregate(maps, linux_gate_loc)
@@ -728,7 +728,7 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         );
         assert_eq!(mappings.len(), 1);
 
-        let process_inspector = ProcessInspector::local(0);
+        let process_inspector = process_inspection::local(0);
 
         let (file_path, file_name, _version) = mappings[0]
             .get_mapping_effective_path_name_and_version(&process_inspector, None)
