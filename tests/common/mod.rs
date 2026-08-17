@@ -39,12 +39,23 @@ fn build_command() -> Command {
     cmd
 }
 
+/// Must be taken by tests that use ptrace() to avoid racing on attaching to the parent,
+/// leading to random failures.
+static PTRACE_PARENT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[allow(unused)]
 pub fn spawn_child(command: &str, args: &[&str]) {
     let mut cmd = build_command();
     cmd.arg(command).args(args);
 
-    let child = cmd.output().expect("failed to execute child");
+    let child = {
+        // Panicking is fine as far as ptrace is concerned,
+        // no need to poison other tests.
+        let _guard = PTRACE_PARENT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cmd.output().expect("failed to execute child")
+    };
 
     println!("Child output:");
     println!("===stdout===");
