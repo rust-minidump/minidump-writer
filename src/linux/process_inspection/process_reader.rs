@@ -46,12 +46,11 @@ impl<'a> ProcessReader<'a> {
                 // For now, only check the SO_NAME of Android APKS, because libraries may be mapped
                 // directly from within an APK. See bug 1982902.
                 #[cfg(target_os = "android")]
-                if name.ends_with(".apk") {
-                    if let Ok(so_name) = crate::module_reader::read_soname_from_module(&mmem) {
-                        if so_name == name {
-                            return Some(mmem);
-                        }
-                    }
+                if name.ends_with(".apk")
+                    && let Ok(so_name) = crate::module_reader::read_soname_from_module(&mmem)
+                    && so_name == name
+                {
+                    return Some(mmem);
                 }
 
                 None
