@@ -931,26 +931,25 @@ impl MinidumpWriter {
         })
     }
 
-    pub fn build_id_from_process_memory_for_index(
-        &mut self,
-        idx: usize,
+    /// Reads the build ID out of the ELF object loaded at `start_address`.
+    pub fn build_id_from_process_memory(
+        &self,
+        start_address: usize,
     ) -> Result<Vec<u8>, WriterError> {
         let reader = self.process_inspector.process_reader();
         module_reader::read_build_id_from_module(module_reader::ProcessModuleMemoryReader::new(
             &reader,
-            self.mappings[idx].start_address,
+            start_address,
         ))
         .map_err(WriterError::ModuleReaderError)
     }
 
-    pub fn soname_from_process_memory_for_index(
-        &mut self,
-        idx: usize,
-    ) -> Result<String, WriterError> {
+    /// Reads the `DT_SONAME` out of the ELF object loaded at `start_address`.
+    pub fn soname_from_process_memory(&self, start_address: usize) -> Result<String, WriterError> {
         let reader = self.process_inspector.process_reader();
         module_reader::read_soname_from_module(module_reader::ProcessModuleMemoryReader::new(
             &reader,
-            self.mappings[idx].start_address,
+            start_address,
         ))
         .map_err(WriterError::ModuleReaderError)
     }

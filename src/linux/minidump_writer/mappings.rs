@@ -20,25 +20,23 @@ impl MinidumpWriter {
         let mut modules = Vec::new();
 
         // First write all the mappings from the dumper
-        for map_idx in 0..self.mappings.len() {
+        for mapping in &self.mappings {
             // If the mapping is uninteresting, or if
             // there is caller-provided information about this mapping
             // in the user_mapping_list list, skip it
 
-            if !self.mappings[map_idx].is_interesting()
-                || self.mappings[map_idx].is_contained_in(&self.user_mapping_list)
-            {
+            if !mapping.is_interesting() || mapping.is_contained_in(&self.user_mapping_list) {
                 continue;
             }
-            log::debug!("retrieving build id for {:?}", self.mappings[map_idx]);
+            log::debug!("retrieving build id for {:?}", mapping);
             let identifier = self
-            .build_id_from_process_memory_for_index(map_idx)
+            .build_id_from_process_memory(mapping.start_address)
             .or_else(|e| {
                 // If the mapping has an associated name that is a file, try to read the build id
                 // from the file. If there is no note segment with the build id in
                 // the program headers, we can't get to the note section if the section header
                 // table isn't loaded.
-                let Some(path) = &self.mappings[map_idx].name else {
+                let Some(path) = &mapping.name else {
                     return Err(e);
                 };
 
@@ -58,12 +56,12 @@ impl MinidumpWriter {
 
             // SONAME should always be accessible through program headers alone, so we don't really
             // need to fall back to trying to read from the mapping file.
-            let soname = self.soname_from_process_memory_for_index(map_idx).ok();
+            let soname = self.soname_from_process_memory(mapping.start_address).ok();
 
             let module = fill_raw_module(
                 &self.process_inspector,
                 buffer,
-                &self.mappings[map_idx],
+                mapping,
                 &identifier,
                 soname,
             )?;
