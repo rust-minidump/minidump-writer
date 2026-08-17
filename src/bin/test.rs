@@ -177,20 +177,17 @@ mod linux {
         let exe_link = format!("/proc/{ppid}/exe");
         let exe_name = std::fs::read_link(exe_link)?.into_os_string();
 
-        let mut dumper = fail_on_soft_error!(
+        let dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
 
-        let mut found_exe = None;
-        for (idx, mapping) in dumper.mappings.iter().enumerate() {
-            if mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name) {
-                found_exe = Some(idx);
-                break;
-            }
-        }
-        let idx = found_exe.unwrap();
-        let id = dumper.build_id_from_process_memory_for_index(idx)?;
+        let exe_mapping = dumper
+            .mappings
+            .iter()
+            .find(|mapping| mapping.name.as_ref().map(|x| x.into()).as_ref() == Some(&exe_name))
+            .unwrap();
+        let id = dumper.build_id_from_process_memory(exe_mapping.start_address)?;
 
         drop(dumper);
 
@@ -226,24 +223,19 @@ mod linux {
 
     fn test_linux_gate_mapping_id() -> Result<()> {
         let ppid = getppid();
-        let mut dumper = fail_on_soft_error!(
+        let dumper = fail_on_soft_error!(
             soft_errors,
             MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
-        let mut found_linux_gate = false;
-        for idx in 0..dumper.mappings.len() {
-            if dumper.mappings[idx].name == Some(LINUX_GATE_LIBRARY_NAME.into()) {
-                found_linux_gate = true;
+        let linux_gate = dumper
+            .mappings
+            .iter()
+            .find(|mapping| mapping.name == Some(LINUX_GATE_LIBRARY_NAME.into()));
+        test!(linux_gate.is_some(), "found no linux_gate");
 
-                let id = dumper.build_id_from_process_memory_for_index(idx)?;
-
-                test!(!id.is_empty(), "id-vec is empty");
-                test!(id.iter().any(|&x| x > 0), "all id elements are 0");
-                drop(dumper);
-                break;
-            }
-        }
-        test!(found_linux_gate, "found no linux_gate");
+        let id = dumper.build_id_from_process_memory(linux_gate.unwrap().start_address)?;
+        test!(!id.is_empty(), "id-vec is empty");
+        test!(id.iter().any(|&x| x > 0), "all id elements are 0");
         Ok(())
     }
 
