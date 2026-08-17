@@ -204,6 +204,51 @@ contextual_test! {
     }
 }
 
+/// A module list starts with the executable and doesn't have overlaps
+#[test]
+fn module_list_properties() {
+    let mut child = start_child_and_wait_for_threads(1);
+    let pid = child.id() as i32;
+
+    let executable = std::fs::read_link(format!("/proc/{pid}/exe")).expect("failed to read exe");
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("module_list")
+        .tempfile()
+        .unwrap();
+
+    MinidumpWriterConfig::new(pid, pid)
+        .write(&mut tmpfile)
+        .expect("could not write minidump");
+
+    child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait for child");
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+    let module_list: MinidumpModuleList = dump
+        .get_stream()
+        .expect("Couldn't find stream MinidumpModuleList");
+    let modules: Vec<_> = module_list.iter().collect();
+    assert!(!modules.is_empty(), "no modules in the dump");
+
+    // Executable is first
+    assert_eq!(modules[0].code_file(), executable.to_string_lossy());
+
+    // Get the ranges ordered by their start
+    let mut ranges: Vec<_> = modules
+        .iter()
+        .map(|module| (module.base_address(), module.size()))
+        .collect();
+    ranges.sort_unstable();
+
+    // Test for overlap
+    for pair in ranges.windows(2) {
+        let (base, size) = pair[0];
+        let (next_base, _) = pair[1];
+        assert!(base + size <= next_base);
+    }
+}
+
 contextual_test! {
     fn write_with_additional_memory(context: Context) {
         let mut child = start_child_and_return(&["spawn_alloc_wait"]);
