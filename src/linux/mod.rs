@@ -10,6 +10,7 @@ pub mod app_memory;
 mod crash_context_ext;
 pub mod maps_reader;
 pub mod minidump_writer;
+pub mod module_list;
 pub mod module_reader;
 pub mod thread_info;
 

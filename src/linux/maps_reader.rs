@@ -15,7 +15,6 @@ use {
         ffi::{OsStr, OsString},
         mem::size_of,
         os::unix::ffi::{OsStrExt, OsStringExt},
-        path::{Path, PathBuf},
     },
 };
 
@@ -71,8 +70,6 @@ pub enum MapsReaderError {
         #[serde(serialize_with = "serialize_goblin_error")]
         goblin::error::Error,
     ),
-    #[error("error reading soname from file")]
-    ReadSoNameFromFileFailed(#[source] ModuleReaderError),
     #[error("failed to memory map file")]
     MemoryMapFileFailed(#[source] ModuleReaderError),
     #[error("No soname found (filename: {})", .0.to_string_lossy())]
@@ -115,11 +112,23 @@ pub enum MapsReaderError {
     ),
 }
 
-fn is_mapping_a_path(pathname: Option<&OsStr>) -> bool {
+/// Return whether a `/proc/<pid>/maps` pathname is a path (contains a `/`).
+pub(crate) fn name_is_path(pathname: Option<&OsStr>) -> bool {
     match pathname {
         Some(x) => x.as_bytes().contains(&b'/'),
         None => false,
     }
+}
+
+/// Quick helper to convert a `/proc/<pid>/maps` excerpt into mapping data.
+#[cfg(test)]
+#[cfg(target_pointer_width = "64")] // All tests are 64-bit
+pub(crate) fn get_mappings_for(map: &str, linux_gate_loc: u64) -> Vec<MappingInfo> {
+    MappingInfo::aggregate(
+        MemoryMaps::from_read(map.as_bytes()).expect("failed to read mapping info"),
+        Some(linux_gate_loc),
+    )
+    .unwrap_or_default()
 }
 
 /// Sanitize mapped paths.
@@ -150,7 +159,7 @@ impl MappingInfo {
 
     /// Return whether the `name` field is a path (contains a `/`).
     pub fn name_is_path(&self) -> bool {
-        is_mapping_a_path(self.name.as_deref())
+        name_is_path(self.name.as_deref())
     }
 
     pub fn is_empty_page(&self) -> bool {
@@ -186,7 +195,7 @@ impl MappingInfo {
                 MMapPath::Anonymous => None,
             };
 
-            let is_path = is_mapping_a_path(pathname.as_deref());
+            let is_path = name_is_path(pathname.as_deref());
 
             if let Some(linux_gate_loc) = linux_gate_loc.map(|u| usize::try_from(u).unwrap())
                 && (!is_path && (start_address == linux_gate_loc))
@@ -296,73 +305,6 @@ impl MappingInfo {
         false
     }
 
-    /// Find the shared object name (SONAME) by examining the ELF information
-    /// for the mapping.
-    fn so_name(&self, process_inspector: &dyn ProcessInspector) -> Result<String> {
-        let path = Path::new(self.name.as_deref().unwrap_or_default());
-        super::module_reader::read_soname_from_file(process_inspector, path, self.offset)
-            .map_err(MapsReaderError::ReadSoNameFromFileFailed)
-    }
-
-    #[inline]
-    fn so_version(&self) -> Option<SoVersion> {
-        SoVersion::parse(self.name.as_deref()?)
-    }
-
-    pub fn get_mapping_effective_path_name_and_version(
-        &self,
-        process_inspector: &dyn ProcessInspector,
-        soname: Option<String>,
-    ) -> Result<(PathBuf, String, Option<SoVersion>)> {
-        let mut file_path = PathBuf::from(self.name.clone().unwrap_or_default());
-
-        // Tools such as minidump_stackwalk use the name of the module to look up
-        // symbols produced by dump_syms. dump_syms will prefer to use a module's
-        // DT_SONAME as the module name, if one exists, and will fall back to the
-        // filesystem name of the module.
-
-        // Just use the filesystem name if no SONAME is present.
-        let Some(file_name) = soname.or_else(|| self.so_name(process_inspector).ok()) else {
-            //   file_path := /path/to/libname.so
-            //   file_name := libname.so
-            let file_name = file_path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-
-            return Ok((file_path, file_name, self.so_version()));
-        };
-
-        if self.is_executable() && self.offset != 0 {
-            // If an executable is mapped from a non-zero offset, this is likely because
-            // the executable was loaded directly from inside an archive file (e.g., an
-            // apk on Android).
-            // In this case, we append the file_name to the mapped archive path:
-            //   file_name := libname.so
-            //   file_path := /path/to/ARCHIVE.APK/libname.so
-            file_path.push(&file_name);
-        } else {
-            // Otherwise, replace the basename with the SONAME.
-            file_path.set_file_name(&file_name);
-        }
-
-        Ok((file_path, file_name, self.so_version()))
-    }
-
-    pub fn is_contained_in(&self, user_mapping_list: &MappingList) -> bool {
-        for user in user_mapping_list {
-            // Ignore any mappings that are wholly contained within
-            // mappings in the mapping_info_ list.
-            if self.start_address >= user.mapping.start_address
-                && (self.start_address + self.size)
-                    <= (user.mapping.start_address + user.mapping.size)
-            {
-                return true;
-            }
-        }
-        false
-    }
-
     pub fn is_interesting(&self) -> bool {
         // only want modules with filenames.
         self.name.is_some() &&
@@ -391,110 +333,10 @@ impl MappingInfo {
     }
 }
 
-/// Version metadata retrieved from an .so filename
-///
-/// There is no standard for .so version numbers so this implementation just
-/// does a best effort to pull as much data as it can based on real .so schemes
-/// seen
-///
-/// That being said, the [libtool](https://www.gnu.org/software/libtool/manual/html_node/Libtool-versioning.html)
-/// versioning scheme is fairly common
-#[cfg_attr(test, derive(Debug))]
-pub struct SoVersion {
-    /// Might be non-zero if there is at least one non-zero numeric component after .so.
-    ///
-    /// Equivalent to `current` in libtool versions
-    pub major: u32,
-    /// The numeric component after the major version, if any
-    ///
-    /// Equivalent to `revision` in libtool versions
-    pub minor: u32,
-    /// The numeric component after the minor version, if any
-    ///
-    /// Equivalent to `age` in libtool versions
-    pub patch: u32,
-    /// The patch component may contain additional non-numeric metadata similar
-    /// to a semver prelease, this is any numeric data that suffixes that prerelease
-    /// string
-    pub prerelease: u32,
-}
-
-impl SoVersion {
-    /// Attempts to retrieve the .so version of the elf path via its filename
-    fn parse(so_path: &OsStr) -> Option<Self> {
-        let filename = std::path::Path::new(so_path).file_name()?;
-
-        // Avoid an allocation unless the string contains non-utf8
-        let filename = filename.to_string_lossy();
-
-        let (_, version) = filename.split_once(".so.")?;
-
-        let mut sov = Self {
-            major: 0,
-            minor: 0,
-            patch: 0,
-            prerelease: 0,
-        };
-
-        let comps = [
-            &mut sov.major,
-            &mut sov.minor,
-            &mut sov.patch,
-            &mut sov.prerelease,
-        ];
-
-        for (i, comp) in version.split('.').enumerate() {
-            if i <= 1 {
-                *comps[i] = comp.parse().unwrap_or_default();
-            } else if i >= 4 {
-                break;
-            } else {
-                // In some cases the release/patch version is alphanumeric (eg. '2rc5'),
-                // so try to parse either a single or two numbers
-                if let Some(pend) = comp.find(|c: char| !c.is_ascii_digit()) {
-                    if let Ok(patch) = comp[..pend].parse() {
-                        *comps[i] = patch;
-                    }
-
-                    if i >= comps.len() - 1 {
-                        break;
-                    }
-                    if let Some(pre) = comp.rfind(|c: char| !c.is_ascii_digit())
-                        && let Ok(pre) = comp[pre + 1..].parse()
-                    {
-                        *comps[i + 1] = pre;
-                        break;
-                    }
-                } else {
-                    *comps[i] = comp.parse().unwrap_or_default();
-                }
-            }
-        }
-
-        Some(sov)
-    }
-}
-
-#[cfg(test)]
-impl PartialEq<(u32, u32, u32, u32)> for SoVersion {
-    fn eq(&self, o: &(u32, u32, u32, u32)) -> bool {
-        self.major == o.0 && self.minor == o.1 && self.patch == o.2 && self.prerelease == o.3
-    }
-}
-
 #[cfg(test)]
 #[cfg(target_pointer_width = "64")] // All addresses are 64 bit and I'm currently too lazy to adjust it to work for both
 mod tests {
     use super::*;
-    use procfs_core::FromRead;
-
-    fn get_mappings_for(map: &str, linux_gate_loc: u64) -> Vec<MappingInfo> {
-        MappingInfo::aggregate(
-            MemoryMaps::from_read(map.as_bytes()).expect("failed to read mapping info"),
-            Some(linux_gate_loc),
-        )
-        .unwrap_or_default()
-    }
 
     const LINES: &str = "\
 5597483fc000-5597483fe000 r--p 00000000 00:31 4750073                    /usr/bin/cat
@@ -714,59 +556,6 @@ a4840000-a4873000 rw-p 09021000 08:12 393449     /data/app/org.mozilla.firefox-1
         };
 
         assert_eq!(mappings[0], gate_map);
-    }
-
-    #[test]
-    fn test_get_mapping_effective_name() {
-        let mappings = get_mappings_for(
-            "\
-7f0b97b6f000-7f0b97b70000 r--p 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so
-7f0b97b70000-7f0b97b71000 r-xp 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so
-7f0b97b71000-7f0b97b73000 r--p 00000000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so
-7f0b97b73000-7f0b97b74000 rw-p 00001000 00:3e 27136458                   /home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so",
-            0x7ffe091bf000,
-        );
-        assert_eq!(mappings.len(), 1);
-
-        let process_inspector = process_inspection::local(0);
-
-        let (file_path, file_name, _version) = mappings[0]
-            .get_mapping_effective_path_name_and_version(process_inspector.as_ref(), None)
-            .expect("Couldn't get effective name for mapping");
-        assert_eq!(file_name, "libmozgtk.so");
-        assert_eq!(
-            file_path,
-            PathBuf::from(
-                "/home/martin/Documents/mozilla/devel/mozilla-central/obj/widget/gtk/mozgtk/gtk3/libmozgtk.so"
-            )
-        );
-    }
-
-    #[test]
-    fn test_elf_file_so_version() {
-        #[rustfmt::skip]
-        let test_cases = [
-            ("/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32", (6, 0, 32, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libcairo-gobject.so.2.11800.0", (2, 11800, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libm.so.6", (6, 0, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libpthread.so.0", (0, 0, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libgmodule-2.0.so.0.7800.0", (0, 7800, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libabsl_time_zone.so.20220623.0.0", (20220623, 0, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc5", (3, 34, 2, 5)),
-            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.2rc", (3, 34, 2, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libdbus-1.so.3.34.rc5", (3, 34, 0, 5)),
-            ("/usr/lib/x86_64-linux-gnu/libtoto.so.AAA", (0, 0, 0, 0)),
-            ("/usr/lib/x86_64-linux-gnu/libsemver-1.so.1.2.alpha.1", (1, 2, 0, 1)),
-            ("/usr/lib/x86_64-linux-gnu/libboop.so.1.2.3.4.5", (1, 2, 3, 4)),
-            ("/usr/lib/x86_64-linux-gnu/libboop.so.1.2.3pre4.5", (1, 2, 3, 4)),
-        ];
-
-        assert!(SoVersion::parse(OsStr::new("/home/alex/bin/firefox/libmozsandbox.so")).is_none());
-
-        for (path, expected) in test_cases {
-            let actual = SoVersion::parse(OsStr::new(path)).unwrap();
-            assert_eq!(actual, expected);
-        }
     }
 
     #[test]
