@@ -29,6 +29,17 @@ pub enum ModuleResolveError {
         name.to_string_lossy()
     )]
     DuplicateUserModule { name: OsString, base_address: usize },
+    #[error(
+        "module `{}` at {base_address:#x} was clamped at {clamped_to:#x} while \
+         its last executable segment ends at {code_end:#x}",
+        name.to_string_lossy()
+    )]
+    ModuleImageClamped {
+        name: OsString,
+        base_address: usize,
+        code_end: usize,
+        clamped_to: usize,
+    },
 }
 
 /// Where a module's information came from.
@@ -162,11 +173,44 @@ pub(crate) fn resolve(
     filter_out_user_overlap(&mut process_candidates, &user_candidates);
     ensure_entrypoint_is_first(&mut process_candidates, entry_point);
 
-    process_candidates
+    let mut candidates: Vec<ModuleCandidate> = process_candidates
         .into_iter()
         .chain(user_candidates)
+        .collect();
+    clamp_overlapping_modules(&mut candidates, &mut soft_errors);
+
+    candidates
+        .into_iter()
         .map(ModuleCandidate::into_module)
         .collect()
+}
+
+/// Shortens any module whose image overlaps another entry of the module list.
+fn clamp_overlapping_modules(
+    modules: &mut [ModuleCandidate],
+    mut soft_errors: impl WriteErrorList<ModuleResolveError>,
+) {
+    let mut claims: Vec<usize> = modules.iter().map(|module| module.base_address).collect();
+    claims.sort_unstable();
+
+    for module in modules {
+        let Some(&claim) = claims.iter().find(|&&claim| claim > module.base_address) else {
+            continue;
+        };
+        if claim < module.end_address {
+            // Clamping is typically harmless *unless* the stuff that's cut
+            // out is executable code.
+            if claim < module.code_end {
+                soft_errors.push(ModuleResolveError::ModuleImageClamped {
+                    name: module.name.clone().unwrap_or_default(),
+                    base_address: module.base_address,
+                    code_end: module.code_end,
+                    clamped_to: claim,
+                });
+            }
+            module.end_address = claim;
+        }
+    }
 }
 
 /// Where the object behind `mapping` was loaded.
