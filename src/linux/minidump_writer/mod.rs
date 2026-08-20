@@ -883,11 +883,11 @@ impl MinidumpWriter {
         for x in &mut stack_copy[0..offset] {
             *x = 0;
         }
-        let mut chunks = stack_copy[offset..].chunks_exact_mut(std::mem::size_of::<usize>());
+        let (chunks, remainder) = stack_copy[offset..].as_chunks_mut::<{ size_of::<usize>() }>();
 
         // Apply sanitization to each complete pointer-aligned word in the
         // stack.
-        for sp in &mut chunks {
+        for sp in chunks {
             let addr = usize::from_ne_bytes(sp.to_vec().as_slice().try_into()?);
             let addr_signed = isize::from_ne_bytes(sp.to_vec().as_slice().try_into()?);
 
@@ -918,7 +918,7 @@ impl MinidumpWriter {
         }
         // Zero any partial word at the top of the stack, if alignment is
         // such that that is required.
-        for sp in chunks.into_remainder() {
+        for sp in remainder {
             *sp = 0;
         }
         Ok(())
