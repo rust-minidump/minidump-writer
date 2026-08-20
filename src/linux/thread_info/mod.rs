@@ -54,7 +54,7 @@ cfg_if::cfg_if! {
     }
 }
 
-fn get_ppid_and_tgid(process_inspector: &ProcessInspector, tid: Pid) -> Result<(Pid, Pid)> {
+fn get_ppid_and_tgid(process_inspector: &dyn ProcessInspector, tid: Pid) -> Result<(Pid, Pid)> {
     let mut ppid = -1;
     let mut tgid = -1;
 

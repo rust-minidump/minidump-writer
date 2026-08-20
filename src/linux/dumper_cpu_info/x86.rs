@@ -24,7 +24,7 @@ impl CpuInfoEntry {
 }
 
 pub fn write_cpu_information(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     sys_info: &mut MDRawSystemInfo,
 ) -> Result<()> {
     let vendor_id_name = "vendor_id";

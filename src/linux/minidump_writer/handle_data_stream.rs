@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{linux::process_inspection, mem_writer::MemoryWriter},
+    crate::{linux::process_inspection::ProcessInspector, mem_writer::MemoryWriter},
     std::{
         ffi::OsStr,
         mem,
@@ -9,7 +9,7 @@ use {
 };
 
 fn descriptor_from_path(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     buffer: &mut DumpBuf,
     path: &Path,
 ) -> Option<MDRawHandleDescriptor> {
@@ -73,7 +73,7 @@ impl MinidumpWriter {
             .filter_map(|filename| filename.ok())
             .filter_map(|filename| {
                 let path = proc_fd_path.join(filename);
-                descriptor_from_path(&self.process_inspector, buffer, &path)
+                descriptor_from_path(self.process_inspector.as_ref(), buffer, &path)
             })
             .collect();
         let number_of_descriptors = descriptors.len() as u32;

@@ -133,7 +133,7 @@ mod linux {
             .unwrap();
 
         let stack_res = MinidumpWriter::copy_from_process(
-            &dumper.process_inspector,
+            dumper.process_inspector.as_ref(),
             stack_var,
             std::mem::size_of::<usize>(),
         )?;
@@ -141,7 +141,7 @@ mod linux {
         test!(stack_res == expected_stack, "stack var not correct");
 
         let heap_res = MinidumpWriter::copy_from_process(
-            &dumper.process_inspector,
+            dumper.process_inspector.as_ref(),
             heap_var,
             std::mem::size_of::<usize>(),
         )?;

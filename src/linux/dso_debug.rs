@@ -97,7 +97,7 @@ pub struct RDebug {
 }
 
 pub fn write_dso_debug_stream(
-    process_inspector: &ProcessInspector,
+    process_inspector: &dyn ProcessInspector,
     buffer: &mut Buffer,
     auxv: &AuxvDumpInfo,
 ) -> Result<MDRawDirectory> {
