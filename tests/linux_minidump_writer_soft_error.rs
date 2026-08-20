@@ -3,7 +3,6 @@
 use common::*;
 use minidump::Minidump;
 use minidump_writer::{FailSpotName, minidump_writer::MinidumpWriterConfig};
-use serde_json as json;
 
 mod common;
 
@@ -30,27 +29,6 @@ fn soft_error_stream() {
     // Ensure the minidump has a MozSoftErrors present
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
     read_minidump_soft_errors_or_panic(&dump);
-}
-
-fn visit_json_terminals<V>(json: &json::Value, path: &mut Vec<String>, visit: &mut V)
-where
-    V: FnMut(&[String], &json::Value),
-{
-    if let Some(obj) = json.as_object() {
-        for (key, value) in obj.iter() {
-            path.push(key.clone());
-            visit_json_terminals(value, path, visit);
-            path.pop();
-        }
-        return;
-    }
-    if let Some(arr) = json.as_array() {
-        for value in arr.iter() {
-            visit_json_terminals(value, path, visit);
-        }
-        return;
-    }
-    visit(path, json);
 }
 
 #[test]
@@ -81,50 +59,20 @@ fn soft_error_stream_content() {
     child.kill().expect("Failed to kill process");
     child.wait().expect("Failed to wait on killed process");
 
-    // Ensure the MozSoftErrors stream contains the expected errors
     let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
 
-    let actual_json = read_minidump_soft_errors_or_panic(&dump);
-
-    let mut stop_process_error_found = false;
-    let mut missing_auxv_error_found = false;
-    let mut thread_name_error_found = false;
-    let mut suspend_thread_error_found = false;
-    let mut cpu_info_error_found = false;
-
-    let mut path = Vec::new();
-
-    visit_json_terminals(&actual_json, &mut path, &mut |path, value| {
-        if value.as_i64() == Some(libc::EPERM.into())
-            && path.contains(&"StopProcessFailed".to_string())
-        {
-            stop_process_error_found = true;
-        }
-        if value.as_str() == Some("InvalidFormat")
-            && path.contains(&"FillMissingAuxvInfoErrors".to_string())
-        {
-            missing_auxv_error_found = true;
-        }
-        if path.contains(&"ReadThreadNameFailed".to_string()) {
-            thread_name_error_found = true;
-        }
-        if value.as_i64() == Some(libc::EPERM.into())
-            && path.contains(&"SuspendThreadsErrors".to_string())
-        {
-            suspend_thread_error_found = true;
-        }
-        if value.as_i64() == Some(libc::EPERM.into())
-            && path.contains(&"WriteCpuInformationFailed".to_string())
-        {
-            cpu_info_error_found = true;
-        }
-    });
-
-    assert!(stop_process_error_found);
-    assert!(missing_auxv_error_found);
-    assert!(thread_name_error_found);
-    assert!(suspend_thread_error_found);
-    assert!(cpu_info_error_found);
+    // Ensure the MozSoftErrors stream contains the expected errors
+    assert_minidump_soft_errors_match_all(
+        &dump,
+        &[
+            ErrorPattern::value(libc::EPERM).with_ancestor("StopProcessFailed"),
+            // AuxvError is not reachable so use the string form instead
+            ErrorPattern::value("InvalidFormat").with_ancestor("FillMissingAuxvInfoErrors"),
+            ErrorPattern::value("ReadThreadNameFailed"),
+            ErrorPattern::value(libc::EPERM).with_ancestor("SuspendThreadsErrors"),
+            ErrorPattern::value(libc::EPERM).with_ancestor("WriteCpuInformationFailed"),
+        ],
+    );
 }
 
 #[test]
