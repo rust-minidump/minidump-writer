@@ -201,14 +201,14 @@ impl Backend {
     fn get_regs<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
         self.ptrace_getregset::<T>(tid).or_else(|e| {
             if T::LEGACY_REQUEST.is_some() {
-                self.ptrace_getregs::<T>(tid)
+                self.ptrace_getregs_legacy::<T>(tid)
             } else {
                 Err(e)
             }
         })
     }
 
-    fn ptrace_getregs<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+    fn ptrace_getregs_legacy<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
         let Some(request) = T::LEGACY_REQUEST else {
             return Err(Error::NotSupported);
         };
@@ -240,7 +240,7 @@ impl Backend {
             ptrace(
                 libc::PTRACE_GETREGSET,
                 tid,
-                T::NOTE as *mut _,
+                T::NOTE.0 as *mut _,
                 (&raw mut io).cast(),
             )
         })

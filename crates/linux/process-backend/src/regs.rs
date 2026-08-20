@@ -27,6 +27,10 @@ pub(crate) type PtraceRequestType = core::ffi::c_uint;
 #[cfg(not(target_env = "gnu"))]
 pub(crate) type PtraceRequestType = core::ffi::c_int;
 
+/// A kernel-defined constant that names a register set as part of a call to
+/// ptrace(PTRACE_GETREGSET)
+pub(crate) struct RegSetNote(pub(crate) usize);
+
 /// Describes a register-set buffer that may be populated by `ptrace`.
 ///
 /// # Safety
@@ -50,7 +54,8 @@ pub(crate) type PtraceRequestType = core::ffi::c_int;
 ///
 /// 5. `Output` must not require drop glue.
 pub(crate) unsafe trait PtraceRegisterSet {
-    const NOTE: usize;
+    const NOTE: RegSetNote;
+    /// Legacy ptrace request to fall back on if PTRACE_GETREGSET fails
     const LEGACY_REQUEST: Option<PtraceRequestType>;
     const KERNEL_SIZE: usize;
     type Output: Copy + Default;
@@ -60,10 +65,10 @@ pub(crate) enum GenRegsTag {}
 pub(crate) enum FpRegsTag {}
 
 // https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/uapi/linux/elf.h?h=v7.1.8
-const NT_PRSTATUS: usize = 1;
-const NT_PRFPREG: usize = 2;
-const NT_ARM_VFP: usize = 0x400;
-const NT_PRXFPREG: usize = 0x46e62b7f;
+const NT_PRSTATUS: RegSetNote = RegSetNote(1);
+const NT_PRFPREG: RegSetNote = RegSetNote(2);
+const NT_ARM_VFP: RegSetNote = RegSetNote(0x400);
+const NT_PRXFPREG: RegSetNote = RegSetNote(0x46e62b7f);
 
 pub use imp::*;
 
@@ -97,14 +102,14 @@ mod imp {
     }
 
     unsafe impl PtraceRegisterSet for GenRegsTag {
-        const NOTE: usize = NT_PRSTATUS;
+        const NOTE: RegSetNote = NT_PRSTATUS;
         const LEGACY_REQUEST: Option<PtraceRequestType> = None;
         const KERNEL_SIZE: usize = size_of::<user_pt_regs>();
         type Output = user_pt_regs;
     }
 
     unsafe impl PtraceRegisterSet for FpRegsTag {
-        const NOTE: usize = NT_PRFPREG;
+        const NOTE: RegSetNote = NT_PRFPREG;
         const LEGACY_REQUEST: Option<PtraceRequestType> = None;
         const KERNEL_SIZE: usize = size_of::<user_fpsimd_state>();
         type Output = user_fpsimd_state;
@@ -134,20 +139,18 @@ mod imp {
     const ARM_VFPREGS_SIZE: usize = 32 * 8 /*fpregs*/ + 4 /*fpscr*/;
 
     // https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/arch/arm/include/asm/user.h?h=v7.1.8#n85
+    //
+    // Note: This struct has 4 bytes of padding at the end due to its alignment requirements, but
+    // the kernel does not write those 4 bytes as part of a ptrace call - it will only write 260
+    // bytes and not 264 (the size of this struct with trailing padding).
+    //
+    // We capture that by setting the `KERNEL_SIZE` to `ARM_VFPREGS_SIZE` instead of
+    // `size_of::<user_vfp>()`.
     #[repr(C)]
     #[derive(Clone, Copy, Debug, Default, serde::Deserialize, serde::Serialize)]
     pub struct user_vfp {
         pub fpregs: [u64; 32],
         pub fpscr: u32,
-
-        // Note: not explicit in the kernel's declaration of this struct.
-        //
-        // Technically, the kernel copies this struct as-if it's 65 u32s even though its
-        // C layout puts it at 66 u32s with padding. But, it's permitted to pass in a buffer
-        // larger than necessary to ptrace(PTRACE_GETREGSET), so that's why code that uses the
-        // C definition of the structure works just fine.
-        #[serde(skip)]
-        pub __padding: u32,
     }
 
     // https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/arch/arm/include/asm/ptrace.h?h=v7.1.8#n16
@@ -158,14 +161,14 @@ mod imp {
     }
 
     unsafe impl PtraceRegisterSet for GenRegsTag {
-        const NOTE: usize = NT_PRSTATUS;
+        const NOTE: RegSetNote = NT_PRSTATUS;
         const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETREGS);
         const KERNEL_SIZE: usize = size_of::<pt_regs>();
         type Output = pt_regs;
     }
 
     unsafe impl PtraceRegisterSet for FpRegsTag {
-        const NOTE: usize = NT_ARM_VFP;
+        const NOTE: RegSetNote = NT_ARM_VFP;
         const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETVFPREGS);
         const KERNEL_SIZE: usize = ARM_VFPREGS_SIZE;
         type Output = user_vfp;
@@ -270,21 +273,21 @@ mod imp {
         }
 
         unsafe impl PtraceRegisterSet for GenRegsTag {
-            const NOTE: usize = NT_PRSTATUS;
+            const NOTE: RegSetNote = NT_PRSTATUS;
             const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETREGS);
             const KERNEL_SIZE: usize = size_of::<user_regs_struct>();
             type Output = user_regs_struct;
         }
 
         unsafe impl PtraceRegisterSet for FpRegsTag {
-            const NOTE: usize = NT_PRFPREG;
+            const NOTE: RegSetNote = NT_PRFPREG;
             const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETFPREGS);
             const KERNEL_SIZE: usize = size_of::<user_i387_ia32_struct>();
             type Output = user_i387_ia32_struct;
         }
 
         unsafe impl PtraceRegisterSet for FpxRegsTag {
-            const NOTE: usize = NT_PRXFPREG;
+            const NOTE: RegSetNote = NT_PRXFPREG;
             const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETFPXREGS);
             const KERNEL_SIZE: usize = size_of::<fxregs_state>();
             type Output = fxregs_state;
@@ -366,14 +369,14 @@ mod imp {
         }
 
         unsafe impl PtraceRegisterSet for GenRegsTag {
-            const NOTE: usize = NT_PRSTATUS;
+            const NOTE: RegSetNote = NT_PRSTATUS;
             const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETREGS);
             const KERNEL_SIZE: usize = size_of::<user_regs_struct>();
             type Output = user_regs_struct;
         }
 
         unsafe impl PtraceRegisterSet for FpRegsTag {
-            const NOTE: usize = NT_PRFPREG;
+            const NOTE: RegSetNote = NT_PRFPREG;
             const LEGACY_REQUEST: Option<PtraceRequestType> = Some(PTRACE_GETFPREGS);
             const KERNEL_SIZE: usize = size_of::<fxregs_state>();
             type Output = fxregs_state;
