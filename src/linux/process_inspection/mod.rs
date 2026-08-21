@@ -1,7 +1,7 @@
 use super as linux;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
 use linux::maps_reader;
-use process_backend::{local, regs::*};
+use process_backend::{ProcessReader as _, local, regs::*};
 use process_reader::{CopyFromProcessError, ProcessReader, ProcessReaderBackend};
 use std::{
     borrow::Cow,
@@ -22,8 +22,9 @@ pub mod process_reader;
 
 pub(crate) type Result<T> = core::result::Result<T, Error>;
 
-// This is an arbitrary choice and may need to be tweaked
+// These are both arbitrary choices and may need to be tweaked
 const MAX_PATH_LEN: usize = 65536;
+const MAX_DIRECTORY_NAME_LENGTH: usize = 256;
 
 pub(crate) fn local(pid: libc::pid_t) -> Box<dyn ProcessInspector> {
     set_process_backend_drop_fail_handler();
@@ -37,14 +38,14 @@ pub trait ProcessInspector: core::fmt::Debug {
     fn continue_process(&self) -> Result<()>;
     fn suspend_thread(&self, tid: libc::pid_t) -> Result<()>;
     fn resume_thread(&self, tid: libc::pid_t) -> Result<()>;
-    fn map_module_into_memory(
-        &self,
+    fn map_module_into_memory<'a>(
+        &'a self,
         path: PathBuf,
         offset: u64,
-    ) -> Result<MappedModuleMemoryReader>;
+    ) -> Result<MappedModuleMemoryReader<'a>>;
     fn stat_file(&self, path: PathBuf) -> Result<libc::stat>;
-    fn read_file(&self, path: PathBuf) -> Result<FileReader>;
-    fn read_dir(&self, path: PathBuf) -> Result<DirReader>;
+    fn read_file<'a>(&'a self, path: PathBuf) -> Result<FileReader<'a>>;
+    fn read_dir<'a>(&'a self, path: PathBuf) -> Result<DirReader<'a>>;
     fn read_link(&self, path: PathBuf) -> Result<PathBuf>;
     fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs>;
     fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs>;
@@ -60,95 +61,94 @@ pub trait ProcessInspector: core::fmt::Debug {
     fn fail_one_syscall_with(&self, errno: core::ffi::c_int);
 }
 
-impl ProcessInspector for local::Backend {
+impl<B: process_backend::Backend> ProcessInspector for B {
     fn process_reader<'a>(&'a self) -> ProcessReader<'a> {
         ProcessReader::new(self)
     }
 
     fn pid(&self) -> Result<libc::pid_t> {
-        Ok(local::Backend::pid(self))
+        B::pid(self).map_err(Error::Backend)
     }
 
     fn stop_process(&self) -> Result<()> {
-        local::Backend::stop_process(self).map_err(Error::Local)
+        B::stop_process(self).map_err(Error::Backend)
     }
 
     fn continue_process(&self) -> Result<()> {
-        local::Backend::continue_process(self).map_err(Error::Local)
+        B::continue_process(self).map_err(Error::Backend)
     }
 
     fn suspend_thread(&self, tid: libc::pid_t) -> Result<()> {
-        local::Backend::suspend_thread(self, tid).map_err(Error::Local)
+        B::suspend_thread(self, tid).map_err(Error::Backend)
     }
 
     fn resume_thread(&self, tid: libc::pid_t) -> Result<()> {
-        local::Backend::resume_thread(self, tid).map_err(Error::Local)
+        B::resume_thread(self, tid).map_err(Error::Backend)
     }
 
-    fn map_module_into_memory(
-        &self,
+    fn map_module_into_memory<'a>(
+        &'a self,
         path: PathBuf,
         offset: u64,
-    ) -> Result<MappedModuleMemoryReader> {
+    ) -> Result<MappedModuleMemoryReader<'a>> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
-        let reader =
-            local::Backend::map_module_into_memory(self, &c_path, offset).map_err(Error::Local)?;
-        Ok(MappedModuleMemoryReader(reader))
+        let reader = B::map_module_into_memory(self, &c_path, offset).map_err(Error::Backend)?;
+        Ok(MappedModuleMemoryReader(Box::new(reader)))
     }
 
     fn stat_file(&self, path: PathBuf) -> Result<libc::stat> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
-        local::Backend::stat_file(self, &c_path).map_err(Error::Local)
+        B::stat_file(self, &c_path).map_err(Error::Backend)
     }
 
-    fn read_file(&self, path: PathBuf) -> Result<FileReader> {
+    fn read_file<'a>(&'a self, path: PathBuf) -> Result<FileReader<'a>> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
-        let reader = local::Backend::read_file(self, &c_path).map_err(Error::Local)?;
-        Ok(FileReader(reader))
+        let reader = B::read_file(self, &c_path).map_err(Error::Backend)?;
+        Ok(FileReader(Box::new(reader)))
     }
 
-    fn read_dir(&self, path: PathBuf) -> Result<DirReader> {
+    fn read_dir<'a>(&'a self, path: PathBuf) -> Result<DirReader<'a>> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
-        let reader = local::Backend::read_dir(self, &c_path).map_err(Error::Local)?;
-        Ok(DirReader(reader))
+        let reader = B::read_dir(self, &c_path).map_err(Error::Backend)?;
+        Ok(DirReader(Box::new(reader)))
     }
 
     fn read_link(&self, path: PathBuf) -> Result<PathBuf> {
         let c_path = CString::new(path.into_os_string().into_vec()).unwrap();
         let mut buf = vec![0u8; MAX_PATH_LEN];
-        let len = local::Backend::read_link(self, &c_path, &mut buf).map_err(Error::Local)?;
+        let len = B::read_link(self, &c_path, &mut buf).map_err(Error::Backend)?;
         buf.truncate(len);
         Ok(PathBuf::from(OsString::from_vec(buf)))
     }
     fn get_gen_regs(&self, tid: libc::pid_t) -> Result<GenRegs> {
-        local::Backend::get_gen_regs(self, tid).map_err(Error::Local)
+        B::get_gen_regs(self, tid).map_err(Error::Backend)
     }
 
     fn get_fp_regs(&self, tid: libc::pid_t) -> Result<FpRegs> {
-        local::Backend::get_fp_regs(self, tid).map_err(Error::Local)
+        B::get_fp_regs(self, tid).map_err(Error::Backend)
     }
 
     #[cfg(target_arch = "x86")]
     fn get_fpx_regs(&self, tid: libc::pid_t) -> Result<FpxRegs> {
-        local::Backend::get_fpx_regs(self, tid).map_err(Error::Local)
+        B::get_fpx_regs(self, tid).map_err(Error::Backend)
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn ptrace_peekuser(&self, addr: usize) -> Result<[u8; PTRACE_DATA_LEN]> {
-        local::Backend::ptrace_peekuser(self, addr).map_err(Error::Local)
+        B::ptrace_peekuser(self, addr).map_err(Error::Backend)
     }
 
     fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> Result<()> {
-        local::Backend::force_process_reader_kind(self, kind).map_err(Error::Local)
+        B::force_process_reader_kind(self, kind).map_err(Error::Backend)
     }
 
     #[doc(hidden)]
     fn fail_one_syscall_with(&self, errno: c_int) {
-        local::Backend::fail_one_syscall_with(self, errno)
+        B::fail_one_syscall_with(self, errno)
     }
 }
 
-impl ProcessReaderBackend for local::Backend {
+impl<B: process_backend::Backend> ProcessReaderBackend for B {
     fn process_inspector(&self) -> &dyn ProcessInspector {
         self
     }
@@ -158,72 +158,68 @@ impl ProcessReaderBackend for local::Backend {
         src: usize,
         dst: &mut [u8],
     ) -> core::result::Result<usize, CopyFromProcessError> {
-        local::Backend::process_reader(self)
+        B::process_reader(self)
             .read_at(src, dst)
-            .map_err(|e| CopyFromProcessError::Backend(Error::Local(e)))
+            .map_err(|e| CopyFromProcessError::Backend(Error::Backend(e)))
     }
 }
 
 #[derive(Debug)]
-pub struct FileReader(local::FileReader);
+pub struct FileReader<'a>(Box<dyn process_backend::FileReader + 'a>);
 
-impl io::Read for FileReader {
+impl<'a> io::Read for FileReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.0
             .read(buf)
-            .map_err(Error::Local)
+            .map_err(Error::Backend)
             .map_err(io::Error::other)
     }
 }
 
 #[derive(Debug)]
-pub struct DirReader(local::DirReader);
+pub struct DirReader<'a>(Box<dyn process_backend::DirReader + 'a>);
 
-impl Iterator for DirReader {
+impl<'a> Iterator for DirReader<'a> {
     type Item = Result<OsString>;
     fn next(&mut self) -> Option<Self::Item> {
-        Some(
-            self.0
-                .read_next_name()
-                .transpose()?
-                .map(<[u8]>::to_vec)
-                .map(OsString::from_vec)
-                .map_err(Error::Local),
-        )
+        let mut buf = vec![0; MAX_DIRECTORY_NAME_LENGTH];
+        match self.0.read_next_name(&mut buf).map_err(Error::Backend) {
+            Ok(0) => None,
+            Ok(len) => {
+                buf.truncate(len);
+                Some(Ok(OsString::from_vec(buf)))
+            }
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct MappedModuleMemoryReader(local::MappedModuleMemoryReader);
+pub struct MappedModuleMemoryReader<'a>(Box<dyn process_backend::MappedModuleMemoryReader + 'a>);
 
-impl MappedModuleMemoryReader {
+impl<'a> MappedModuleMemoryReader<'a> {
     pub fn read_exact_at(&self, mut offset: usize, mut buf: &mut [u8]) -> Result<()> {
         if buf.is_empty() {
             return Ok(());
         }
 
         loop {
-            let bytes = self.0.read_at(offset, buf.len()).map_err(Error::Local)?;
-            if bytes.is_empty() {
-                return Err(Error::UnexpectedEndOfBuffer);
-            }
-            let (dst, tail) = buf.split_at_mut(bytes.len());
-            dst.copy_from_slice(bytes);
-            if tail.is_empty() {
+            let bytes_read = self.0.read_at(offset, buf).map_err(Error::Backend)?;
+            if bytes_read == buf.len() {
                 return Ok(());
             }
             offset = offset
-                .checked_add(dst.len())
+                .checked_add(bytes_read)
                 .ok_or(Error::AddressOverflowed)?;
-            buf = tail;
+            buf = &mut buf[bytes_read..];
         }
     }
     pub fn len(&self) -> Result<usize> {
-        Ok(self.0.len())
+        self.0.len().map_err(Error::Backend)
     }
 }
 
-impl ReadModuleMemory for MappedModuleMemoryReader {
+impl<'a> ReadModuleMemory for MappedModuleMemoryReader<'a> {
     fn read(
         &self,
         offset: u64,
@@ -266,8 +262,8 @@ impl ReadModuleMemory for MappedModuleMemoryReader {
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum Error {
-    #[error("an error occurred running a syscall directly")]
-    Local(#[source] local::Error),
+    #[error("an error occurred running the backend")]
+    Backend(#[source] process_backend::Error),
     #[error("an address overflowed")]
     AddressOverflowed,
     #[error("unexpected end of buffer reached")]

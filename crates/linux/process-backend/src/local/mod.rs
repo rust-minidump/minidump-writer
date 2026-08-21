@@ -318,6 +318,91 @@ impl Backend {
     }
 }
 
+impl crate::Backend for Backend {
+    type ProcessReader<'a> = ProcessReader<'a>;
+
+    type FileReader<'a> = FileReader;
+
+    type DirReader<'a> = DirReader;
+
+    type MappedModuleMemoryReader<'a> = MappedModuleMemoryReader;
+
+    fn pid(&self) -> crate::Result<libc::pid_t> {
+        Ok(Backend::pid(self))
+    }
+
+    fn process_reader<'a>(&'a self) -> Self::ProcessReader<'a> {
+        Backend::process_reader(self)
+    }
+
+    fn stop_process(&self) -> crate::Result<()> {
+        Backend::stop_process(self).map_err(crate::Error::Local)
+    }
+
+    fn continue_process(&self) -> crate::Result<()> {
+        Backend::continue_process(self).map_err(crate::Error::Local)
+    }
+
+    fn suspend_thread(&self, tid: libc::pid_t) -> crate::Result<()> {
+        Backend::suspend_thread(self, tid).map_err(crate::Error::Local)
+    }
+
+    fn resume_thread(&self, tid: libc::pid_t) -> crate::Result<()> {
+        Backend::resume_thread(self, tid).map_err(crate::Error::Local)
+    }
+
+    fn map_module_into_memory<'a>(
+        &'a self,
+        path: &CStr,
+        offset: u64,
+    ) -> crate::Result<Self::MappedModuleMemoryReader<'a>> {
+        Backend::map_module_into_memory(self, path, offset).map_err(crate::Error::Local)
+    }
+
+    fn stat_file(&self, path: &CStr) -> crate::Result<libc::stat> {
+        Backend::stat_file(self, path).map_err(crate::Error::Local)
+    }
+
+    fn read_file<'a>(&'a self, path: &CStr) -> crate::Result<Self::FileReader<'a>> {
+        Backend::read_file(self, path).map_err(crate::Error::Local)
+    }
+
+    fn read_dir<'a>(&'a self, path: &CStr) -> crate::Result<Self::DirReader<'a>> {
+        Backend::read_dir(self, path).map_err(crate::Error::Local)
+    }
+
+    fn read_link(&self, path: &CStr, buf: &mut [u8]) -> crate::Result<usize> {
+        Backend::read_link(self, path, buf).map_err(crate::Error::Local)
+    }
+
+    fn get_gen_regs(&self, tid: libc::pid_t) -> crate::Result<GenRegs> {
+        Backend::get_gen_regs(self, tid).map_err(crate::Error::Local)
+    }
+
+    fn get_fp_regs(&self, tid: libc::pid_t) -> crate::Result<FpRegs> {
+        Backend::get_fp_regs(self, tid).map_err(crate::Error::Local)
+    }
+
+    #[cfg(target_arch = "x86")]
+    fn get_fpx_regs(&self, tid: libc::pid_t) -> crate::Result<FpxRegs> {
+        Backend::get_fpx_regs(self, tid).map_err(crate::Error::Local)
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn ptrace_peekuser(&self, addr: usize) -> crate::Result<[u8; crate::PTRACE_DATA_LEN]> {
+        Backend::ptrace_peekuser(self, addr).map_err(crate::Error::Local)
+    }
+
+    fn force_process_reader_kind(&mut self, kind: ProcessReaderKind) -> crate::Result<()> {
+        Backend::force_process_reader_kind(self, kind).map_err(crate::Error::Local)
+    }
+
+    #[cfg(feature = "testing")]
+    fn fail_one_syscall_with(&self, errno: c_int) {
+        Backend::fail_one_syscall_with(self, errno)
+    }
+}
+
 #[derive(Debug)]
 pub struct FileReader(OwnedFd);
 
@@ -342,6 +427,12 @@ impl FileReader {
             return Err(Error::ReadFileFailed(errno()));
         }
         Ok(rv.try_into().unwrap())
+    }
+}
+
+impl crate::FileReader for FileReader {
+    fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+        FileReader::read(self, buf).map_err(crate::Error::Local)
     }
 }
 
@@ -394,12 +485,31 @@ impl Drop for DirReader {
     }
 }
 
+impl crate::DirReader for DirReader {
+    fn read_next_name(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+        let Some(name) = DirReader::read_next_name(self).map_err(crate::Error::Local)? else {
+            return Ok(0);
+        };
+        let buf = buf
+            .get_mut(0..name.len())
+            .ok_or(crate::Error::BufferTooSmall)?;
+        buf.copy_from_slice(name);
+        Ok(name.len())
+    }
+}
+
 #[derive(Debug)]
 pub struct ProcessReader<'a>(&'a process_reader::ProcessReader);
 
 impl<'a> ProcessReader<'a> {
     pub fn read_at(&self, address: usize, buf: &mut [u8]) -> Result<usize> {
         self.0.read_at(address, buf).map_err(Error::ProcessReader)
+    }
+}
+
+impl<'a> crate::ProcessReader for ProcessReader<'a> {
+    fn read_at(&self, address: usize, buf: &mut [u8]) -> crate::Result<usize> {
+        ProcessReader::read_at(self, address, buf).map_err(crate::Error::Local)
     }
 }
 
