@@ -14,6 +14,7 @@ use {
         },
         minidump_format::*,
     },
+    plain::Plain,
 };
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
@@ -75,19 +76,19 @@ pub enum SectionDsoDebugError {
 pub struct LinkMap {
     /// Difference between the addresses in the ELF file and the addresses in
     /// memory.
-    l_addr: ElfAddr,
+    pub(crate) l_addr: ElfAddr,
     /// Address of the absolute file name the object was found in.
     /// WAS: `char *`
-    l_name: usize,
+    pub(crate) l_name: usize,
     /// Address of the dynamic section of the shared object.
     /// WAS: `ElfW(Dyn) *`
-    l_ld: usize,
+    pub(crate) l_ld: usize,
     /// Address of the next node in the chain of loaded objects.
     /// WAS: `struct link_map *`
-    l_next: usize,
+    pub(crate) l_next: usize,
     /// Address of the previous node in the chain of loaded objects.
     /// WAS: `struct link_map *`
-    l_prev: usize,
+    pub(crate) l_prev: usize,
 }
 
 /// Shared object loading information for the debugger.
@@ -104,23 +105,28 @@ pub struct LinkMap {
 #[repr(C)]
 pub struct RDebug {
     /// Version number for this protocol.
-    r_version: libc::c_int,
+    pub(crate) r_version: libc::c_int,
     /// Address of the head of the chain of loaded objects.
     /// WAS: `struct link_map *`
-    r_map: usize,
+    pub(crate) r_map: usize,
     /// Address of a function internal to the run-time linker, that will always
     /// be called when the linker begins to map in a library or unmap it, and
     /// again when the mapping change is complete. The debugger can set a
     /// breakpoint at this address if it wants to notice shared object mapping
     /// changes.
-    r_brk: ElfAddr,
+    pub(crate) r_brk: ElfAddr,
     /// Which mapping change is taking place when `r_brk` is called: 0
     /// (`RT_CONSISTENT`, the change is complete), 1 (`RT_ADD`, beginning to add
     /// a new object) or 2 (`RT_DELETE`, beginning to remove an object mapping).
-    r_state: libc::c_int,
+    pub(crate) r_state: libc::c_int,
     /// Base address the linker is loaded at.
-    r_ldbase: ElfAddr,
+    pub(crate) r_ldbase: ElfAddr,
 }
+
+// Safety: both are `repr(C)` aggregates of plain integers, so every bit pattern
+// we could read out of the target process is a valid value.
+unsafe impl Plain for LinkMap {}
+unsafe impl Plain for RDebug {}
 
 pub fn write_dso_debug_stream(
     process_inspector: &dyn ProcessInspector,
@@ -175,22 +181,15 @@ pub fn write_dso_debug_stream(
     let dyn_size = std::mem::size_of::<elf::dynamic::Dyn>();
     let mut r_debug = 0usize;
     let mut dynamic_length = 0usize;
+    let memory_reader = process_inspector.process_reader();
 
     // The dynamic linker makes information available that helps gdb find all
     // DSOs loaded into the program. If this information is indeed available,
     // dump it to a MD_LINUX_DSO_DEBUG stream.
     loop {
-        let dyn_data = MinidumpWriter::copy_from_process(
-            process_inspector,
-            dyn_addr as usize + dynamic_length,
-            dyn_size,
-        )?;
+        let dyn_struct: elf::dynamic::Dyn =
+            memory_reader.read_pod(dyn_addr as usize + dynamic_length)?;
         dynamic_length += dyn_size;
-
-        // goblin::elf::Dyn doesn't have padding bytes
-        let (head, body, _tail) = unsafe { dyn_data.align_to::<elf::dynamic::Dyn>() };
-        assert!(head.is_empty(), "Data was not aligned");
-        let dyn_struct = &body[0];
 
         #[allow(clippy::useless_conversion)]
         let d_tag = u64::from(dyn_struct.d_tag);
@@ -205,38 +204,18 @@ pub fn write_dso_debug_stream(
     // loaded DSOs.
     // Our list of DSOs potentially is different from the ones in the crashing
     // process. So, we have to be careful to never dereference pointers
-    // directly. Instead, we use CopyFromProcess() everywhere.
+    // directly. Instead, we copy every node out of the process.
     // See <link.h> for a more detailed discussion of the how the dynamic
     // loader communicates with debuggers.
-
-    let debug_entry_data = MinidumpWriter::copy_from_process(
-        process_inspector,
-        r_debug,
-        std::mem::size_of::<RDebug>(),
-    )?;
-
-    // goblin::elf::Dyn doesn't have padding bytes
-    let (head, body, _tail) = unsafe { debug_entry_data.align_to::<RDebug>() };
-    assert!(head.is_empty(), "Data was not aligned");
-    let debug_entry = &body[0];
+    let debug_entry: RDebug = memory_reader.read_pod(r_debug)?;
 
     // Count the number of loaded DSOs
     let mut dso_vec = Vec::new();
     let mut curr_map = debug_entry.r_map;
     while curr_map != 0 {
-        let link_map_data = MinidumpWriter::copy_from_process(
-            process_inspector,
-            curr_map,
-            std::mem::size_of::<LinkMap>(),
-        )?;
-
-        // LinkMap is repr(C) and doesn't have padding bytes, so this should be safe
-        let (head, body, _tail) = unsafe { link_map_data.align_to::<LinkMap>() };
-        assert!(head.is_empty(), "Data was not aligned");
-        let map = &body[0];
-
+        let map: LinkMap = memory_reader.read_pod(curr_map)?;
         curr_map = map.l_next;
-        dso_vec.push(map.clone());
+        dso_vec.push(map);
     }
 
     let mut linkmap_rva = u32::MAX;
