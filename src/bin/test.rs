@@ -6,15 +6,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux {
-    use {
-        super::*,
-        error_graph::ErrorList,
-        minidump_writer::{
-            LINUX_GATE_LIBRARY_NAME, ProcessReaderKind,
-            minidump_writer::{MinidumpWriter, MinidumpWriterConfig},
-        },
-        std::ptr,
-    };
+    use super::*;
+    use error_graph::ErrorList;
+    use minidump_writer::Pid;
+    use minidump_writer::minidump_writer::{MinidumpWriter, MinidumpWriterConfig};
+    use minidump_writer::remote_process_inspection as remote;
+    use minidump_writer::{LINUX_GATE_LIBRARY_NAME, ProcessReaderKind};
+    use std::{ptr, thread};
 
     macro_rules! test {
         ($x:expr, $errmsg:expr) => {
@@ -41,7 +39,7 @@ mod linux {
         let ppid = getppid();
         fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         Ok(())
     }
@@ -50,7 +48,7 @@ mod linux {
         let ppid = getppid();
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         test!(!dumper.threads.is_empty(), "No threads");
         test!(
@@ -75,7 +73,7 @@ mod linux {
         let ppid = getppid();
         let mut dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
 
         // We support 3 different methods of reading memory from another
@@ -158,7 +156,7 @@ mod linux {
 
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         dumper
             .find_mapping(addr1)
@@ -179,7 +177,7 @@ mod linux {
 
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
 
         let exe_mapping = dumper
@@ -200,7 +198,7 @@ mod linux {
         // Now check that PtraceDumper interpreted the mappings properly.
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(getppid(), getppid()).build_for_testing(&mut soft_errors)?
+            remote_mw_config(getppid(), getppid()).build_for_testing(&mut soft_errors)?
         );
         let mut mapping_count = 0;
         for map in &dumper.mappings {
@@ -225,7 +223,7 @@ mod linux {
         let ppid = getppid();
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         let linux_gate = dumper
             .mappings
@@ -243,7 +241,7 @@ mod linux {
         let ppid = getppid();
         let dumper = fail_on_soft_error!(
             soft_errors,
-            MinidumpWriterConfig::new(ppid, ppid).build_for_testing(&mut soft_errors)?
+            remote_mw_config(ppid, ppid).build_for_testing(&mut soft_errors)?
         );
         let linux_gate_loc = dumper.auxv.get_linux_gate_address().unwrap();
         test!(linux_gate_loc != 0, "linux_gate_loc == 0");
@@ -441,6 +439,65 @@ mod linux {
                 }
             }
             _ => Err("Unknown test option".into()),
+        }
+    }
+
+    fn remote_mw_config(process_id: Pid, blamed_thread: Pid) -> MinidumpWriterConfig {
+        let mut config = MinidumpWriterConfig::new(process_id, blamed_thread);
+        config.set_remote_transport(TransportForTestExecutor::new(process_id));
+        config
+    }
+
+    #[derive(Debug)]
+    struct TransportForTestExecutor {
+        transport: Option<remote::transport::postcard::Backend<remote::io::UnixStream, Vec<u8>>>,
+        thread_handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TransportForTestExecutor {
+        pub fn new(pid: Pid) -> Self {
+            let (backend_io, executor_io) =
+                remote::io::UnixStream::pair().expect("failed to create unix stream");
+
+            let thread_handle = thread::spawn(move || {
+                let args_buf = vec![0u8; remote::ARGS_BUFFER_LEN];
+                let transport = remote::transport::postcard::Executor::new(executor_io, args_buf);
+                let mut executor_resources = remote::ExecutorResources::const_new();
+                remote::executor::run(pid, transport, executor_resources.as_mut())
+                    .expect("an error occurred running the executor");
+            });
+
+            let output_buf = vec![0u8; remote::OUTPUT_BUFFER_LEN];
+            let transport = remote::transport::postcard::Backend::new(backend_io, output_buf);
+
+            TransportForTestExecutor {
+                transport: Some(transport),
+                thread_handle: Some(thread_handle),
+            }
+        }
+    }
+
+    impl Drop for TransportForTestExecutor {
+        fn drop(&mut self) {
+            drop(self.transport.take().unwrap());
+            if let Err(payload) = self.thread_handle.take().unwrap().join()
+                && !thread::panicking()
+            {
+                std::panic::resume_unwind(payload);
+            }
+        }
+    }
+
+    impl remote::transport::Backend for TransportForTestExecutor {
+        fn max_response_output_len(&self) -> usize {
+            self.transport.as_ref().unwrap().max_response_output_len()
+        }
+
+        fn send_request<'output, Req: serde::Serialize, Resp: serde::Deserialize<'output>>(
+            &'output mut self,
+            req: Req,
+        ) -> std::result::Result<Resp, remote::transport::BackendError> {
+            self.transport.as_mut().unwrap().send_request(req)
         }
     }
 }

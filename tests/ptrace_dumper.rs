@@ -1,19 +1,14 @@
 //! All of these tests are specific to ptrace
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
-use {
-    common::*,
-    error_graph::ErrorList,
-    minidump_writer::minidump_writer::MinidumpWriterConfig,
-    std::{
-        convert::TryInto,
-        ffi::c_void,
-        io::{BufRead, BufReader},
-        mem::size_of,
-        os::unix::process::ExitStatusExt,
-        ptr,
-    },
-};
+use common::*;
+use error_graph::ErrorList;
+use std::convert::TryInto;
+use std::ffi::c_void;
+use std::io::{BufRead, BufReader};
+use std::mem::size_of;
+use std::os::unix::process::ExitStatusExt;
+use std::ptr;
 
 mod common;
 
@@ -106,7 +101,7 @@ fn thread_list_from_parent() {
 
     let dumper = assert_no_soft_errors!(
         soft_errors,
-        MinidumpWriterConfig::new(pid, pid).build_for_testing(&mut soft_errors)
+        remote_mw_config(pid, pid).build_for_testing(&mut soft_errors)
     )
     .expect("Couldn't init dumper");
 
@@ -287,7 +282,7 @@ fn sanitizes_stack_copies() {
 
     let dumper = assert_no_soft_errors!(
         soft_errors,
-        MinidumpWriterConfig::new(pid, pid).build_for_testing(&mut soft_errors)
+        remote_mw_config(pid, pid).build_for_testing(&mut soft_errors)
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
