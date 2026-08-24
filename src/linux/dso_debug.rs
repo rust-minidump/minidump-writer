@@ -64,22 +64,6 @@ pub struct LinkMap {
 }
 
 // COPY from <link.h>
-/// This state value describes the mapping change taking place when
-/// the `r_brk' address is called.
-#[derive(Debug, Clone, Default)]
-#[allow(non_camel_case_types, unused)]
-#[repr(C)]
-enum RState {
-    /// Mapping change is complete.
-    #[default]
-    RT_CONSISTENT,
-    /// Beginning to add a new object.
-    RT_ADD,
-    /// Beginning to remove an object mapping.
-    RT_DELETE,
-}
-
-// COPY from <link.h>
 #[derive(Debug, Clone, Default)]
 #[repr(C)]
 pub struct RDebug {
@@ -92,7 +76,10 @@ pub struct RDebug {
     The debugger can set a breakpoint at this address if it wants to
     notice shared object mapping changes.  */
     r_brk: ElfAddr,
-    r_state: RState,
+    /// Which mapping change is taking place when `r_brk` is called: 0
+    /// (`RT_CONSISTENT`, the change is complete), 1 (`RT_ADD`, beginning to add
+    /// a new object) or 2 (`RT_DELETE`, beginning to remove an object mapping).
+    r_state: libc::c_int,
     r_ldbase: ElfAddr, /* Base address the linker is loaded at.  */
 }
 
