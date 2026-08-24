@@ -258,13 +258,14 @@ pub use linux::*;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[allow(unused)]
 mod linux {
-    use {
-        minidump_writer::{
-            CrashContextExt, Pid,
-            module_reader::{self, ModuleMemoryReadError, ReadModuleMemory},
-        },
-        std::borrow::Cow,
+    use minidump_writer::module_reader::{self, ModuleMemoryReadError, ReadModuleMemory};
+    use minidump_writer::remote_process_inspection;
+    use minidump_writer::remote_process_inspection::{
+        ExecutorResources, executor, io::UnixStream, transport,
     };
+    use minidump_writer::{CrashContextExt, Pid, minidump_writer::MinidumpWriterConfig};
+    use std::borrow::Cow;
+
     pub struct SliceModuleMemoryReader<'a>(pub &'a [u8]);
 
     impl<'a> ReadModuleMemory for SliceModuleMemoryReader<'a> {
@@ -317,6 +318,44 @@ mod linux {
                 #[cfg(not(target_arch = "arm"))]
                 float_state,
             },
+        }
+    }
+
+    pub struct RemoteConfigProvider {
+        config: Option<MinidumpWriterConfig>,
+        join_handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl RemoteConfigProvider {
+        pub fn new(process_id: Pid, blamed_thread: Pid) -> RemoteConfigProvider {
+            let (executor_io, backend_io) = UnixStream::pair().unwrap();
+            let join_handle = std::thread::spawn(move || {
+                let mut args_buf = vec![0u8; remote_process_inspection::ARGS_BUFFER_LEN];
+                let transport = transport::postcard::Executor::new(executor_io, &mut args_buf);
+                let mut resources = ExecutorResources::const_new();
+                executor::run(process_id, transport, resources.as_mut()).unwrap();
+            });
+
+            let mut output_buf = vec![0u8; remote_process_inspection::OUTPUT_BUFFER_LEN];
+            let transport = transport::postcard::Backend::new(backend_io, output_buf);
+            let mut config = MinidumpWriterConfig::new(process_id, blamed_thread);
+            config.set_remote_transport(transport);
+            RemoteConfigProvider {
+                config: Some(config),
+                join_handle: Some(join_handle),
+            }
+        }
+        pub fn provide(&mut self) -> MinidumpWriterConfig {
+            self.config.take().unwrap()
+        }
+        pub fn borrow_mut(&mut self) -> &mut MinidumpWriterConfig {
+            self.config.as_mut().unwrap()
+        }
+    }
+
+    impl Drop for RemoteConfigProvider {
+        fn drop(&mut self) {
+            self.join_handle.take().unwrap().join().unwrap();
         }
     }
 }

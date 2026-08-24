@@ -31,11 +31,11 @@ enum Context {
 }
 
 impl Context {
-    pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
-        let mut mw = MinidumpWriterConfig::new(pid, pid);
+    pub fn minidump_writer(&self, pid: Pid) -> RemoteConfigProvider {
+        let mut mw = RemoteConfigProvider::new(pid, pid);
         if self == &Context::With {
             let crash_context = get_dummy_crash_context(pid);
-            mw.set_crash_context(crash_context);
+            mw.borrow_mut().set_crash_context(crash_context);
         }
         mw
     }
@@ -74,7 +74,8 @@ contextual_test! {
             .tempfile()
             .unwrap();
 
-        let tmp = context.minidump_writer(pid);
+        let mut tmp = context.minidump_writer(pid);
+        let tmp = tmp.provide();
         let in_memory_buffer = tmp.write(&mut tmpfile).expect("Could not write minidump");
         child.kill().expect("Failed to kill process");
 
@@ -139,6 +140,7 @@ contextual_test! {
         };
 
         let mut tmp = context.minidump_writer(pid);
+        let mut tmp = tmp.provide();
 
         tmp.set_user_mapping_list(vec![entry]);
         tmp
@@ -213,7 +215,10 @@ fn module_list_properties() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriterConfig::new(pid, pid)
+    let mut provider = RemoteConfigProvider::new(pid, pid);
+
+    provider
+        .provide()
         .write(&mut tmpfile)
         .expect("could not write minidump");
 
@@ -275,6 +280,7 @@ contextual_test! {
         };
 
         let mut tmp = context.minidump_writer(pid);
+        let mut tmp = tmp.provide();
 
         tmp.set_app_memory(vec![app_memory]);
         tmp
@@ -325,6 +331,7 @@ contextual_test! {
             .unwrap();
 
         let mut tmp = context.minidump_writer(pid);
+        let mut tmp = tmp.provide();
 
         let pr_mapping_addr;
         #[cfg(target_pointer_width = "64")]
@@ -372,6 +379,7 @@ contextual_test! {
             .unwrap();
 
         let mut tmp = context.minidump_writer(pid);
+        let mut tmp = tmp.provide();
         tmp.sanitize_stack();
         tmp
             .write(&mut tmpfile)
@@ -443,6 +451,7 @@ contextual_test! {
         };
 
         let mut tmp = context.minidump_writer(pid);
+        let mut tmp = tmp.provide();
         tmp.set_app_memory(vec![app_memory]);
 
         // This should fail, because during the dump an error is detected (try_from fails)
@@ -480,7 +489,8 @@ contextual_test! {
             .tempfile()
             .unwrap();
 
-        let tmp = context.minidump_writer(pid);
+        let mut tmp = context.minidump_writer(pid);
+        let tmp = tmp.provide();
         let _ = tmp.write(&mut tmpfile).expect("Could not write minidump");
         child.kill().expect("Failed to kill process");
 
@@ -525,7 +535,8 @@ contextual_test! {
             .tempfile()
             .unwrap();
 
-        let tmp = context.minidump_writer(pid);
+        let mut tmp = context.minidump_writer(pid);
+        let tmp = tmp.provide();
         let _ = tmp.write(&mut tmpfile).expect("Could not write minidump");
         child.kill().expect("Failed to kill process");
 
@@ -580,7 +591,9 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        MinidumpWriterConfig::new(pid, pid)
+        let mut provider = RemoteConfigProvider::new(pid, pid);
+        provider
+            .provide()
             .write(&mut tmpfile)
             .expect("Could not write minidump");
 
@@ -612,7 +625,8 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        let mut tmp = MinidumpWriterConfig::new(pid, pid);
+        let mut tmp = RemoteConfigProvider::new(pid, pid);
+        let mut tmp = tmp.provide();
         tmp.set_minidump_size_limit(minidump_size_limit);
         tmp.write(&mut tmpfile).expect("Could not write minidump");
 
@@ -658,7 +672,8 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        let mut tmp = MinidumpWriterConfig::new(pid, pid);
+        let mut tmp = RemoteConfigProvider::new(pid, pid);
+        let mut tmp = tmp.provide();
         tmp.set_minidump_size_limit(minidump_size_limit);
         tmp.write(&mut tmpfile).expect("Could not write minidump");
 
@@ -745,7 +760,9 @@ fn with_deleted_binary() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriterConfig::new(pid, pid)
+    let mut provider = RemoteConfigProvider::new(pid, pid);
+    provider
+        .provide()
         .write(&mut tmpfile)
         .expect("Could not write minidump");
 
@@ -805,8 +822,11 @@ fn memory_info_list_stream() {
         .tempfile()
         .unwrap();
 
+    let mut provider = RemoteConfigProvider::new(pid, pid);
+
     // Write a minidump
-    MinidumpWriterConfig::new(pid, pid)
+    provider
+        .provide()
         .write(&mut tmpfile)
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
