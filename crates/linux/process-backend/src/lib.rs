@@ -5,6 +5,7 @@ use core::ffi::CStr;
 use regs::*;
 
 pub use drop_fail_handler::Handler as DropFailHandler;
+pub use wrapper::Stat;
 
 #[macro_use]
 mod drop_fail_handler;
@@ -44,7 +45,7 @@ pub trait Backend: core::fmt::Debug {
         path: &CStr,
         offset: u64,
     ) -> Result<Self::MappedModuleMemoryReader<'a>>;
-    fn stat_file(&self, path: &CStr) -> Result<libc::stat>;
+    fn stat_file(&self, path: &CStr) -> Result<Stat>;
     fn read_file<'a>(&'a self, path: &CStr) -> Result<Self::FileReader<'a>>;
     fn read_dir<'a>(&'a self, path: &CStr) -> Result<Self::DirReader<'a>>;
     fn read_link(&self, path: &CStr, buf: &mut [u8]) -> Result<usize>;
