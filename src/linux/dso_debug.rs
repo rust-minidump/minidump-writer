@@ -18,6 +18,11 @@ use {
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 
+#[cfg(not(target_pointer_width = "64"))]
+use goblin::elf32 as elf;
+#[cfg(target_pointer_width = "64")]
+use goblin::elf64 as elf;
+
 cfg_if::cfg_if! {
     if #[cfg(target_pointer_width = "32")] {
         use goblin::elf::program_header::program_header32::SIZEOF_PHDR;
@@ -167,7 +172,7 @@ pub fn write_dso_debug_stream(
 
     dyn_addr += base as ElfAddr;
 
-    let dyn_size = std::mem::size_of::<goblin::elf::Dyn>();
+    let dyn_size = std::mem::size_of::<elf::dynamic::Dyn>();
     let mut r_debug = 0usize;
     let mut dynamic_length = 0usize;
 
@@ -183,14 +188,15 @@ pub fn write_dso_debug_stream(
         dynamic_length += dyn_size;
 
         // goblin::elf::Dyn doesn't have padding bytes
-        let (head, body, _tail) = unsafe { dyn_data.align_to::<goblin::elf::Dyn>() };
+        let (head, body, _tail) = unsafe { dyn_data.align_to::<elf::dynamic::Dyn>() };
         assert!(head.is_empty(), "Data was not aligned");
         let dyn_struct = &body[0];
 
-        let debug_tag = goblin::elf::dynamic::DT_DEBUG;
-        if dyn_struct.d_tag == debug_tag {
+        #[allow(clippy::useless_conversion)]
+        let d_tag = u64::from(dyn_struct.d_tag);
+        if d_tag == goblin::elf::dynamic::DT_DEBUG {
             r_debug = dyn_struct.d_val as usize;
-        } else if dyn_struct.d_tag == goblin::elf::dynamic::DT_NULL {
+        } else if d_tag == goblin::elf::dynamic::DT_NULL {
             break;
         }
     }
