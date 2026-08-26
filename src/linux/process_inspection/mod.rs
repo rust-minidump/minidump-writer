@@ -268,6 +268,8 @@ pub enum Error {
     AddressOverflowed,
     #[error("unexpected end of buffer reached")]
     UnexpectedEndOfBuffer,
+    #[error("got an unexpected end of file")]
+    UnexpectedEndOfFile,
 }
 
 fn set_process_backend_drop_fail_handler() {
