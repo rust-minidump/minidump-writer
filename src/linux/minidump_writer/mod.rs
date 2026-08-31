@@ -1,3 +1,5 @@
+use crate::module_list::ModuleInfo;
+
 use {
     super::{
         Pid,
@@ -6,7 +8,8 @@ use {
         crash_context_ext::CrashContextExt,
         dso_debug,
         dumper_cpu_info::CpuInfoError,
-        maps_reader::{MappingInfo, MappingList, MapsReaderError},
+        maps_reader::{MappingInfo, MappingList},
+        module_list,
         process_inspection::{self, ProcessInspector, process_reader::CopyFromProcessError},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
@@ -34,9 +37,6 @@ use {
     },
     thiserror::Error,
 };
-
-#[cfg(target_os = "android")]
-use super::android::late_process_mappings;
 
 pub use super::auxv::{AuxvType, DirectAuxvDumpInfo};
 
@@ -92,6 +92,7 @@ pub struct MinidumpWriter {
     pub threads: Vec<Thread>,
     pub auxv: AuxvDumpInfo,
     pub mappings: Vec<MappingInfo>,
+    pub modules: Vec<ModuleInfo>,
     pub page_size: usize,
     pub sanitize_stack: bool,
     pub minidump_size_limit: Option<u64>,
@@ -234,6 +235,7 @@ impl MinidumpWriterConfig {
             threads: Default::default(),
             auxv,
             mappings: Default::default(),
+            modules: Default::default(),
             page_size: Default::default(),
             sanitize_stack: self.sanitize_stack,
             minidump_size_limit: self.minidump_size_limit,
@@ -301,14 +303,14 @@ impl MinidumpWriter {
             soft_errors.push(InitError::SuspendNoThreadsLeft(threads_count));
         }
 
-        #[cfg(target_os = "android")]
-        {
-            late_process_mappings(self.process_inspector.as_ref(), &mut self.mappings)?;
+        // The module list is derived from mappings.
+        if let Err(e) = self.enumerate_modules(&mut soft_errors) {
+            soft_errors.push(InitError::EnumerateModulesFailed(Box::new(e)));
         }
 
         if self.skip_stacks_if_mapping_unreferenced {
             if let Some(address) = self.principal_mapping_address {
-                self.principal_mapping = self.find_mapping_no_bias(address).cloned();
+                self.principal_mapping = self.find_mapping(address).cloned();
             }
 
             if !self.crash_thread_references_principal_mapping() {
@@ -359,7 +361,10 @@ impl MinidumpWriter {
         )?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
-        let dirent = self.write_mappings(buffer)?;
+        let dirent = self.write_mappings(
+            buffer,
+            soft_errors.subwriter(WriterError::WriteModuleListErrors),
+        )?;
         dir_section.write_to_file(buffer, Some(dirent))?;
 
         self.write_app_memory(buffer)
@@ -478,34 +483,17 @@ impl MinidumpWriter {
     }
 
     fn crash_thread_references_principal_mapping(&self) -> bool {
-        if self.crash_context.is_none() || self.principal_mapping.is_none() {
+        let (Some(crash_context), Some(mapping)) =
+            (self.crash_context.as_ref(), self.principal_mapping.as_ref())
+        else {
             return false;
-        }
+        };
 
-        let low_addr = self
-            .principal_mapping
-            .as_ref()
-            .unwrap()
-            .system_mapping_info
-            .start_address;
-        let high_addr = self
-            .principal_mapping
-            .as_ref()
-            .unwrap()
-            .system_mapping_info
-            .end_address;
-
-        let pc = self
-            .crash_context
-            .as_ref()
-            .unwrap()
-            .get_instruction_pointer();
-        let stack_pointer = self.crash_context.as_ref().unwrap().get_stack_pointer();
-
-        if pc >= low_addr && pc < high_addr {
+        if mapping.contains_address(crash_context.get_instruction_pointer()) {
             return true;
         }
 
+        let stack_pointer = crash_context.get_stack_pointer();
         let (valid_stack_pointer, stack_len) = match self.get_stack_info(stack_pointer) {
             Ok(x) => x,
             Err(_) => {
@@ -732,26 +720,31 @@ impl MinidumpWriter {
         )
         .map_err(InitError::AggregateMappingsFailed)?;
 
-        // Although the initial executable is usually the first mapping, it's not
-        // guaranteed (see http://crosbug.com/25355); therefore, try to use the
-        // actual entry point to find the mapping.
-        if let Some(entry_point_loc) = self
-            .auxv
-            .get_entry_address()
-            .map(|u| usize::try_from(u).unwrap())
-        {
-            // If this module contains the entry-point, and it's not already the first
-            // one, then we need to make it be first.  This is because the minidump
-            // format assumes the first module is the one that corresponds to the main
-            // executable (as codified in
-            // processor/minidump.cc:MinidumpModuleList::GetMainModule()).
-            if let Some(entry_mapping_idx) = self.mappings.iter().position(|mapping| {
-                (mapping.start_address..mapping.start_address + mapping.size)
-                    .contains(&entry_point_loc)
-            }) {
-                self.mappings.swap(0, entry_mapping_idx);
-            }
-        }
+        Ok(())
+    }
+
+    /// Builds the list of loaded modules written to the `ModuleListStream`.
+    /// Typically, those would be ELF objects loaded by the dynamic linker, but
+    /// the user can also provide additional modules to be included through
+    /// the configuration object.
+    fn enumerate_modules(
+        &mut self,
+        mut soft_errors: impl WriteErrorList<InitError>,
+    ) -> Result<(), InitError> {
+        let mut candidates =
+            module_list::from_mappings(self.process_inspector.as_ref(), &self.mappings);
+        candidates.append(&mut module_list::from_user_mappings(
+            &self.user_mapping_list,
+        ));
+
+        self.modules = module_list::resolve(
+            candidates,
+            self.auxv
+                .get_entry_address()
+                .map(|u| usize::try_from(u).unwrap()),
+            soft_errors.subwriter(InitError::ResolveModuleListErrors),
+        );
+
         Ok(())
     }
 
@@ -850,7 +843,7 @@ impl MinidumpWriter {
         let shift = 32 - 11;
         // let MappingInfo* last_hit_mapping = nullptr;
         // let MappingInfo* hit_mapping = nullptr;
-        let stack_mapping = self.find_mapping_no_bias(stack_pointer);
+        let stack_mapping = self.find_mapping(stack_pointer);
         let mut last_hit_mapping: Option<&MappingInfo> = None;
         // The magnitude below which integers are considered to be to be
         // 'small', and not constitute a PII risk. These are included to
@@ -908,7 +901,7 @@ impl MinidumpWriter {
 
             let test = addr >> shift;
             if (could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) != 0)
-                && let Some(hit_mapping) = self.find_mapping_no_bias(addr)
+                && let Some(hit_mapping) = self.find_mapping(addr)
                 && hit_mapping.is_executable()
             {
                 last_hit_mapping = Some(hit_mapping);
@@ -929,16 +922,6 @@ impl MinidumpWriter {
         self.mappings
             .iter()
             .find(|map| address >= map.start_address && address - map.start_address < map.size)
-    }
-
-    // Find the mapping which the given memory address falls in. Uses the
-    // unadjusted mapping address range from the kernel, rather than the
-    // biased range.
-    pub fn find_mapping_no_bias(&self, address: usize) -> Option<&MappingInfo> {
-        self.mappings.iter().find(|map| {
-            address >= map.system_mapping_info.start_address
-                && address < map.system_mapping_info.end_address
-        })
     }
 
     /// Reads the build ID out of the ELF object loaded at `start_address`.

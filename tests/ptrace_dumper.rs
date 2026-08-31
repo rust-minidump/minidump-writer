@@ -338,7 +338,7 @@ fn sanitizes_stack_copies() {
     // The instruction pointer definitely should point into an executable mapping.
     let instr_ptr = thread_info.get_instruction_pointer();
     let mapping_info = dumper
-        .find_mapping_no_bias(instr_ptr)
+        .find_mapping(instr_ptr)
         .expect("Failed to find mapping info");
     assert!(mapping_info.is_executable());
 

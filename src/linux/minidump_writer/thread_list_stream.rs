@@ -266,9 +266,7 @@ impl MinidumpWriter {
         let stack_pointer_offset = stack_ptr.saturating_sub(valid_stack_ptr);
         if self.skip_stacks_if_mapping_unreferenced {
             if let Some(principal_mapping) = &self.principal_mapping {
-                let low_addr = principal_mapping.system_mapping_info.start_address;
-                let high_addr = principal_mapping.system_mapping_info.end_address;
-                if (instruction_ptr < low_addr || instruction_ptr > high_addr)
+                if !principal_mapping.contains_address(instruction_ptr)
                     && !principal_mapping
                         .stack_has_pointer_to_mapping(&stack_bytes, stack_pointer_offset)
                 {
