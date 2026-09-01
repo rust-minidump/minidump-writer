@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(dead_code)]
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
 use core::ffi::CStr;
@@ -12,6 +13,7 @@ mod drop_fail_handler;
 
 pub mod local;
 pub mod regs;
+pub mod remote;
 
 mod wrapper;
 
