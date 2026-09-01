@@ -17,15 +17,18 @@ impl UnixStream {
         let stream1 = unsafe { Self::from_raw_fd(fds[1]) };
         Ok((stream0, stream1))
     }
+
     /// # Safety
     ///
     /// 'fd' must be a valid UNIX stream socket
     pub unsafe fn from_raw_fd(fd: c_int) -> Self {
         unsafe { Self(OwnedFd::new(fd)) }
     }
+
     pub fn as_raw_fd(&self) -> c_int {
         self.0.as_raw_fd()
     }
+
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let rv = unsafe { libc::read(self.0.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
         if rv == -1 {
@@ -34,6 +37,7 @@ impl UnixStream {
         let bytes_read = usize::try_from(rv).unwrap();
         Ok(bytes_read)
     }
+
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         let rv = unsafe { libc::write(self.0.as_raw_fd(), buf.as_ptr().cast(), buf.len()) };
         if rv == -1 {

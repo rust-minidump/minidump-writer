@@ -33,6 +33,7 @@ where
     fn max_response_output_len(&self) -> usize {
         self.output_buf.as_ref().len()
     }
+
     fn send_request<'output, Req: Serialize, Resp: Deserialize<'output>>(
         &'output mut self,
         req: Req,
@@ -183,6 +184,7 @@ impl<'io, 'buf, Io> DeFlavor<'io, 'buf, Io> {
             error: None,
         }
     }
+
     fn with_inner<'a, F, T>(&'a mut self, f: F) -> postcard::Result<T>
     where
         F: FnOnce(&'a mut DeFlavorInner<'io, 'buf, Io>) -> Result<T, transport::DeserializeError>,
@@ -286,6 +288,7 @@ impl<'buf> BumpAllocator<'buf> {
             phantom: PhantomData,
         }
     }
+
     pub fn allocate(&mut self, n: usize) -> Option<&'buf mut [u8]> {
         let bytes_left = (self.end as usize) - (self.start as usize);
         if bytes_left < n {
