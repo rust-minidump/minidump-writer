@@ -1,5 +1,8 @@
 use {
-    super::*, crate::minidump_cpu::RawContextCPU, error_graph::WriteErrorList, failspot::failspot,
+    super::*,
+    crate::minidump_cpu::RawContextCPU,
+    error_graph::{ErrorList, WriteErrorList},
+    failspot::failspot,
     std::cmp::min,
 };
 
@@ -41,6 +44,8 @@ pub enum SectionThreadListError {
     GetStackInfoFailed(#[source] Box<WriterError>),
     #[error("Failed to get thread info")]
     ThreadInfoError(#[from] ThreadInfoError),
+    #[error("Soft errors occurred getting thread info")]
+    ThreadInfoSoftErrors(#[source] ErrorList<ThreadInfoError>),
     #[error("Failed to write to memory buffer")]
     IOError(
         #[from]
@@ -180,7 +185,10 @@ impl MinidumpWriter {
                 self.crashing_thread_context =
                     CrashingThreadContext::CrashContext(cpu_section.location());
             } else {
-                let info = self.get_thread_info_by_index(idx)?;
+                let info = self.get_thread_info_by_index(
+                    idx,
+                    soft_errors.subwriter(SectionThreadListError::ThreadInfoSoftErrors),
+                )?;
                 let max_stack_len =
                     if self.minidump_size_limit.is_some() && idx >= LIMIT_BASE_THREAD_COUNT {
                         extra_thread_stack_len

@@ -34,10 +34,13 @@ pub enum Error {
     BufferTooSmall,
     #[error("not supported")]
     NotSupported,
-    #[error("failed to get registers: {0}")]
-    GetRegistersFailed(c_int),
-    #[error("unexpected size for register set. Expected: {0}, actual: {0}")]
-    UnexpectedRegisterSetSize(usize, usize),
+    #[error(
+        "failed to get registers. getregset_error: `{getregset_error}`, legacy_error: `{legacy_error}`"
+    )]
+    GetRegistersFailed {
+        getregset_error: super::PtraceGetRegSetError,
+        legacy_error: super::PtraceGetRegsLegacyError,
+    },
     #[error("failed to map memory: {0}")]
     MMapfailed(c_int),
     #[error("the start position of a mapping is past its end position")]
