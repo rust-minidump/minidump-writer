@@ -12,6 +12,7 @@ impl HandlesRequests for &mut Executor<'_> {
     {
         Ok(self.local_backend.pid())
     }
+
     fn ProcessReaderReadAt<'args, 'output>(
         self,
         args: wire::ProcessReaderReadAtArgs,
@@ -29,30 +30,35 @@ impl HandlesRequests for &mut Executor<'_> {
 
         Ok(&scratch_buf[0..bytes_read])
     }
+
     fn StopProcess<'args, 'output>(self, _args: ()) -> Result<()>
     where
         Self: 'output,
     {
         self.local_backend.stop_process().map_err(Error::Local)
     }
+
     fn ContinueProcess<'args, 'output>(self, _args: ()) -> Result<()>
     where
         Self: 'output,
     {
         self.local_backend.continue_process().map_err(Error::Local)
     }
+
     fn SuspendThread<'args, 'output>(self, tid: libc::pid_t) -> Result<()>
     where
         Self: 'output,
     {
         self.local_backend.suspend_thread(tid).map_err(Error::Local)
     }
+
     fn ResumeThread<'args, 'output>(self, tid: libc::pid_t) -> Result<()>
     where
         Self: 'output,
     {
         self.local_backend.resume_thread(tid).map_err(Error::Local)
     }
+
     fn MappedModuleMemoryReaderOpen<'args, 'output>(
         self,
         args: wire::MappedModuleMemoryReaderOpenArgs,
@@ -68,6 +74,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .assign_slot(reader)
             .ok_or(Error::MappedModuleMemoryReaderSlotsExhausted)
     }
+
     fn MappedModuleMemoryReaderReadAt<'args, 'output>(
         self,
         args: wire::MappedModuleMemoryReaderReadAtArgs,
@@ -83,6 +90,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .read_at(args.offset, args.requested_len)
             .map_err(Error::Local)
     }
+
     fn MappedModuleMemoryReaderLen<'args, 'output>(self, handle: usize) -> Result<usize>
     where
         Self: 'output,
@@ -93,6 +101,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .ok_or(Error::EmptyMappedModuleMemoryReaderSlotRequested)?;
         Ok(reader.len())
     }
+
     fn MappedModuleMemoryReaderClose<'args, 'output>(self, handle: usize) -> Result<()>
     where
         Self: 'output,
@@ -103,12 +112,14 @@ impl HandlesRequests for &mut Executor<'_> {
             .ok_or(Error::EmptyMappedModuleMemoryReaderSlotRequested)?;
         Ok(())
     }
+
     fn StatFile<'args, 'output>(self, path: CStrWithNull<'_>) -> Result<Stat>
     where
         Self: 'output,
     {
         self.local_backend.stat_file(&path).map_err(Error::Local)
     }
+
     fn FileReaderOpen<'args, 'output>(self, path: CStrWithNull<'_>) -> Result<usize>
     where
         Self: 'output,
@@ -118,6 +129,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .assign_slot(reader)
             .ok_or(Error::FileReaderSlotsExhausted)
     }
+
     fn FileReaderRead<'args, 'output>(self, args: wire::FileReaderArgs) -> Result<&'output [u8]>
     where
         Self: 'output,
@@ -133,6 +145,7 @@ impl HandlesRequests for &mut Executor<'_> {
 
         Ok(&scratch_buf[0..bytes_read])
     }
+
     fn FileReaderClose<'args, 'output>(self, handle: usize) -> Result<()>
     where
         Self: 'output,
@@ -143,6 +156,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .ok_or(Error::EmptyFileSlotRequested)?;
         Ok(())
     }
+
     fn DirReaderOpen<'args, 'output>(self, path: CStrWithNull<'_>) -> Result<usize>
     where
         Self: 'output,
@@ -152,6 +166,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .assign_slot(reader)
             .ok_or(Error::DirReaderSlotsExhausted)
     }
+
     fn DirReaderRead<'args, 'output>(self, handle: usize) -> Result<Option<&'output [u8]>>
     where
         Self: 'output,
@@ -163,6 +178,7 @@ impl HandlesRequests for &mut Executor<'_> {
 
         reader.read_next_name().map_err(Error::Local)
     }
+
     fn DirReaderClose<'args, 'output>(self, handle: usize) -> Result<()>
     where
         Self: 'output,
@@ -173,6 +189,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .ok_or(Error::EmptyDirSlotRequested)?;
         Ok(())
     }
+
     fn ReadLink<'args, 'output>(self, args: wire::ReadLinkArgs<'_>) -> Result<&'output [u8]>
     where
         Self: 'output,
@@ -186,18 +203,21 @@ impl HandlesRequests for &mut Executor<'_> {
 
         Ok(&scratch_buf[0..bytes_read])
     }
+
     fn GetGenRegs<'args, 'output>(self, tid: libc::pid_t) -> Result<GenRegs>
     where
         Self: 'output,
     {
         self.local_backend.get_gen_regs(tid).map_err(Error::Local)
     }
+
     fn GetFpRegs<'args, 'output>(self, tid: libc::pid_t) -> Result<FpRegs>
     where
         Self: 'output,
     {
         self.local_backend.get_fp_regs(tid).map_err(Error::Local)
     }
+
     #[cfg(target_arch = "x86")]
     fn GetFpxRegs<'args, 'output>(self, tid: libc::pid_t) -> Result<FpxRegs>
     where
@@ -215,6 +235,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .ptrace_peekuser(addr)
             .map_err(Error::Local)
     }
+
     fn ForceProcessReaderKind<'args, 'output>(self, kind: ProcessReaderKind) -> Result<()>
     where
         Self: 'output,
@@ -223,6 +244,7 @@ impl HandlesRequests for &mut Executor<'_> {
             .force_process_reader_kind(kind)
             .map_err(Error::Local)
     }
+
     #[cfg(feature = "testing")]
     fn FailOneSyscallWith<'args, 'output>(self, errno: core::ffi::c_int) -> Result<()>
     where
@@ -231,6 +253,7 @@ impl HandlesRequests for &mut Executor<'_> {
         self.local_backend.fail_one_syscall_with(errno);
         Ok(())
     }
+
     fn Quit<'args, 'output>(self, _args: ()) -> Result<()>
     where
         Self: 'output,
