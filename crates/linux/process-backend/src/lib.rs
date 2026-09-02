@@ -96,6 +96,8 @@ pub enum ProcessReaderKind {
 pub enum Error {
     #[error("there was a failure making a direct syscall")]
     Local(#[source] local::Error),
+    #[error("the remote executor returned an error")]
+    Executor(#[source] remote::executor::Error),
     #[error("buffer was too small to contain the result")]
     BufferTooSmall,
 }

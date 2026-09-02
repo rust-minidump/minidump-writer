@@ -18,8 +18,7 @@ pub(crate) trait Operation {
         T: transport::Backend;
 }
 
-// TEMPORARY - Will be the executor::Error type when the executor is implemented
-pub(crate) type RemoteError = ();
+pub(crate) type RemoteError = remote::executor::Error;
 
 macro_rules! operations({
     $(
