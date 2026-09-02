@@ -4,7 +4,6 @@
 use {
     common::*,
     error_graph::ErrorList,
-    minidump_writer::minidump_writer::MinidumpWriterConfig,
     std::{
         convert::TryInto,
         ffi::c_void,
@@ -104,9 +103,11 @@ fn thread_list_from_parent() {
     let mut child = start_child_and_wait_for_threads(num_of_threads);
     let pid = child.id() as i32;
 
+    let mut provider = RemoteConfigProvider::new(pid, pid);
+
     let dumper = assert_no_soft_errors!(
         soft_errors,
-        MinidumpWriterConfig::new(pid, pid).build_for_testing(&mut soft_errors)
+        provider.provide().build_for_testing(&mut soft_errors)
     )
     .expect("Couldn't init dumper");
 
@@ -285,9 +286,11 @@ fn sanitizes_stack_copies() {
     let heap_addr = usize::from_str_radix(output.next().unwrap().trim_start_matches("0x"), 16)
         .expect("unable to parse mmap_addr");
 
+    let mut provider = RemoteConfigProvider::new(pid, pid);
+
     let dumper = assert_no_soft_errors!(
         soft_errors,
-        MinidumpWriterConfig::new(pid, pid).build_for_testing(&mut soft_errors)
+        provider.provide().build_for_testing(&mut soft_errors)
     )
     .expect("Couldn't init dumper");
     assert_eq!(dumper.threads.len(), num_of_threads);
