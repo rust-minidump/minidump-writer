@@ -5,8 +5,11 @@
 
 use {
     super::{
-        auxv::AuxvDumpInfo, minidump_writer::MinidumpWriter, process_inspection::ProcessInspector,
-        process_reader::CopyFromProcessError, serializers::*,
+        auxv::AuxvDumpInfo,
+        minidump_writer::MinidumpWriter,
+        process_inspection::ProcessInspector,
+        process_reader::{CopyFromProcessError, ProcessReader},
+        serializers::*,
     },
     crate::{
         mem_writer::{
@@ -18,19 +21,18 @@ use {
 };
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
+type RendezvousResult<T> = std::result::Result<T, RendezvousError>;
 
 #[cfg(not(target_pointer_width = "64"))]
 use goblin::elf32 as elf;
 #[cfg(target_pointer_width = "64")]
 use goblin::elf64 as elf;
 
-cfg_if::cfg_if! {
-    if #[cfg(target_pointer_width = "32")] {
-        use goblin::elf::program_header::program_header32::SIZEOF_PHDR;
-    } else if #[cfg(target_pointer_width = "64")] {
-        use goblin::elf::program_header::program_header64::SIZEOF_PHDR;
-    }
-}
+use elf::{
+    dynamic::Dyn,
+    program_header::{PT_DYNAMIC, PT_PHDR, ProgramHeader},
+};
+use goblin::elf::dynamic::{DT_DEBUG, DT_NULL};
 
 cfg_if::cfg_if! {
     if #[cfg(all(target_pointer_width = "64", target_arch = "arm"))] {
@@ -58,6 +60,138 @@ pub enum SectionDsoDebugError {
         #[serde(serialize_with = "serialize_from_utf8_error")]
         std::string::FromUtf8Error,
     ),
+    #[error("Failed to reach the dynamic linker's rendez-vous")]
+    Rendezvous(#[from] RendezvousError),
+}
+
+/// Errors on the way to the dynamic linker's rendez-vous.
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum RendezvousError {
+    #[error("failed to read program header table")]
+    ReadProgramHeaderTableFailed(#[source] CopyFromProcessError),
+    #[error("program header table missing self-pointer")]
+    ProgramHeaderTableNoSelf,
+    #[error("program header table missing dynamic section")]
+    ProgramHeaderTableNoDynamic,
+    #[error("unexpected size for dynamic section `{0}`")]
+    InvalidDynamicSectionSize(usize),
+    #[error("dynamic section missing NULL entry")]
+    DynamicSectionMissingTerminator,
+    #[error("failed to read dynamic section")]
+    ReadDynamicSectionFailed(#[source] CopyFromProcessError),
+    #[error("failed to find DT_DEBUG entry in dynamic section")]
+    MissingDebugEntry,
+}
+
+/// Main executable description, as described by its own in-memory headers
+#[derive(Debug)]
+pub(crate) struct MainExecutable {
+    /// How far the object moved from the addresses in its headers.
+    pub(crate) load_bias: usize,
+    program_headers: Vec<ProgramHeader>,
+}
+
+impl MainExecutable {
+    /// Reads the program header table the kernel advertised through `AT_PHDR`
+    /// and `AT_PHNUM`, and works out where the object owning it was loaded.
+    pub(crate) fn read(
+        memory_reader: &ProcessReader<'_>,
+        program_header_table_address: usize,
+        program_header_count: usize,
+    ) -> RendezvousResult<Self> {
+        let program_headers: Vec<ProgramHeader> = memory_reader
+            .read_pod_vec(program_header_table_address, program_header_count)
+            .map_err(RendezvousError::ReadProgramHeaderTableFailed)?;
+        let load_bias = Self::compute_bias(&program_headers, program_header_table_address)?;
+
+        Ok(Self {
+            load_bias,
+            program_headers,
+        })
+    }
+
+    /// `PT_PHDR` describes the program header table itself, so the difference
+    /// between the virtual address it claims and where it actually sits gives you
+    /// the load bias.
+    fn compute_bias(
+        program_headers: &[ProgramHeader],
+        program_header_table_address: usize,
+    ) -> RendezvousResult<usize> {
+        let table = program_headers
+            .iter()
+            .find(|hdr| hdr.p_type == PT_PHDR)
+            .ok_or(RendezvousError::ProgramHeaderTableNoSelf)?;
+
+        Ok(program_header_table_address - usize::try_from(table.p_vaddr).unwrap())
+    }
+
+    /// Where the first segment of the given type actually is in the target, and
+    /// how big it is in memory.
+    fn find_segment(&self, segment_type: u32) -> Option<(usize, usize)> {
+        self.program_headers
+            .iter()
+            .find(|hdr| hdr.p_type == segment_type)
+            .map(|hdr| {
+                (
+                    self.load_bias + usize::try_from(hdr.p_vaddr).unwrap(),
+                    usize::try_from(hdr.p_memsz).unwrap(),
+                )
+            })
+    }
+
+    /// Copies the whole of `PT_DYNAMIC` out of the target.
+    ///
+    /// Returns the address it was read from alongside the entries.
+    pub(crate) fn dynamic_section(
+        &self,
+        memory_reader: &ProcessReader<'_>,
+    ) -> RendezvousResult<(usize, Vec<Dyn>)> {
+        let (address, size) = self
+            .find_segment(PT_DYNAMIC)
+            .ok_or(RendezvousError::ProgramHeaderTableNoDynamic)?;
+
+        // A partial trailing entry means we are not looking at a dynamic section.
+        if !size.is_multiple_of(std::mem::size_of::<Dyn>()) {
+            return Err(RendezvousError::InvalidDynamicSectionSize(size));
+        }
+
+        let entries: Vec<Dyn> = memory_reader
+            .read_pod_vec(address, size / std::mem::size_of::<Dyn>())
+            .map_err(RendezvousError::ReadDynamicSectionFailed)?;
+
+        if entries.last() != Some(&Dyn::default()) {
+            return Err(RendezvousError::DynamicSectionMissingTerminator);
+        }
+
+        Ok((address, entries))
+    }
+}
+
+// Helper to isolate conversion noise
+#[allow(clippy::useless_conversion)]
+fn dtag(entry: &Dyn) -> u64 {
+    u64::from(entry.d_tag)
+}
+
+/// Find the DT_DEBUG debugger rendezvous within a dynamic section,
+/// typically gotten from `MainExecutable::dynamic_section`.
+pub(crate) fn find_rendezvous_address(dynamic_section: &[Dyn]) -> RendezvousResult<usize> {
+    dynamic_section
+        .iter()
+        .find_map(|entry| (dtag(entry) == DT_DEBUG).then_some(entry.d_val))
+        .map(|address| usize::try_from(address).unwrap())
+        .ok_or(RendezvousError::MissingDebugEntry)
+}
+
+/// How many bytes of the dynamic section actually say something: everything up
+/// to and including the `DT_NULL` terminator.
+fn dynamic_section_len(dynamic_section: &[Dyn]) -> usize {
+    let entries = dynamic_section
+        .iter()
+        .position(|entry| dtag(entry) == DT_NULL)
+        .map_or(dynamic_section.len(), |terminator| terminator + 1);
+
+    entries * std::mem::size_of::<Dyn>()
 }
 
 /// Information for a single dynamically loaded module.
@@ -140,65 +274,11 @@ pub fn write_dso_debug_stream(
         .get_program_header_address()
         .ok_or(SectionDsoDebugError::CouldNotFind("AT_PHDR in auxv"))? as usize;
 
-    let ph = MinidumpWriter::copy_from_process(process_inspector, phdr, SIZEOF_PHDR * phnum_max)?;
-    let program_headers;
-    #[cfg(target_pointer_width = "64")]
-    {
-        program_headers = goblin::elf::program_header::program_header64::ProgramHeader::from_bytes(
-            &ph, phnum_max,
-        );
-    }
-    #[cfg(target_pointer_width = "32")]
-    {
-        program_headers = goblin::elf::program_header::program_header32::ProgramHeader::from_bytes(
-            &ph, phnum_max,
-        );
-    };
-
-    // Assume the program base is at the beginning of the same page as the PHDR
-    let mut base = phdr & !0xfff;
-    let mut dyn_addr = 0;
-    // Search for the program PT_DYNAMIC segment
-    for ph in program_headers {
-        // Adjust base address with the virtual address of the PT_LOAD segment
-        // corresponding to offset 0
-        if ph.p_type == goblin::elf::program_header::PT_LOAD && ph.p_offset == 0 {
-            base -= ph.p_vaddr as usize;
-        }
-        if ph.p_type == goblin::elf::program_header::PT_DYNAMIC {
-            dyn_addr = ph.p_vaddr;
-        }
-    }
-
-    if dyn_addr == 0 {
-        return Err(SectionDsoDebugError::CouldNotFind(
-            "dyn_addr in program headers",
-        ));
-    }
-
-    dyn_addr += base as ElfAddr;
-
-    let dyn_size = std::mem::size_of::<elf::dynamic::Dyn>();
-    let mut r_debug = 0usize;
-    let mut dynamic_length = 0usize;
     let memory_reader = process_inspector.process_reader();
+    let main_executable = MainExecutable::read(&memory_reader, phdr, phnum_max)?;
 
-    // The dynamic linker makes information available that helps gdb find all
-    // DSOs loaded into the program. If this information is indeed available,
-    // dump it to a MD_LINUX_DSO_DEBUG stream.
-    loop {
-        let dyn_struct: elf::dynamic::Dyn =
-            memory_reader.read_pod(dyn_addr as usize + dynamic_length)?;
-        dynamic_length += dyn_size;
-
-        #[allow(clippy::useless_conversion)]
-        let d_tag = u64::from(dyn_struct.d_tag);
-        if d_tag == goblin::elf::dynamic::DT_DEBUG {
-            r_debug = dyn_struct.d_val as usize;
-        } else if d_tag == goblin::elf::dynamic::DT_NULL {
-            break;
-        }
-    }
+    let (dyn_addr, dynamic_section) = main_executable.dynamic_section(&memory_reader)?;
+    let r_debug = find_rendezvous_address(&dynamic_section)?;
 
     // The "r_map" field of that r_debug struct contains a linked list of all
     // loaded DSOs.
@@ -255,7 +335,7 @@ pub fn write_dso_debug_stream(
         dso_count: dso_vec.len() as u32,
         brk: debug_entry.r_brk,
         ldbase: debug_entry.r_ldbase,
-        dynamic: dyn_addr,
+        dynamic: dyn_addr as ElfAddr,
     };
     let debug_loc = MemoryWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
 
@@ -264,10 +344,63 @@ pub fn write_dso_debug_stream(
         location: debug_loc.location(),
     };
 
+    // We'll want to copy *only* the dynamic section, not the entire segment.
+    let dynamic_length = dynamic_section_len(&dynamic_section);
     dirent.location.data_size += dynamic_length as u32;
     let dso_debug_data =
-        MinidumpWriter::copy_from_process(process_inspector, dyn_addr as usize, dynamic_length)?;
+        MinidumpWriter::copy_from_process(process_inspector, dyn_addr, dynamic_length)?;
     MemoryArrayWriter::write_bytes(buffer, &dso_debug_data);
 
     Ok(dirent)
+}
+
+#[cfg(test)]
+// Every address below is 64 bit, and the header fields they go into are only
+// that wide on a 64-bit target.
+#[cfg(target_pointer_width = "64")]
+mod tests {
+    use super::*;
+    use elf::program_header::PT_LOAD;
+
+    /// Create a fake PT_PHDR with the given vaddr.
+    fn program_header_table_at(virtual_address: u64) -> ProgramHeader {
+        ProgramHeader {
+            p_type: PT_PHDR,
+            p_offset: 0x40,
+            p_vaddr: virtual_address,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn load_bias_pie() {
+        let program_headers = [program_header_table_at(0x40)];
+
+        let load_bias = MainExecutable::compute_bias(&program_headers, 0xaaaa_0040).unwrap();
+
+        assert_eq!(load_bias, 0xaaaa_0000);
+    }
+
+    // No-PIE execs don't have a load bias
+    #[test]
+    fn load_bias_executable_non_pie() {
+        let program_headers = [program_header_table_at(0x40_0040)];
+
+        let load_bias = MainExecutable::compute_bias(&program_headers, 0x40_0040).unwrap();
+
+        assert_eq!(load_bias, 0);
+    }
+
+    #[test]
+    fn load_bias_no_pt_phdr() {
+        let program_headers = [ProgramHeader {
+            p_type: PT_LOAD,
+            ..Default::default()
+        }];
+
+        assert!(matches!(
+            MainExecutable::compute_bias(&program_headers, 0x40_0040),
+            Err(RendezvousError::ProgramHeaderTableNoSelf)
+        ));
+    }
 }
