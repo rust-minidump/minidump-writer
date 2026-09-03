@@ -9,7 +9,7 @@ use {
         dso_debug,
         dumper_cpu_info::CpuInfoError,
         maps_reader::{MappingInfo, MappingList},
-        module_list,
+        module_list::{self, ModuleCandidate},
         process_inspection::{self, ProcessInspector, process_reader::CopyFromProcessError},
         serializers::*,
         thread_info::{ThreadInfo, ThreadInfoError},
@@ -66,6 +66,16 @@ pub const AT_SYSINFO_EHDR: u32 = 33;
 #[cfg(target_pointer_width = "64")]
 pub const AT_SYSINFO_EHDR: u64 = 33;
 
+/// Where the module list written to the `ModuleListStream` is sourced from.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ModuleListSource {
+    #[default]
+    /// Derive the module list from `/proc/<pid>/maps`.
+    ProcMaps,
+    /// Use the DT_DEBUG debugger rendezvous protocol to inspect ELF objects
+    DebuggerRendezvous,
+}
+
 #[derive(Debug)]
 pub struct MinidumpWriterConfig {
     process_id: Pid,
@@ -83,6 +93,7 @@ pub struct MinidumpWriterConfig {
     stop_timeout: Duration,
     direct_auxv_dump_info: Option<DirectAuxvDumpInfo>,
     process_inspector: Box<dyn ProcessInspector>,
+    module_list_source: ModuleListSource,
 }
 
 #[derive(Debug)]
@@ -93,6 +104,7 @@ pub struct MinidumpWriter {
     pub auxv: AuxvDumpInfo,
     pub mappings: Vec<MappingInfo>,
     pub modules: Vec<ModuleInfo>,
+    module_list_source: ModuleListSource,
     pub page_size: usize,
     pub sanitize_stack: bool,
     pub minidump_size_limit: Option<u64>,
@@ -141,6 +153,7 @@ impl MinidumpWriterConfig {
             stop_timeout: STOP_TIMEOUT,
             direct_auxv_dump_info: Default::default(),
             process_inspector: process_inspection::local(process_id),
+            module_list_source: Default::default(),
         }
     }
 
@@ -202,6 +215,12 @@ impl MinidumpWriterConfig {
         self
     }
 
+    /// Chooses where the `ModuleListStream` is sourced from.
+    pub fn set_module_list_source(&mut self, module_list_source: ModuleListSource) -> &mut Self {
+        self.module_list_source = module_list_source;
+        self
+    }
+
     /// Generates a minidump and writes to the destination provided. Returns the in-memory
     /// version of the minidump as well.
     pub fn write(self, destination: &mut (impl Write + Seek)) -> Result<Vec<u8>, WriterError> {
@@ -236,6 +255,7 @@ impl MinidumpWriterConfig {
             auxv,
             mappings: Default::default(),
             modules: Default::default(),
+            module_list_source: self.module_list_source,
             page_size: Default::default(),
             sanitize_stack: self.sanitize_stack,
             minidump_size_limit: self.minidump_size_limit,
@@ -706,6 +726,12 @@ impl MinidumpWriter {
     }
 
     fn enumerate_mappings(&mut self) -> Result<(), InitError> {
+        if failspot!(EnumerateMappingsFromProc) {
+            return Err(InitError::AggregateMappingsFailed(
+                std::io::Error::other("fake I/O error reading maps file").into(),
+            ));
+        }
+
         // linux_gate_loc is the beginning of the kernel's mapping of
         // linux-gate.so in the process.  It doesn't actually show up in the
         // maps list as a filename, but it can be found using the AT_SYSINFO_EHDR
@@ -731,8 +757,18 @@ impl MinidumpWriter {
         &mut self,
         mut soft_errors: impl WriteErrorList<InitError>,
     ) -> Result<(), InitError> {
-        let mut candidates =
-            module_list::from_mappings(self.process_inspector.as_ref(), &self.mappings);
+        use ModuleListSource::*;
+        let (primary, fallback) = match self.module_list_source {
+            ProcMaps => (ProcMaps, DebuggerRendezvous),
+            DebuggerRendezvous => (DebuggerRendezvous, ProcMaps),
+        };
+        let mut candidates = self
+            .try_module_source(primary, &mut soft_errors)
+            .or_else(|e| {
+                soft_errors.push(e);
+                self.try_module_source(fallback, &mut soft_errors)
+            })?;
+
         candidates.append(&mut module_list::from_user_mappings(
             &self.user_mapping_list,
         ));
@@ -746,6 +782,63 @@ impl MinidumpWriter {
         );
 
         Ok(())
+    }
+
+    fn try_module_source(
+        &self,
+        source: ModuleListSource,
+        mut soft_errors: impl WriteErrorList<InitError>,
+    ) -> Result<Vec<ModuleCandidate>, InitError> {
+        use ModuleListSource::*;
+        match source {
+            ProcMaps => {
+                let candidates =
+                    module_list::from_mappings(self.process_inspector.as_ref(), &self.mappings);
+
+                // No detected module is probably because the initial mapping parsing failed.
+                // Error out so that we try the fallback.
+                if candidates.is_empty() {
+                    return Err(InitError::NoModulesInProcessMappings);
+                }
+
+                Ok(candidates)
+            }
+            DebuggerRendezvous => self.modules_via_debugger_rendezvous(
+                soft_errors.subwriter(InitError::DebuggerRendezvousErrors),
+            ),
+        }
+    }
+
+    fn modules_via_debugger_rendezvous(
+        &self,
+        soft_errors: impl WriteErrorList<module_list::FromRendezvousError>,
+    ) -> Result<Vec<ModuleCandidate>, InitError> {
+        // `DT_DEBUG` only lives in the main executable's dynamic section, and
+        // AT_PHDR/AT_PHNUM are how we find that executable's program headers.
+        let Some(program_header_table_address) = self
+            .auxv
+            .get_program_header_address()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderTableAddress);
+        };
+
+        let Some(program_header_count) = self
+            .auxv
+            .get_program_header_count()
+            .map(|x| usize::try_from(x).unwrap())
+        else {
+            return Err(InitError::MissingProgramHeaderCount);
+        };
+
+        module_list::from_debugger_rendezvous(
+            self.process_inspector.as_ref(),
+            self.process_id,
+            program_header_table_address,
+            program_header_count,
+            soft_errors,
+        )
+        .map_err(InitError::ModuleListFromDebuggerRendezvousFailed)
     }
 
     /// Read thread info from /proc/$pid/status.
