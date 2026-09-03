@@ -238,6 +238,19 @@ where
     );
 }
 
+#[allow(unused)]
+/// Negative equivalent to [`assert_minidump_contains_soft_error`].
+pub fn assert_minidump_lacks_soft_error<'a, T>(dump: &minidump::Minidump<'a, T>, variant: &str)
+where
+    T: std::ops::Deref<Target = [u8]> + 'a,
+{
+    let errors = read_minidump_soft_errors_or_panic(dump);
+    assert!(
+        !soft_errors_contain(&errors, variant),
+        "soft error list contains unexpected error `{variant}`\nError_list: {errors:#?}"
+    );
+}
+
 fn soft_errors_contain(value: &serde_json::Value, variant: &str) -> bool {
     match value {
         serde_json::Value::String(s) => s == variant,
