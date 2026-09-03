@@ -81,6 +81,14 @@ pub enum RendezvousError {
     ReadDynamicSectionFailed(#[source] CopyFromProcessError),
     #[error("failed to find DT_DEBUG entry in dynamic section")]
     MissingDebugEntry,
+    #[error("failed to read debugger rendezvous address")]
+    ReadDebuggerRendezvousAddressFailed(#[source] CopyFromProcessError),
+    #[error("unexpected debugger rendezvous version '{0}'")]
+    UnexpectedDebuggerRendezvousVersion(i32),
+    #[error("failed reading link_map entry")]
+    ReadLinkMapEntryFailed(#[source] CopyFromProcessError),
+    #[error("invalid link entry")]
+    InvalidLinkEntry,
 }
 
 /// Main executable description, as described by its own in-memory headers
@@ -262,6 +270,78 @@ pub struct RDebug {
 unsafe impl Plain for LinkMap {}
 unsafe impl Plain for RDebug {}
 
+impl RDebug {
+    pub(crate) fn from_memory(
+        address: usize,
+        reader: &ProcessReader<'_>,
+    ) -> RendezvousResult<Self> {
+        let debugger_rendezvous: RDebug = reader
+            .read_pod(address)
+            .map_err(RendezvousError::ReadDebuggerRendezvousAddressFailed)?;
+        if debugger_rendezvous.r_version != 1 {
+            return Err(RendezvousError::UnexpectedDebuggerRendezvousVersion(
+                debugger_rendezvous.r_version,
+            ));
+        }
+        Ok(debugger_rendezvous)
+    }
+
+    pub(crate) fn map_iterator<'a>(&self, reader: &'a ProcessReader<'a>) -> LinkMapIter<'a> {
+        LinkMapIter {
+            address: self.r_map,
+            first_node: true,
+            reader,
+        }
+    }
+}
+
+/// Walks the linker's chain of loaded objects, starting at [`RDebug::r_map`].
+///
+/// Our list of DSOs potentially differs from the one in the target process, so
+/// we have to be careful never to dereference its pointers directly: every node
+/// is copied out of the target instead.
+#[derive(Debug)]
+pub(crate) struct LinkMapIter<'a> {
+    address: usize,
+    first_node: bool,
+    reader: &'a ProcessReader<'a>,
+}
+
+impl<'a> Iterator for LinkMapIter<'a> {
+    type Item = RendezvousResult<LinkMap>;
+
+    /// Copies the node the walk currently sits on, and steps to `l_next`.
+    ///
+    /// Returns `None` once the chain is exhausted.
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.address == 0 {
+            return None;
+        }
+
+        let link = self
+            .reader
+            .read_pod::<LinkMap>(self.address)
+            .map_err(RendezvousError::ReadLinkMapEntryFailed);
+        let Ok(link) = link else {
+            self.address = 0;
+            return Some(link);
+        };
+
+        if self.first_node {
+            // We were handed `r_map`, so nothing should precede us.
+            if link.l_prev != 0 {
+                self.address = 0;
+                return Some(Err(RendezvousError::InvalidLinkEntry));
+            }
+            self.first_node = false;
+        }
+
+        self.address = link.l_next;
+
+        Some(Ok(link))
+    }
+}
+
 pub fn write_dso_debug_stream(
     process_inspector: &dyn ProcessInspector,
     buffer: &mut Buffer,
@@ -282,21 +362,14 @@ pub fn write_dso_debug_stream(
 
     // The "r_map" field of that r_debug struct contains a linked list of all
     // loaded DSOs.
-    // Our list of DSOs potentially is different from the ones in the crashing
-    // process. So, we have to be careful to never dereference pointers
-    // directly. Instead, we copy every node out of the process.
     // See <link.h> for a more detailed discussion of the how the dynamic
     // loader communicates with debuggers.
-    let debug_entry: RDebug = memory_reader.read_pod(r_debug)?;
+    let debug_entry = RDebug::from_memory(r_debug, &memory_reader)?;
 
     // Count the number of loaded DSOs
-    let mut dso_vec = Vec::new();
-    let mut curr_map = debug_entry.r_map;
-    while curr_map != 0 {
-        let map: LinkMap = memory_reader.read_pod(curr_map)?;
-        curr_map = map.l_next;
-        dso_vec.push(map);
-    }
+    let dso_vec = debug_entry
+        .map_iterator(&memory_reader)
+        .collect::<RendezvousResult<Vec<_>>>()?;
 
     let mut linkmap_rva = u32::MAX;
     if !dso_vec.is_empty() {
