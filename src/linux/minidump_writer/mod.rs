@@ -752,12 +752,20 @@ impl MinidumpWriter {
     /// Fill out the |tgid|, |ppid| and |pid| members of |info|. If unavailable,
     /// these members are set to -1. Returns true if all three members are
     /// available.
-    pub fn get_thread_info_by_index(&self, index: usize) -> Result<ThreadInfo, ThreadInfoError> {
+    pub fn get_thread_info_by_index(
+        &self,
+        index: usize,
+        soft_errors: impl WriteErrorList<ThreadInfoError>,
+    ) -> Result<ThreadInfo, ThreadInfoError> {
         if index > self.threads.len() {
             return Err(ThreadInfoError::IndexOutOfBounds(index, self.threads.len()));
         }
 
-        ThreadInfo::create(self.process_inspector.as_ref(), self.threads[index].tid)
+        ThreadInfo::create(
+            self.process_inspector.as_ref(),
+            self.threads[index].tid,
+            soft_errors,
+        )
     }
 
     // Returns a valid stack pointer and the mapping that contains the stack.

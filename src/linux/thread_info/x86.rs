@@ -2,6 +2,7 @@ use {
     super::{Pid, ProcessInspector, ThreadInfoError, regs::*},
     crate::{minidump_cpu::RawContextCPU, minidump_format::format},
     core::mem,
+    error_graph::WriteErrorList,
     scroll::Pwrite,
 };
 
@@ -10,45 +11,66 @@ pub struct ThreadInfoX86 {
     pub tgid: Pid, // thread group id
     pub ppid: Pid, // parent process
     pub regs: GenRegs,
-    pub fpregs: FpRegs,
+    pub fpregs: Option<FpRegs>,
     pub dregs: [RegType; NUM_DEBUG_REGISTERS],
     #[cfg(target_arch = "x86")]
-    pub fpxregs: FpxRegs,
+    pub fpxregs: Option<FpxRegs>,
 }
 
 impl ThreadInfoX86 {
     pub fn create(
         process_inspector: &dyn ProcessInspector,
         tid: Pid,
+        mut soft_errors: impl WriteErrorList<ThreadInfoError>,
     ) -> Result<Self, ThreadInfoError> {
         let (ppid, tgid) = super::get_ppid_and_tgid(process_inspector, tid)?;
+
         let regs = process_inspector
             .get_gen_regs(tid)
-            .map_err(ThreadInfoError::PtraceError)?;
-        let fpregs = process_inspector
+            .map_err(ThreadInfoError::GetGenRegsFailed)?;
+
+        let fpregs = match process_inspector
             .get_fp_regs(tid)
-            .map_err(ThreadInfoError::PtraceError)?;
+            .map_err(ThreadInfoError::GetFpRegsFailed)
+        {
+            Ok(regs) => Some(regs),
+            Err(e) => {
+                soft_errors.push(e);
+                None
+            }
+        };
 
         #[cfg(target_arch = "x86")]
-        let fpxregs = {
-            if cfg!(target_feature = "fxsr") {
-                process_inspector
-                    .get_fpx_regs(tid)
-                    .map_err(ThreadInfoError::PtraceError)?
-            } else {
-                unsafe { mem::zeroed() }
+        let fpxregs = if cfg!(target_feature = "fxsr") {
+            match process_inspector
+                .get_fpx_regs(tid)
+                .map_err(ThreadInfoError::GetFpxRegsFailed)
+            {
+                Ok(regs) => Some(regs),
+                Err(e) => {
+                    soft_errors.push(e);
+                    None
+                }
             }
+        } else {
+            None
         };
 
         let mut dregs: [RegType; NUM_DEBUG_REGISTERS] = [0; NUM_DEBUG_REGISTERS];
 
         let debug_offset = USER_STRUCT_DEBUGREG_OFFSET;
         for (idx, dreg) in dregs.iter_mut().enumerate() {
-            let chunk = process_inspector
+            match process_inspector
                 .ptrace_peekuser(debug_offset + idx * mem::size_of::<RegType>())
-                .map_err(ThreadInfoError::PtraceError)?;
-
-            *dreg = RegType::from_ne_bytes(chunk[0..mem::size_of::<RegType>()].try_into().unwrap());
+                .map_err(ThreadInfoError::GetDebugRegsFailed)
+            {
+                Ok(chunk) => {
+                    *dreg = RegType::from_ne_bytes(
+                        chunk[0..mem::size_of::<RegType>()].try_into().unwrap(),
+                    )
+                }
+                Err(e) => soft_errors.push(e),
+            }
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -126,7 +148,7 @@ impl ThreadInfoX86 {
         out.rip = self.regs.rip;
 
         {
-            let fs = &self.fpregs;
+            let fs = self.fpregs.unwrap_or_default();
             let mut float_save = crate::minidump_cpu::FloatStateCPU {
                 control_word: fs.cwd,
                 status_word: fs.swd,
@@ -182,18 +204,20 @@ impl ThreadInfoX86 {
         out.esp = self.regs.esp;
         out.ss = self.regs.ss;
 
-        out.float_save.control_word = self.fpregs.cwd;
-        out.float_save.status_word = self.fpregs.swd;
-        out.float_save.tag_word = self.fpregs.twd;
-        out.float_save.error_offset = self.fpregs.fip;
-        out.float_save.error_selector = self.fpregs.fcs;
-        out.float_save.data_offset = self.fpregs.foo;
-        out.float_save.data_selector = self.fpregs.fos;
+        let fpregs = self.fpregs.unwrap_or_default();
+
+        out.float_save.control_word = fpregs.cwd;
+        out.float_save.status_word = fpregs.swd;
+        out.float_save.tag_word = fpregs.twd;
+        out.float_save.error_offset = fpregs.fip;
+        out.float_save.error_selector = fpregs.fcs;
+        out.float_save.data_offset = fpregs.foo;
+        out.float_save.data_selector = fpregs.fos;
 
         {
             let ra = &mut out.float_save.register_area;
             // 8 registers * 10 bytes per register.
-            for (idx, block) in self.fpregs.st_space.iter().enumerate() {
+            for (idx, block) in fpregs.st_space.iter().enumerate() {
                 let offset = idx * std::mem::size_of::<u32>();
                 if offset >= ra.len() {
                     break;
@@ -216,26 +240,29 @@ impl ThreadInfoX86 {
                 };
             }
 
+            let fpregs = self.fpregs.unwrap_or_default();
+            let fpxregs = self.fpxregs.unwrap_or_default();
+
             // This matches the Intel fpsave format.
-            write_er!(self.fpregs.cwd as u16);
-            write_er!(self.fpregs.swd as u16);
-            write_er!(self.fpregs.twd as u16);
-            write_er!(self.fpxregs.fop);
-            write_er!(self.fpxregs.fip);
-            write_er!(self.fpxregs.fcs);
-            write_er!(self.fpregs.foo);
-            write_er!(self.fpregs.fos);
-            write_er!(self.fpxregs.mxcsr);
+            write_er!(fpregs.cwd as u16);
+            write_er!(fpregs.swd as u16);
+            write_er!(fpregs.twd as u16);
+            write_er!(fpxregs.fop);
+            write_er!(fpxregs.fip);
+            write_er!(fpxregs.fcs);
+            write_er!(fpregs.foo);
+            write_er!(fpregs.fos);
+            write_er!(fpxregs.mxcsr);
 
             offset = 32;
 
-            for val in &self.fpxregs.st_space {
+            for val in &fpxregs.st_space {
                 write_er!(val);
             }
 
             debug_assert_eq!(offset, 160);
 
-            for val in &self.fpxregs.xmm_space.0 {
+            for val in &fpxregs.xmm_space.0 {
                 write_er!(val);
             }
         }

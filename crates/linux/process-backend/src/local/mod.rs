@@ -199,18 +199,28 @@ impl Backend {
     }
 
     fn get_regs<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
-        self.ptrace_getregset::<T>(tid).or_else(|e| {
-            if T::LEGACY_REQUEST.is_some() {
-                self.ptrace_getregs_legacy::<T>(tid)
-            } else {
-                Err(e)
-            }
+        let getregset_error = match self.ptrace_getregset::<T>(tid) {
+            Ok(output) => return Ok(output),
+            Err(e) => e,
+        };
+
+        let legacy_error = match self.ptrace_getregs_legacy::<T>(tid) {
+            Ok(output) => return Ok(output),
+            Err(e) => e,
+        };
+
+        Err(Error::GetRegistersFailed {
+            getregset_error,
+            legacy_error,
         })
     }
 
-    fn ptrace_getregs_legacy<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+    fn ptrace_getregs_legacy<T: PtraceRegisterSet>(
+        &self,
+        tid: libc::pid_t,
+    ) -> core::result::Result<T::Output, PtraceGetRegsLegacyError> {
         let Some(request) = T::LEGACY_REQUEST else {
-            return Err(Error::NotSupported);
+            return Err(PtraceGetRegsLegacyError::NotSupported);
         };
 
         let mut output = T::Output::default();
@@ -222,11 +232,14 @@ impl Backend {
                 (&raw mut output).cast(),
             )
         })
-        .map_err(Error::GetRegistersFailed)?;
+        .map_err(PtraceGetRegsLegacyError::PtraceFailed)?;
         Ok(output)
     }
 
-    fn ptrace_getregset<T: PtraceRegisterSet>(&self, tid: libc::pid_t) -> Result<T::Output> {
+    fn ptrace_getregset<T: PtraceRegisterSet>(
+        &self,
+        tid: libc::pid_t,
+    ) -> core::result::Result<T::Output, PtraceGetRegSetError> {
         let output_size = size_of::<T::Output>();
         assert!(T::KERNEL_SIZE <= output_size);
 
@@ -244,10 +257,13 @@ impl Backend {
                 (&raw mut io).cast(),
             )
         })
-        .map_err(Error::GetRegistersFailed)?;
+        .map_err(PtraceGetRegSetError::PtraceFailed)?;
 
         if T::KERNEL_SIZE != io.iov_len {
-            return Err(Error::UnexpectedRegisterSetSize(T::KERNEL_SIZE, io.iov_len));
+            return Err(PtraceGetRegSetError::UnexpectedRegisterSetSize(
+                T::KERNEL_SIZE,
+                io.iov_len,
+            ));
         }
 
         Ok(output)
@@ -488,4 +504,20 @@ unsafe fn ptrace(
     data: *mut c_void,
 ) -> c_long {
     unsafe { libc::ptrace(request, pid, addr, data) }
+}
+
+#[derive(Debug, thiserror::Error, serde::Deserialize, serde::Serialize)]
+pub enum PtraceGetRegSetError {
+    #[error("ptrace returned error code: {0}")]
+    PtraceFailed(c_int),
+    #[error("unexpected size for register set. Expected: {0}, actual: {0}")]
+    UnexpectedRegisterSetSize(usize, usize),
+}
+
+#[derive(Debug, thiserror::Error, serde::Deserialize, serde::Serialize)]
+pub enum PtraceGetRegsLegacyError {
+    #[error("ptrace returned error code: {0}")]
+    PtraceFailed(c_int),
+    #[error("legacy API not supported on this architecture")]
+    NotSupported,
 }
