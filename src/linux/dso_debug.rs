@@ -18,6 +18,7 @@ use {
         minidump_format::*,
     },
     plain::Plain,
+    std::{ffi::OsString, os::unix::ffi::OsStringExt},
 };
 
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
@@ -87,6 +88,8 @@ pub enum RendezvousError {
     UnexpectedDebuggerRendezvousVersion(i32),
     #[error("failed reading link_map entry")]
     ReadLinkMapEntryFailed(#[source] CopyFromProcessError),
+    #[error("failed reading the name a link_map entry points at")]
+    ReadModuleNameFailed(#[source] CopyFromProcessError),
     #[error("invalid link entry")]
     InvalidLinkEntry,
 }
@@ -270,6 +273,27 @@ pub struct RDebug {
 unsafe impl Plain for LinkMap {}
 unsafe impl Plain for RDebug {}
 
+impl LinkMap {
+    /// Copies that entry's file name out of the target.
+    pub(crate) fn name(&self, reader: &ProcessReader<'_>) -> RendezvousResult<OsString> {
+        if self.l_name == 0 {
+            return Ok(OsString::new());
+        }
+
+        let mut buf = Vec::new();
+        reader
+            .read_until(self.l_name, 0, &mut buf)
+            .map_err(RendezvousError::ReadModuleNameFailed)?;
+
+        // `read_until` includes the terminator it stopped on, if it found one.
+        if buf.last() == Some(&0) {
+            buf.pop();
+        }
+
+        Ok(OsString::from_vec(buf))
+    }
+}
+
 impl RDebug {
     pub(crate) fn from_memory(
         address: usize,
@@ -380,16 +404,7 @@ pub fn write_dso_debug_stream(
 
         // Iterate over DSOs and write their information to mini dump
         for (idx, map) in dso_vec.iter().enumerate() {
-            let mut filename = String::new();
-            if map.l_name > 0 {
-                let filename_data =
-                    MinidumpWriter::copy_from_process(process_inspector, map.l_name, 256)?;
-
-                // C - string is NULL-terminated
-                if let Some(name) = filename_data.splitn(2, |x| *x == b'\0').next() {
-                    filename = String::from_utf8(name.to_vec())?;
-                }
-            }
+            let filename = String::from_utf8(map.name(&memory_reader)?.into_vec())?;
             let location = write_string_to_location(buffer, &filename)?;
             let entry = MDRawLinkMap {
                 addr: map.l_addr,
