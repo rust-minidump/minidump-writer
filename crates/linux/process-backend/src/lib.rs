@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(dead_code)]
 #![cfg(any(target_os = "linux", target_os = "android"))]
 
 use core::ffi::CStr;
@@ -98,6 +97,8 @@ pub enum Error {
     Local(#[source] local::Error),
     #[error("the remote executor returned an error")]
     Executor(#[source] remote::executor::Error),
+    #[error("there was an error transporting the request to/from the remote executor")]
+    Transport(#[source] remote::transport::BackendError),
     #[error("buffer was too small to contain the result")]
     BufferTooSmall,
 }

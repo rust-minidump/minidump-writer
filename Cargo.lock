@@ -1685,6 +1685,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "postcard",
+ "process-backend",
  "process-reader",
  "serde",
  "thiserror 2.0.19",
