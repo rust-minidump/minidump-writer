@@ -205,9 +205,14 @@ impl<'a> MappedModuleMemoryReader<'a> {
 
         loop {
             let bytes_read = self.0.read_at(offset, buf).map_err(Error::Backend)?;
+            if bytes_read == 0 {
+                return Err(Error::UnexpectedEndOfBuffer);
+            }
+
             if bytes_read == buf.len() {
                 return Ok(());
             }
+
             offset = offset
                 .checked_add(bytes_read)
                 .ok_or(Error::AddressOverflowed)?;
