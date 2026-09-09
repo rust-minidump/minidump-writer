@@ -145,10 +145,6 @@ impl MinidumpWriterConfig {
         }
     }
 
-    pub fn process_id(&self) -> Pid {
-        self.process_id
-    }
-
     pub fn set_minidump_size_limit(&mut self, limit: u64) -> &mut Self {
         self.minidump_size_limit = Some(limit);
         self
