@@ -1,26 +1,20 @@
 #![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(unused_imports, unused_variables)]
 
-use {
-    common::*,
-    minidump::*,
-    minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*},
-    minidump_writer::{
-        CrashContextExt, Pid,
-        app_memory::AppMemory,
-        maps_reader::{MappingEntry, MappingInfo},
-        minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError},
-        module_reader::{self},
-    },
-    procfs_core::process::MMPermissions,
-    serde_json::json,
-    std::{
-        collections::HashSet,
-        io::{BufRead, BufReader},
-        os::unix::process::ExitStatusExt,
-        process::{Command, Stdio},
-    },
-};
+use common::*;
+use minidump::*;
+use minidump_common::format::{GUID, MINIDUMP_STREAM_TYPE::*};
+use minidump_writer::app_memory::AppMemory;
+use minidump_writer::maps_reader::{MappingEntry, MappingInfo};
+use minidump_writer::minidump_writer::{MinidumpWriter, MinidumpWriterConfig, errors::WriterError};
+use minidump_writer::module_reader;
+use minidump_writer::{CrashContextExt, Pid};
+use procfs_core::process::MMPermissions;
+use serde_json::json;
+use std::collections::HashSet;
+use std::io::{BufRead, BufReader};
+use std::os::unix::process::ExitStatusExt;
+use std::process::{Command, Stdio};
 
 mod common;
 
@@ -32,7 +26,7 @@ enum Context {
 
 impl Context {
     pub fn minidump_writer(&self, pid: Pid) -> MinidumpWriterConfig {
-        let mut mw = MinidumpWriterConfig::new(pid, pid);
+        let mut mw = remote_mw_config(pid, pid);
         if self == &Context::With {
             let crash_context = get_dummy_crash_context(pid);
             mw.set_crash_context(crash_context);
@@ -213,7 +207,7 @@ fn module_list_properties() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriterConfig::new(pid, pid)
+    remote_mw_config(pid, pid)
         .write(&mut tmpfile)
         .expect("could not write minidump");
 
@@ -580,7 +574,7 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        MinidumpWriterConfig::new(pid, pid)
+        remote_mw_config(pid, pid)
             .write(&mut tmpfile)
             .expect("Could not write minidump");
 
@@ -612,7 +606,7 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        let mut tmp = MinidumpWriterConfig::new(pid, pid);
+        let mut tmp = remote_mw_config(pid, pid);
         tmp.set_minidump_size_limit(minidump_size_limit);
         tmp.write(&mut tmpfile).expect("Could not write minidump");
 
@@ -658,7 +652,7 @@ fn minidump_size_limit() {
             .tempfile()
             .unwrap();
 
-        let mut tmp = MinidumpWriterConfig::new(pid, pid);
+        let mut tmp = remote_mw_config(pid, pid);
         tmp.set_minidump_size_limit(minidump_size_limit);
         tmp.write(&mut tmpfile).expect("Could not write minidump");
 
@@ -745,7 +739,7 @@ fn with_deleted_binary() {
         .tempfile()
         .unwrap();
 
-    MinidumpWriterConfig::new(pid, pid)
+    remote_mw_config(pid, pid)
         .write(&mut tmpfile)
         .expect("Could not write minidump");
 
@@ -806,7 +800,7 @@ fn memory_info_list_stream() {
         .unwrap();
 
     // Write a minidump
-    MinidumpWriterConfig::new(pid, pid)
+    remote_mw_config(pid, pid)
         .write(&mut tmpfile)
         .expect("cound not write minidump");
     child.kill().expect("Failed to kill process");
