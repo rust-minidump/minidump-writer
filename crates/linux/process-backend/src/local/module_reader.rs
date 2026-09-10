@@ -1,4 +1,4 @@
-use super as local;
+use super::super::local;
 use crate::wrapper::{OwnedFd, errno};
 use core::{
     ffi::{CStr, c_void},
