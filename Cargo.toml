@@ -10,7 +10,7 @@ members = [
 repository = "https://github.com/rust-minidump/minidump-writer"
 homepage = "https://github.com/rust-minidump/minidump-writer"
 edition = "2024"
-rust-version = "1.88.0"
+rust-version = "1.90.0"
 license = "MIT"
 
 [workspace.dependencies]
