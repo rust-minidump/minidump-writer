@@ -1,4 +1,4 @@
-use super as linux;
+use super::super::linux;
 use crate::module_reader::{ModuleMemoryReadError, ReadError, ReadModuleMemory};
 use linux::maps_reader;
 use process_backend::{ProcessReader as _, Stat, local, regs::*};
