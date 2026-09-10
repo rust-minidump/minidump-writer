@@ -1,7 +1,6 @@
-use super as executor;
-use super::remote;
+use super::super::executor;
 use crate::{ProcessReaderKind, regs::*, wrapper::Stat};
-use executor::{Error, Executor, Result};
+use executor::{Error, Executor, Result, remote};
 use remote::wire;
 use wire::{CStrWithNull, HandlesRequests};
 

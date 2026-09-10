@@ -1,4 +1,4 @@
-use super as remote;
+use super::super::remote;
 use crate::wrapper::Stat;
 use crate::{Error, ProcessReaderKind, Result};
 use core::cell::{Cell, RefCell};

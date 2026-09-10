@@ -1,4 +1,4 @@
-use super as io;
+use super::super::io;
 use crate::wrapper::{OwnedFd, errno};
 use core::ffi::c_int;
 use io::{Error, Result};

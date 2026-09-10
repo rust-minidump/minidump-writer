@@ -1,4 +1,4 @@
-use super as transport;
+use super::super::transport;
 use core::{marker::PhantomData, ops::Range};
 use remote::io;
 use serde::{Deserialize, Serialize};

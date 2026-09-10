@@ -1,4 +1,4 @@
-use super as remote;
+use super::super::remote;
 use crate::{ProcessReaderKind, regs::*, wrapper::Stat};
 use remote::transport;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-use super as remote;
+use super::super::remote;
 use crate::local;
 use remote::{transport, wire};
 use resources::Pool;

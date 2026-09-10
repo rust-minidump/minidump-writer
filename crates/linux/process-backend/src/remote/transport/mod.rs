@@ -1,4 +1,4 @@
-use super as remote;
+use super::super::remote;
 use remote::io;
 use serde::{Deserialize, Serialize};
 
