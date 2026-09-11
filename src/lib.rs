@@ -12,6 +12,7 @@ cfg_if::cfg_if! {
                 StackPointerMapping,
                 ThreadStackCopy,
                 CrashingThreadIpCopy,
+                EnumerateMappingsFromProc,
             }
         }
 
