@@ -23,28 +23,20 @@ use {
 type Result<T> = std::result::Result<T, SectionDsoDebugError>;
 type RendezvousResult<T> = std::result::Result<T, RendezvousError>;
 
+// Native types for internal use, while we expose the width-agnostic variants
+// for easier interaction with other code.
 #[cfg(not(target_pointer_width = "64"))]
-use goblin::elf32 as elf;
+use goblin::elf32 as native_elf;
 #[cfg(target_pointer_width = "64")]
-use goblin::elf64 as elf;
+use goblin::elf64 as native_elf;
 
-use elf::{
-    dynamic::Dyn,
+use goblin::elf::{
+    dynamic::{DT_DEBUG, DT_NULL, Dyn},
     program_header::{PT_DYNAMIC, PT_PHDR, ProgramHeader},
 };
-use goblin::elf::dynamic::{DT_DEBUG, DT_NULL};
 
-cfg_if::cfg_if! {
-    if #[cfg(all(target_pointer_width = "64", target_arch = "arm"))] {
-        type ElfAddr = u64;
-    } else if #[cfg(all(target_pointer_width = "64", not(target_arch = "arm")))] {
-        type ElfAddr = libc::Elf64_Addr;
-    } else if #[cfg(all(target_pointer_width = "32", target_arch = "arm"))] {
-        type ElfAddr = u32;
-    } else if #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))] {
-        type ElfAddr = libc::Elf32_Addr;
-    }
-}
+/// Size of one dynamic section entry *in the target*.
+const SIZEOF_DYN: usize = native_elf::dynamic::SIZEOF_DYN;
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum SectionDsoDebugError {
@@ -100,8 +92,14 @@ impl MainExecutable {
         program_header_count: usize,
     ) -> RendezvousResult<Self> {
         let program_headers: Vec<ProgramHeader> = memory_reader
-            .read_pod_vec(program_header_table_address, program_header_count)
-            .map_err(RendezvousError::ReadProgramHeaderTableFailed)?;
+            .read_pod_vec::<native_elf::program_header::ProgramHeader>(
+                program_header_table_address,
+                program_header_count,
+            )
+            .map_err(RendezvousError::ReadProgramHeaderTableFailed)?
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let load_bias = Self::compute_bias(&program_headers, program_header_table_address)?;
 
         Ok(Self {
@@ -151,13 +149,16 @@ impl MainExecutable {
             .ok_or(RendezvousError::ProgramHeaderTableNoDynamic)?;
 
         // A partial trailing entry means we are not looking at a dynamic section.
-        if !size.is_multiple_of(std::mem::size_of::<Dyn>()) {
+        if !size.is_multiple_of(SIZEOF_DYN) {
             return Err(RendezvousError::InvalidDynamicSectionSize(size));
         }
 
         let entries: Vec<Dyn> = memory_reader
-            .read_pod_vec(address, size / std::mem::size_of::<Dyn>())
-            .map_err(RendezvousError::ReadDynamicSectionFailed)?;
+            .read_pod_vec::<native_elf::dynamic::Dyn>(address, size / SIZEOF_DYN)
+            .map_err(RendezvousError::ReadDynamicSectionFailed)?
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
         if entries.last() != Some(&Dyn::default()) {
             return Err(RendezvousError::DynamicSectionMissingTerminator);
@@ -167,18 +168,12 @@ impl MainExecutable {
     }
 }
 
-// Helper to isolate conversion noise
-#[allow(clippy::useless_conversion)]
-fn dtag(entry: &Dyn) -> u64 {
-    u64::from(entry.d_tag)
-}
-
 /// Find the DT_DEBUG debugger rendezvous within a dynamic section,
 /// typically gotten from `MainExecutable::dynamic_section`.
 pub(crate) fn find_rendezvous_address(dynamic_section: &[Dyn]) -> RendezvousResult<usize> {
     dynamic_section
         .iter()
-        .find_map(|entry| (dtag(entry) == DT_DEBUG).then_some(entry.d_val))
+        .find_map(|entry| (entry.d_tag == DT_DEBUG).then_some(entry.d_val))
         .map(elf_addr_to_usize)
         .ok_or(RendezvousError::MissingDebugEntry)
 }
@@ -188,15 +183,16 @@ pub(crate) fn find_rendezvous_address(dynamic_section: &[Dyn]) -> RendezvousResu
 fn dynamic_section_len(dynamic_section: &[Dyn]) -> usize {
     let entries = dynamic_section
         .iter()
-        .position(|entry| dtag(entry) == DT_NULL)
+        .position(|entry| entry.d_tag == DT_NULL)
         .map_or(dynamic_section.len(), |terminator| terminator + 1);
 
-    entries * std::mem::size_of::<Dyn>()
+    entries * SIZEOF_DYN
 }
 
-/// Convert an address read from ELF data into a native usize, panic if the target is too narrow to hold it.
-pub(crate) fn elf_addr_to_usize(addr: ElfAddr) -> usize {
-    usize::try_from(addr).expect("Pointer size mismatch between dumper and target")
+/// Convert an address read from ELF data into a native usize, panic if the target is too narrow to
+/// hold it. Assumes the ELF data comes from width-agnostic code, hence u64.
+pub(crate) fn elf_addr_to_usize(addr: impl Into<u64>) -> usize {
+    usize::try_from(addr.into()).expect("Pointer size mismatch between dumper and target")
 }
 
 /// Information for a single dynamically loaded module.
@@ -215,7 +211,7 @@ pub(crate) fn elf_addr_to_usize(addr: ElfAddr) -> usize {
 pub struct LinkMap {
     /// Difference between the addresses in the ELF file and the addresses in
     /// memory.
-    pub(crate) l_addr: ElfAddr,
+    pub(crate) l_addr: usize,
     /// Address of the absolute file name the object was found in.
     /// WAS: `char *`
     pub(crate) l_name: usize,
@@ -253,13 +249,13 @@ pub struct RDebug {
     /// again when the mapping change is complete. The debugger can set a
     /// breakpoint at this address if it wants to notice shared object mapping
     /// changes.
-    pub(crate) r_brk: ElfAddr,
+    pub(crate) r_brk: usize,
     /// Which mapping change is taking place when `r_brk` is called: 0
     /// (`RT_CONSISTENT`, the change is complete), 1 (`RT_ADD`, beginning to add
     /// a new object) or 2 (`RT_DELETE`, beginning to remove an object mapping).
     pub(crate) r_state: libc::c_int,
     /// Base address the linker is loaded at.
-    pub(crate) r_ldbase: ElfAddr,
+    pub(crate) r_ldbase: usize,
 }
 
 // Safety: both are `repr(C)` aggregates of plain integers, so every bit pattern
@@ -324,9 +320,9 @@ pub fn write_dso_debug_stream(
             }
             let location = write_string_to_location(buffer, &filename)?;
             let entry = MDRawLinkMap {
-                addr: map.l_addr,
+                addr: map.l_addr as _,
                 name: location.rva,
-                ld: map.l_ld as ElfAddr,
+                ld: map.l_ld as _,
             };
 
             linkmap.set_value_at(buffer, entry, idx)?;
@@ -338,9 +334,9 @@ pub fn write_dso_debug_stream(
         version: debug_entry.r_version as u32,
         map: linkmap_rva,
         dso_count: dso_vec.len() as u32,
-        brk: debug_entry.r_brk,
-        ldbase: debug_entry.r_ldbase,
-        dynamic: dyn_addr as ElfAddr,
+        brk: debug_entry.r_brk as _,
+        ldbase: debug_entry.r_ldbase as _,
+        dynamic: dyn_addr as _,
     };
     let debug_loc = MemoryWriter::<MDRawDebug>::alloc_with_val(buffer, debug)?;
 
@@ -360,12 +356,9 @@ pub fn write_dso_debug_stream(
 }
 
 #[cfg(test)]
-// Every address below is 64 bit, and the header fields they go into are only
-// that wide on a 64-bit target.
-#[cfg(target_pointer_width = "64")]
 mod tests {
     use super::*;
-    use elf::program_header::PT_LOAD;
+    use goblin::elf::program_header::PT_LOAD;
 
     /// Create a fake PT_PHDR with the given vaddr.
     fn program_header_table_at(virtual_address: u64) -> ProgramHeader {
