@@ -5,10 +5,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::{
+    Pid,
+    dso_debug::{
+        LinkMap, MainExecutable, RDebug, RendezvousError, elf_addr_to_usize,
+        find_rendezvous_address,
+    },
+    process_inspection::process_reader::ProcessReader,
+};
+use goblin::elf::{
+    dynamic::DT_LOOS,
+    header::ET_DYN,
+    program_header::{PF_X, PT_LOAD},
+};
+
 use crate::{
     linux::process_inspection::ProcessInspector,
     maps_reader::{MappingEntry, MappingList},
-    module_reader::ModuleReaderError,
+    module_reader::{ModuleReader, ModuleReaderError, ProcessModuleMemoryReader, ReadModuleMemory},
 };
 use error_graph::WriteErrorList;
 
@@ -40,6 +54,35 @@ pub enum ModuleResolveError {
         code_end: usize,
         clamped_to: usize,
     },
+}
+
+/// Errors from walking the dynamic linker's debugger rendez-vous.
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum FromRendezvousError {
+    #[error("the main executable is not position-independent")]
+    NonPieMainExecutable,
+    #[error("failed to read the dynamic linker's rendez-vous")]
+    Rendezvous(#[from] RendezvousError),
+    #[error("an error occurred iterating the link_map linked list")]
+    IterateLinkMapFailed(#[source] RendezvousError),
+    #[error("skipping module `{}` at {address:#x}", name.to_string_lossy())]
+    SkippedModule {
+        name: OsString,
+        address: usize,
+        #[source]
+        source: ModuleCandidateError,
+    },
+}
+
+/// Errors that only cost us one entry of the module list.
+#[derive(Debug, thiserror::Error, serde::Serialize)]
+pub enum ModuleCandidateError {
+    #[error("failed reading the name its `link_map` entry points at")]
+    ReadNameFailed(#[source] RendezvousError),
+    #[error("failed to read the module's ELF data")]
+    ReadModuleFailed(#[source] ModuleReaderError),
+    #[error("the module's program header table has no loadable segment")]
+    NoLoadableSegment,
 }
 
 /// Where a module's information came from.
@@ -533,4 +576,270 @@ mod tests {
             assert_eq!(actual, expected);
         }
     }
+}
+
+/// Derives the module list by walking the dynamic linker's debugger rendez-vous.
+///
+/// The debugger rendez-vous is reachable through a field in the main program's
+/// headers, hence the need for `process_inspector`, `program_header_table_address`
+/// and `program_header_count`, while `pid` is there in order to get a name for the
+/// main program's module, which isn't necessarily given in the DT_DEBUG data (glibc).
+pub(crate) fn from_debugger_rendezvous(
+    process_inspector: &dyn ProcessInspector,
+    pid: Pid,
+    program_header_table_address: usize,
+    program_header_count: usize,
+    mut soft_errors: impl WriteErrorList<FromRendezvousError>,
+) -> Result<Vec<ModuleCandidate>, FromRendezvousError> {
+    let memory_reader = process_inspector.process_reader();
+
+    let main_executable = MainExecutable::read(
+        &memory_reader,
+        program_header_table_address,
+        program_header_count,
+    )?;
+
+    // Throughout the code stack we're assuming everything is PIE. Notably,
+    // module_reader would require substantial changes to accomodate for
+    // non-PIE executables reliably. Let's just error out rather than return
+    // garbage.
+    if !main_executable.is_pie() {
+        return Err(FromRendezvousError::NonPieMainExecutable);
+    }
+
+    DebuggerRendezvousReader::new(process_inspector, main_executable, &memory_reader, pid)
+        .read_link_map(&mut soft_errors)
+        .map_err(FromRendezvousError::IterateLinkMapFailed)
+}
+
+struct DebuggerRendezvousReader<'a, 'b> {
+    process_inspector: &'a dyn ProcessInspector,
+    memory_reader: &'a ProcessReader<'b>,
+    main_executable: MainExecutable,
+    pid: Pid,
+    page_size: usize,
+}
+
+impl<'a, 'b> DebuggerRendezvousReader<'a, 'b> {
+    fn new(
+        process_inspector: &'a dyn ProcessInspector,
+        main_executable: MainExecutable,
+        memory_reader: &'a ProcessReader<'b>,
+        pid: Pid,
+    ) -> Self {
+        Self {
+            process_inspector,
+            memory_reader,
+            main_executable,
+            pid,
+            page_size: page_size(),
+        }
+    }
+
+    fn read_rdebug(&self) -> Result<RDebug, RendezvousError> {
+        let (_, dynamic_section) = self.main_executable.dynamic_section(self.memory_reader)?;
+        let rdv_address = find_rendezvous_address(&dynamic_section)?;
+        RDebug::from_memory(rdv_address, self.memory_reader)
+    }
+
+    fn read_link_map(
+        &self,
+        mut soft_errors: impl WriteErrorList<FromRendezvousError>,
+    ) -> Result<Vec<ModuleCandidate>, RendezvousError> {
+        // The first item is presumed to be the main executable
+        // and gets special treatment.
+
+        let links: Vec<LinkMap> = self
+            .read_rdebug()?
+            .map_iterator(self.memory_reader)
+            .collect::<Result<_, _>>()?;
+        let candidates = links
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, link)| {
+                let main_executable = idx == 0;
+                let load_bias = if main_executable {
+                    self.main_executable.load_bias
+                } else {
+                    link.l_addr
+                };
+
+                // The name is threaded back out of the fallible part so that a
+                // module we ended up skipping can still be named in the soft error.
+                let mut name = None;
+                let candidate = link
+                    .name(self.memory_reader)
+                    .map_err(ModuleCandidateError::ReadNameFailed)
+                    .and_then(|read| {
+                        name = if main_executable && read.is_empty() {
+                            self.exec_name_from_procfs()
+                        } else {
+                            Some(read)
+                        };
+                        self.read_module(&name, load_bias)
+                    });
+
+                // One unreadable object shouldn't cost us the rest of the list.
+                match candidate {
+                    Err(source) => {
+                        soft_errors.push(FromRendezvousError::SkippedModule {
+                            name: name.unwrap_or_default(),
+                            address: load_bias,
+                            source,
+                        });
+                        None
+                    }
+                    Ok(candidate) => Some(candidate),
+                }
+            })
+            .collect();
+        Ok(candidates)
+    }
+
+    /// Reads a single module out of its program header table.
+    ///
+    /// A module is one entry, spanning all of its `PT_LOAD` segments. Overlap with
+    /// other entries of the module list is resolved afterwards, once the whole list
+    /// is known.
+    fn read_module(
+        &self,
+        name: &Option<OsString>,
+        load_bias: usize,
+    ) -> Result<ModuleCandidate, ModuleCandidateError> {
+        let module = ModuleReader::new(ProcessModuleMemoryReader::new(
+            self.memory_reader,
+            load_bias,
+        ))
+        .map_err(ModuleCandidateError::ReadModuleFailed)?;
+        let module_headers = module
+            .program_headers()
+            .map_err(ModuleCandidateError::ReadModuleFailed)?;
+
+        let segments = self.read_module_segments(load_bias, &module_headers)?;
+
+        let first = segments
+            .first()
+            .ok_or(ModuleCandidateError::NoLoadableSegment)?;
+
+        // We span the entire segment range, regardless of any hole between them.
+        // Thing will get fixed, clamped and disambiguated later in the process.
+        let end_address = segments.iter().map(|segment| segment.end).max().unwrap();
+        // We need to know where the actual code segments end for clamping.
+        let code_end = segments
+            .iter()
+            .filter(|segment| segment.executable)
+            .map(|segment| segment.end)
+            .max()
+            .unwrap_or(first.start);
+
+        let base_address = base_address(&module, load_bias, first.start);
+
+        Ok(ModuleCandidate {
+            base_address,
+            end_address,
+            code_end,
+            name: name.clone(),
+            file_offset: first.file_offset,
+            source: ModuleSource::Process,
+        })
+    }
+
+    /// Read all the PT_LOAD segments of a module, sorted by their start address.
+    fn read_module_segments(
+        &self,
+        module_start: usize,
+        module_headers: &[goblin::elf::ProgramHeader],
+    ) -> Result<Vec<Segment>, ModuleCandidateError> {
+        let mut segments: Vec<Segment> = module_headers
+            .iter()
+            .filter(|hdr| hdr.p_type == PT_LOAD)
+            .map(|hdr| {
+                let start = module_start + elf_addr_to_usize(hdr.p_vaddr);
+                let end = start + elf_addr_to_usize(hdr.p_memsz);
+                // Round out to whole pages, since that's the granularity the kernel
+                // actually mapped the segment at.
+                Segment {
+                    start: align_down(start, self.page_size),
+                    end: align_up(end, self.page_size),
+                    file_offset: align_down(elf_addr_to_usize(hdr.p_offset), self.page_size),
+                    executable: hdr.p_flags & PF_X != 0,
+                }
+            })
+            .collect();
+        segments.sort_by_key(|segment| segment.start);
+        Ok(segments)
+    }
+
+    fn exec_name_from_procfs(&self) -> Option<OsString> {
+        self.process_inspector
+            .read_link(format!("/proc/{}/exe", self.pid).into())
+            .map(PathBuf::into_os_string)
+            .inspect_err(|e| {
+                log::warn!(
+                    "failed to read /proc/{}/exe for the main executable's name: {}",
+                    self.pid,
+                    e
+                );
+            })
+            .ok()
+    }
+}
+
+/// Get the base address of a given, that is the address against which all
+/// addresses in a module are resolved.
+fn base_address<MM: ReadModuleMemory>(
+    module: &ModuleReader<MM>,
+    load_bias: usize,
+    lowest_segment_start: usize,
+) -> usize {
+    // It's usually the start of the lowest segment, except for shared libraries
+    // that use Android packed relocations (according to the Breakpad sources)
+    if lowest_segment_start != load_bias
+        && module.header().e_type == ET_DYN
+        && has_packed_relocations(module)
+    {
+        load_bias
+    } else {
+        lowest_segment_start
+    }
+}
+
+/// Whether the object carries Android's packed relocation tags.
+fn has_packed_relocations<MM: ReadModuleMemory>(module: &ModuleReader<MM>) -> bool {
+    const DT_ANDROID_REL: u64 = DT_LOOS + 2;
+    const DT_ANDROID_RELA: u64 = DT_LOOS + 4;
+
+    let Ok(entries) = module.dynamic_entries() else {
+        return false;
+    };
+
+    entries
+        .iter()
+        .any(|entry| entry.d_tag == DT_ANDROID_REL || entry.d_tag == DT_ANDROID_RELA)
+}
+
+/// One `PT_LOAD` segment, as the kernel would have mapped it.
+#[derive(Debug)]
+struct Segment {
+    start: usize,
+    end: usize,
+    file_offset: usize,
+    executable: bool,
+}
+
+fn page_size() -> usize {
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    assert!(
+        page_size > 0,
+        "somehow we weren't able to get the page size"
+    );
+    usize::try_from(page_size).expect("page size too large to fit in usize!!")
+}
+
+fn align_down(val: usize, align: usize) -> usize {
+    val / align * align
+}
+
+fn align_up(val: usize, align: usize) -> usize {
+    val.next_multiple_of(align)
 }
