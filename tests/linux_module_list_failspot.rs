@@ -11,6 +11,7 @@
 
 use {
     common::*,
+    memmap2::Mmap,
     minidump::*,
     minidump_writer::{
         FailSpotName,
@@ -20,25 +21,30 @@ use {
 
 mod common;
 
-#[test]
-fn module_list_procmaps_fallback_to_rendezvous() {
-    let mut failspot_client = FailSpotName::testing_client();
-    failspot_client.set_enabled(FailSpotName::EnumerateMappingsFromProc, true);
-
+fn make_dump_with_source(source: ModuleListSource) -> Minidump<'static, Mmap> {
     let mut child = start_child_and_wait_for_threads(1);
     let pid = child.id() as i32;
 
     let mut tmpfile = tempfile::Builder::new().tempfile().unwrap();
 
     let mut writer = MinidumpWriterConfig::new(pid, pid);
-    writer.set_module_list_source(ModuleListSource::ProcMaps);
+    writer.set_module_list_source(source);
     writer.write(&mut tmpfile).unwrap();
 
     child.kill().expect("Failed to kill process");
     child.wait().expect("Failed to wait on killed process");
 
-    let dump = Minidump::read_path(tmpfile.path()).expect("failed to read minidump");
+    Minidump::read_path(tmpfile.path()).expect("failed to read minidump")
+}
+
+#[test]
+fn module_list_procmaps_fallback_to_rendezvous() {
+    let mut failspot_client = FailSpotName::testing_client();
+    failspot_client.set_enabled(FailSpotName::EnumerateMappingsFromProc, true);
+
+    let dump = make_dump_with_source(ModuleListSource::ProcMaps);
     let modules: MinidumpModuleList = dump.get_stream().expect("no module list");
+
     let names = modules
         .iter()
         .map(|module| module.name.clone())
@@ -48,4 +54,23 @@ fn module_list_procmaps_fallback_to_rendezvous() {
     assert!(names.iter().any(|name| name.contains("libc")));
     assert_minidump_contains_soft_error(&dump, "AggregateMappingsFailed");
     assert_minidump_contains_soft_error(&dump, "NoModulesInProcessMappings");
+}
+
+#[test]
+fn inconsistent_debugger_rendezvous_fallback() {
+    let mut failspot_client = FailSpotName::testing_client();
+    failspot_client.set_enabled(FailSpotName::DebuggerRendezvousNotConsistent, true);
+
+    let dump = make_dump_with_source(ModuleListSource::DebuggerRendezvous);
+    let modules: MinidumpModuleList = dump.get_stream().expect("no module list");
+
+    let names = modules
+        .iter()
+        .map(|module| module.name.clone())
+        .collect::<Vec<_>>();
+
+    // Check that we have some valid data.
+    assert!(!names.is_empty(), "empty module list");
+    assert!(names.iter().any(|name| name.contains("libc")));
+    assert_minidump_contains_soft_error(&dump, "DebuggerRendezvousNotConsistent");
 }
