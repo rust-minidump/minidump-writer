@@ -532,8 +532,9 @@ impl MinidumpWriter {
             }
         };
 
-        let stack_copy = match MinidumpWriter::copy_from_process(
+        let stack_copy = match MinidumpWriter::read_until_guard(
             self.process_inspector.as_ref(),
+            self.page_size,
             valid_stack_pointer,
             stack_len,
         ) {
@@ -1067,6 +1068,33 @@ impl MinidumpWriter {
     ) -> Result<Vec<u8>, CopyFromProcessError> {
         let mem = process_inspector.process_reader();
         mem.read_all_to_vec(src, length)
+    }
+
+    /// Copies up to `length` bytes from the target process, stopping at the
+    /// first page that can't be read, typically a guard page. Fails only if
+    /// nothing could be read at all.
+    pub fn read_until_guard(
+        process_inspector: &dyn ProcessInspector,
+        page_size: usize,
+        src: usize,
+        length: usize,
+    ) -> Result<Vec<u8>, CopyFromProcessError> {
+        let mem = process_inspector.process_reader();
+        let mut output = vec![0u8; length];
+        let mut offset = 0;
+        while offset < length {
+            let chunk = (length - offset).min(page_size - (src + offset) % page_size);
+            if let Err(e) = mem.read_exact(src + offset, &mut output[offset..offset + chunk]) {
+                if offset == 0 {
+                    return Err(e);
+                }
+                break;
+            }
+            offset += chunk;
+        }
+
+        output.truncate(offset);
+        Ok(output)
     }
 }
 
