@@ -891,10 +891,13 @@ impl MinidumpWriter {
         // kernels used a 4 KiB one instead. Note the saturating add, as 32-bit
         // processes can have a stack pointer within 1MiB of usize::MAX
         let guard_page_max_addr = address.saturating_add(1024 * 1024);
+        let mem = self.process_inspector.process_reader();
 
         while address <= guard_page_max_addr {
             if let Some(mapping) = self.find_mapping(address)
                 && Self::may_be_stack(mapping)
+                // Actually read a byte. Permissions sometimes lie.
+                && matches!(mem.read(address, &mut [0u8]), Ok(1))
             {
                 return Some((address, mapping));
             }
