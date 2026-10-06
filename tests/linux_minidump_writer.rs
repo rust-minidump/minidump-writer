@@ -559,6 +559,67 @@ contextual_test! {
     }
 }
 
+/// The stack pointer of a thread that overflowed its stack points into its
+/// guard page. With glibc 2.42 and later, guard pages are installed with
+/// `MADV_GUARD_INSTALL` and are part of the stack mapping, but can't be read.
+/// On kernels without it, the child falls back to a separate `PROT_NONE`
+/// mapping like older libcs.
+///
+/// The writer doesn't check that the stack pointer is within the thread's
+/// actual stack, so we point the main thread's at a guarded mapping.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn stack_pointer_in_guard_page() {
+    let mut child = start_child_and_return(&["spawn_guarded_stack_wait"]);
+    let pid = child.id() as i32;
+
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut line)
+        .expect("Couldn't read mapping address from child");
+    let [mapping, _, top_of_stack, stack_size, guard, page_size]: [usize; 6] = line
+        .split_whitespace()
+        .map(|x| x.parse().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let mut crash_context = get_dummy_crash_context(pid);
+    let sp = guard + page_size / 2;
+    #[cfg(target_arch = "x86_64")]
+    {
+        crash_context.inner.context.uc_mcontext.gregs[libc::REG_RSP as usize] = sp as _;
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        crash_context.inner.context.uc_mcontext.sp = sp as _;
+    }
+
+    let mut tmpfile = tempfile::Builder::new()
+        .prefix("stack_pointer_in_guard_page")
+        .tempfile()
+        .unwrap();
+    let mut config = remote_mw_config(pid, pid);
+    config.set_crash_context(crash_context);
+    config
+        .write(&mut tmpfile)
+        .expect("Could not write minidump");
+    child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait for child");
+
+    let dump = Minidump::read_path(tmpfile.path()).expect("Failed to read minidump");
+    let thread_list: MinidumpThreadList = dump.get_stream().expect("No thread list");
+    let thread = thread_list
+        .get_thread(pid as u32)
+        .expect("Crashing thread not in thread list");
+    let stack = &thread.raw.stack;
+    assert_eq!(stack.start_of_memory_range, top_of_stack as u64);
+    assert!(stack.memory.data_size as usize >= stack_size);
+    let rva = stack.memory.rva as usize;
+    let bytes = std::fs::read(tmpfile.path()).unwrap();
+    assert!(bytes[rva..rva + stack_size].iter().all(|&b| b == 0xab));
+}
+
 #[test]
 fn minidump_size_limit() {
     let num_of_threads = 40;
