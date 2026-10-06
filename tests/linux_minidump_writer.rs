@@ -577,7 +577,7 @@ fn stack_pointer_in_guard_page() {
     BufReader::new(child.stdout.as_mut().unwrap())
         .read_line(&mut line)
         .expect("Couldn't read mapping address from child");
-    let [mapping, _, top_of_stack, stack_size, guard, page_size]: [usize; 6] = line
+    let [.., top_of_stack, stack_size, guard, page_size]: [usize; 6] = line
         .split_whitespace()
         .map(|x| x.parse().unwrap())
         .collect::<Vec<_>>()
