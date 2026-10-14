@@ -389,3 +389,69 @@ fn sanitizes_stack_copies() {
     assert_eq!(waitres.code(), None);
     assert_eq!(status, libc::SIGKILL);
 }
+
+// Ensures that reads stop right at a guard page, whichever way the memory is read
+#[test]
+fn reads_until_guard_page() {
+    use minidump_writer::{ProcessReaderKind, minidump_writer::MinidumpWriter};
+
+    let mut child = start_child_and_return(&["spawn_guarded_mmap_wait"]);
+    let pid = child.id() as i32;
+
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().expect("Can't open stdout"))
+        .read_line(&mut line)
+        .expect("Couldn't read address provided by child");
+    let [mapping, map_len, .., guard, page_size]: [usize; 6] = line
+        .split_whitespace()
+        .map(|x| x.parse().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let mut dumper = assert_no_soft_errors!(
+        soft_errors,
+        remote_mw_config(pid, pid).build_for_testing(&mut soft_errors)
+    )
+    .expect("Couldn't init dumper");
+
+    for kind in [
+        ProcessReaderKind::VirtualMem,
+        ProcessReaderKind::File,
+        ProcessReaderKind::Ptrace,
+    ] {
+        let name = format!("{kind:?}");
+        dumper
+            .process_inspector
+            .force_process_reader_kind(kind)
+            .unwrap();
+
+        // Start in the middle of a page, to check that the reads stop at the
+        // guard page rather than at some multiple of the page size.
+        let src = mapping + 100;
+        let data = MinidumpWriter::read_until_guard(
+            dumper.process_inspector.as_ref(),
+            page_size,
+            src,
+            map_len - 100,
+        )
+        .unwrap_or_else(|e| panic!("{name}: read failed: {e}"));
+        assert_eq!(data.len(), guard - src, "{name}");
+        assert!(data.iter().all(|&b| b == 0xab), "{name}");
+
+        assert!(
+            MinidumpWriter::read_until_guard(
+                dumper.process_inspector.as_ref(),
+                page_size,
+                guard,
+                page_size
+            )
+            .is_err(),
+            "{name}: read starting at the guard page succeeded"
+        );
+    }
+
+    drop(dumper);
+    child.kill().expect("Failed to kill process");
+    child.wait().expect("Failed to wait for child");
+}

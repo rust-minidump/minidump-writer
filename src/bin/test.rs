@@ -304,6 +304,58 @@ mod linux {
         }
     }
 
+    /// If MADV_GUARD_INSTALL fails, backup method to use to install
+    /// test guard pages.
+    enum BackupGuard {
+        Unmap,
+        MProtect,
+    }
+
+    /// Maps 4 pages filled with 0xab, with an unreadable guard page in the
+    /// third one, and prints the mapping address, mapping length, top of
+    /// stack, stack size, guard page address and page size.
+    fn spawn_guarded_mmap_wait(backup_guard: BackupGuard) -> Result<()> {
+        // Not in the libc crate yet.
+        const MADV_GUARD_INSTALL: libc::c_int = 102;
+
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let len = 4 * page_size;
+        let mapping = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        test!(mapping != libc::MAP_FAILED, "mmap failed");
+        unsafe { ptr::write_bytes(mapping.cast::<u8>(), 0xab, len) };
+
+        let guard = unsafe { mapping.add(2 * page_size) };
+        let top_of_stack = unsafe { mapping.add(3 * page_size) };
+        let stack_size = page_size;
+        let rc = unsafe { libc::madvise(guard, page_size, MADV_GUARD_INSTALL) };
+        if rc != 0 {
+            let rc = match backup_guard {
+                BackupGuard::Unmap => unsafe { libc::munmap(guard, page_size) },
+                BackupGuard::MProtect => unsafe {
+                    libc::mprotect(guard, page_size, libc::PROT_NONE)
+                },
+            };
+            test!(rc == 0, "couldn't install the guard page");
+        }
+
+        println!(
+            "{} {} {} {} {} {page_size}",
+            mapping as usize, len, top_of_stack as usize, stack_size, guard as usize,
+        );
+        loop {
+            thread::park();
+        }
+    }
+
     fn spawn_mmap_wait() -> Result<()> {
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         assert!(page_size > 0);
@@ -397,6 +449,8 @@ mod linux {
                 "mappings_include_linux_gate" => test_mappings_include_linux_gate(),
                 "linux_gate_mapping_id" => test_linux_gate_mapping_id(),
                 "spawn_mmap_wait" => spawn_mmap_wait(),
+                "spawn_guarded_mmap_wait" => spawn_guarded_mmap_wait(BackupGuard::Unmap),
+                "spawn_guarded_stack_wait" => spawn_guarded_mmap_wait(BackupGuard::MProtect),
                 "spawn_alloc_wait" => spawn_alloc_wait(),
                 _ => Err("Len 1: Unknown test option".into()),
             },
