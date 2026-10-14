@@ -1,5 +1,6 @@
 use crate::module_reader::{ModuleMemoryReadError, ProcessModuleMemoryReader};
 use crate::serializers::*;
+use crate::vec_extension::*;
 use goblin::container::{Container, Ctx, Endian};
 use goblin::mach::{
     self,
@@ -34,6 +35,8 @@ pub enum ModuleReaderError {
     ),
     #[error("failed to derive parsing context from MachO memory")]
     MissingCtx,
+    #[error("failed to pre-allocate memory")]
+    AllocError(#[from] TryReserveError),
 }
 
 macro_rules! read_scroll {
@@ -47,7 +50,7 @@ macro_rules! read_scroll {
 macro_rules! read_scroll_array {
     ( $T:ty , $mem:expr , $offset:expr , $count:expr , $ctx:expr ) => {{
         let bytes = $mem.read($offset, (<$T>::size_with(&$ctx) * $count) as u64)?;
-        let mut vals = Vec::with_capacity($count);
+        let mut vals = vec_with_capacity($count)?;
         let mut offset = 0;
         for _ in 0..$count {
             let (value, bytes_read) = <$T>::try_from_ctx(&bytes[offset..], $ctx)?;
@@ -79,7 +82,7 @@ impl ProcessModuleMemoryReader<'_> {
         Error: From<ModuleMemoryReadError>,
     {
         let bytes = self.read(offset, (T::size_with(&ctx) * count) as u64)?;
-        let mut vals = Vec::with_capacity(count);
+        let mut vals = vec_with_capacity(count)?;
         let mut offset = 0;
         for _ in 0..count {
             let (value, bytes_read) = match T::try_from_ctx(&bytes[offset..], ctx) {

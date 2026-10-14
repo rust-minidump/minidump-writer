@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use {
-    crate::module_reader::ProcessModuleMemoryReader,
+    crate::{module_reader::ProcessModuleMemoryReader, vec_extension::TryReserveError},
     mach2::{
         kern_return::KERN_SUCCESS,
         task::task_info,
@@ -57,12 +57,16 @@ struct ImageInfo {
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
-#[error("Copy from process {child} failed (source {src}, length: {length})")]
-pub struct CopyFromProcessError {
-    pub child: ProcessHandle,
-    pub src: usize,
-    pub length: usize,
-    pub kern_return: mach2::kern_return::kern_return_t,
+pub enum CopyFromProcessError {
+    #[error("Copy from process {child} failed (source {src}, length: {length})")]
+    ReadError {
+        child: ProcessHandle,
+        src: usize,
+        length: usize,
+        kern_return: mach2::kern_return::kern_return_t,
+    },
+    #[error("failed to pre-allocate memory")]
+    AllocError(#[from] TryReserveError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,7 +104,7 @@ impl ProcessReader<'_> {
         if res == KERN_SUCCESS {
             Ok(size as usize)
         } else {
-            Err(CopyFromProcessError {
+            Err(CopyFromProcessError::ReadError {
                 child: self.process,
                 src,
                 length: dst.len(),
