@@ -7,6 +7,7 @@ pub use crate::windows::process_reader::*;
 #[cfg(target_os = "macos")]
 pub use crate::mac::process_reader::*;
 
+use crate::vec_extension::vec_with_capacity;
 use std::{ffi::CString, mem::MaybeUninit};
 
 impl ProcessReader<'_> {
@@ -123,7 +124,7 @@ impl ProcessReader<'_> {
         src: usize,
         num: usize,
     ) -> Result<Vec<MaybeUninit<T>>, CopyFromProcessError> {
-        let mut v = Vec::with_capacity(num);
+        let mut v = vec_with_capacity(num)?;
         for _ in 0..num {
             v.push(MaybeUninit::<T>::uninit());
         }

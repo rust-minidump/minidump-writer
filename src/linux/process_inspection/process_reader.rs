@@ -3,6 +3,7 @@ use super::{
     maps_reader::{MappingInfo, MapsReaderError},
 };
 use crate::module_reader::ProcessModuleMemoryReader;
+use crate::vec_extension::*;
 
 use plain::Plain;
 
@@ -105,7 +106,7 @@ impl<'a> ProcessReader<'a> {
         mut address: usize,
         count: usize,
     ) -> Result<Vec<T>, CopyFromProcessError> {
-        let mut v = Vec::with_capacity(count);
+        let mut v = vec_with_capacity(count)?;
         for _ in 0..count {
             v.push(self.read_pod(address)?);
             address += std::mem::size_of::<T>();
@@ -182,6 +183,8 @@ pub enum CopyFromProcessError {
     Backend(Error),
     #[error("an invalid argument was passed")]
     InvalidArgument,
+    #[error("failed to pre-allocate memory")]
+    CapacityError(#[from] TryReserveError),
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
