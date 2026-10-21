@@ -20,3 +20,8 @@ linker = "aarch64-linux-android30-clang"
 # By default the linker _doesn't_ generate a build-id, however we want one for our tests.
 rustflags = ["-C", "link-args=-Wl,--build-id=sha1"]
 runner = [".cargo/android-runner.sh"]
+
+# The FreeBSD linker doesn't generate a build-id by default; the tests rely
+# on one being present.
+[target.x86_64-unknown-freebsd]
+rustflags = ["-C", "link-args=-Wl,--build-id=sha1"]

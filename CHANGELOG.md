@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Added
+- [PR#183](https://github.com/rust-minidump/minidump-writer/pull/183) added FreeBSD support (x86_64): process inspection via `ptrace`(`PT_IO`, `PT_GETREGS`, `PT_SUSPEND`), maps via `kinfo_getvmmap`, ELF module/build-id/soname reading, and the full minidump writer stream set, resolving [#162](https://github.com/rust-minidump/minidump-writer/issues/162).
+
 ## [0.13.0] - 2026-07-20
 ### Changed
 - [PR#174](https://github.com/rust-minidump/minidump-writer/pull/174) and [PR#175](https://github.com/rust-minidump/minidump-writer/pull/175) refactored `src/linux/thread_info`.

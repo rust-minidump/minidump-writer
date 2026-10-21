@@ -13,6 +13,9 @@ pub use crate::windows::module_reader::*;
 #[cfg(target_os = "macos")]
 pub use crate::mac::module_reader::*;
 
+#[cfg(target_os = "freebsd")]
+pub use crate::freebsd::module_reader::*;
+
 pub struct ProcessModuleMemoryReader<'a> {
     pub(super) reader: &'a ProcessReader<'a>,
     pub(super) start_address: u64,
