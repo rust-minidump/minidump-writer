@@ -16,6 +16,8 @@ pub mod app_memory;
 pub mod auxv;
 pub mod crash_context;
 pub mod dumper_cpu_info;
+pub mod maps_reader;
+pub mod module_reader;
 pub mod thread_info;
 pub mod vm_permissions;
 
