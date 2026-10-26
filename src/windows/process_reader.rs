@@ -1,6 +1,9 @@
 use {
     super::ffi::{self, HMODULE},
-    crate::{module_reader::ProcessModuleMemoryReader, serializers::serialize_io_error},
+    crate::{
+        module_reader::ProcessModuleMemoryReader, serializers::serialize_io_error,
+        vec_extension::TryReserveError,
+    },
     std::{
         convert::TryInto,
         ffi::OsString,
@@ -18,13 +21,17 @@ pub struct ProcessReader<'a> {
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
-#[error("Copy from process {child} failed (source {src}, length: {length})")]
-pub struct CopyFromProcessError {
-    pub child: ProcessHandle,
-    pub src: usize,
-    pub length: usize,
-    #[serde(serialize_with = "serialize_io_error")]
-    pub error: std::io::Error,
+pub enum CopyFromProcessError {
+    #[error("Copy from process {child} failed (source {src}, length: {length})")]
+    ReadError {
+        child: ProcessHandle,
+        src: usize,
+        length: usize,
+        #[serde(serialize_with = "serialize_io_error")]
+        error: std::io::Error,
+    },
+    #[error("failed to pre-allocate memory")]
+    AllocError(#[from] TryReserveError),
 }
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
@@ -60,7 +67,7 @@ impl ProcessReader<'_> {
         if res != ffi::FALSE {
             Ok(size)
         } else {
-            Err(CopyFromProcessError {
+            Err(CopyFromProcessError::ReadError {
                 child: self.process,
                 src,
                 length: dst.len(),
