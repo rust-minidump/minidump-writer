@@ -104,6 +104,12 @@ pub struct VMRegionInfo {
     pub range: std::ops::Range<u64>,
 }
 
+impl VMRegionInfo {
+    fn is_readable(&self) -> bool {
+        self.info.protection & mach2::vm_prot::VM_PROT_READ != 0
+    }
+}
+
 /// Similarly to PtraceDumper for Linux, this provides access to information
 /// for a task (MacOS process)
 pub struct TaskDumper {
@@ -205,7 +211,7 @@ impl TaskDumper {
             if size_to_end < 4 * 1024 {
                 let maybe_adjacent = self.get_vm_region(region.range.end)?;
 
-                if maybe_adjacent.range.start == region.range.end {
+                if maybe_adjacent.range.start == region.range.end && maybe_adjacent.is_readable() {
                     size_to_end += maybe_adjacent.range.end - maybe_adjacent.range.start;
                 }
             }
