@@ -417,7 +417,12 @@ impl Drop for Server {
     fn drop(&mut self) {
         // SAFETY: syscall
         unsafe {
-            mach_port::mach_port_deallocate(mach_task_self(), self.port);
+            mach_port::mach_port_mod_refs(
+                mach_task_self(),
+                self.port,
+                port::MACH_PORT_RIGHT_RECEIVE,
+                -1,
+            );
         }
     }
 }
@@ -558,5 +563,56 @@ impl Drop for AckReceiver {
         unsafe {
             mach_port::mach_port_deallocate(mach_task_self(), self.port);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Server, kern_return_t, port};
+    use mach2::{
+        kern_return::{KERN_INVALID_NAME, KERN_SUCCESS},
+        traps::mach_task_self,
+    };
+    use std::ffi::CString;
+
+    #[test]
+    fn server_drop_releases_receive_right() {
+        let name = CString::new(format!("crash-context.server-drop.{}", std::process::id()))
+            .expect("invalid service name");
+        let server = Server::create(&name).expect("failed to create server");
+        let task = unsafe { mach_task_self() };
+        let port = server.port;
+        let mut references = 0;
+
+        assert_eq!(
+            unsafe {
+                mach_port_get_refs(task, port, port::MACH_PORT_RIGHT_RECEIVE, &mut references)
+            },
+            KERN_SUCCESS
+        );
+        assert_eq!(references, 1);
+        assert_eq!(
+            unsafe { mach_port_get_refs(task, port, port::MACH_PORT_RIGHT_SEND, &mut references) },
+            KERN_SUCCESS
+        );
+        assert_eq!(references, 0);
+
+        drop(server);
+
+        assert_eq!(
+            unsafe {
+                mach_port_get_refs(task, port, port::MACH_PORT_RIGHT_RECEIVE, &mut references)
+            },
+            KERN_INVALID_NAME
+        );
+    }
+
+    unsafe extern "C" {
+        fn mach_port_get_refs(
+            task: port::mach_port_t,
+            name: port::mach_port_name_t,
+            right: port::mach_port_right_t,
+            references: *mut port::mach_port_urefs_t,
+        ) -> kern_return_t;
     }
 }
