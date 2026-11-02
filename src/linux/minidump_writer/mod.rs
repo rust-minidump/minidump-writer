@@ -978,6 +978,9 @@ impl MinidumpWriter {
         // Zero memory that is below the current stack pointer.
         let offset =
             (sp_offset + std::mem::size_of::<usize>() - 1) & !(std::mem::size_of::<usize>() - 1);
+        // A truncated copy (e.g. a guard page in the middle of the stack) can
+        // be shorter than the rounded offset; never index past the data.
+        let offset = offset.min(stack_copy.len());
         for x in &mut stack_copy[0..offset] {
             *x = 0;
         }
