@@ -55,7 +55,7 @@ pub enum ModuleReaderError {
         "failed to calculate build id\n\
     ... from program headers: {program_headers}\n\
     ... from sections: {section}\n\
-    ... from the text section: {section}"
+    ... from the text section: {generated}"
     )]
     NoBuildId {
         program_headers: Box<Self>,
