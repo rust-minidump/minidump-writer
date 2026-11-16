@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+### Changed
+- [PR#210](https://github.com/rust-minidump/minidump-writer/pull/210) changed several APIs to take module addresses instead of indexes in the module list.
+- [PR#240](https://github.com/rust-minidump/minidump-writer/pull/240) bumped the MSRV to 1.90.
+- [PR#246](https://github.com/rust-minidump/minidump-writer/pull/246) made annotations to large for fitting in memory fail gracefully instead of panicking.
+- [PR#247](https://github.com/rust-minidump/minidump-writer/pull/246) and [PR#251](https://github.com/rust-minidump/minidump-writer/pull/251) updated various dependencies.
+
+### Fixed
+- [PR#196](https://github.com/rust-minidump/minidump-writer/pull/196) fixed some flakiness in the Linux tests.
+- [PR#209](https://github.com/rust-minidump/minidump-writer/pull/209) fixed a race in the Android tests.
+- [PR#206](https://github.com/rust-minidump/minidump-writer/pull/206) improved the Android tests.
+- [PR#207](https://github.com/rust-minidump/minidump-writer/pull/207) made the soft error stream tests more robust.
+- [PR#213](https://github.com/rust-minidump/minidump-writer/pull/213) fixed some linting issues.
+- [PR#245](https://github.com/rust-minidump/minidump-writer/pull/245) fixed handling stack guards created using MADV_GUARD_INSTALL.
+- [PR#250](https://github.com/rust-minidump/minidump-writer/pull/250) fixes reading memory adjacent to guard pages on macOS.
+- [PR#252](https://github.com/rust-minidump/minidump-writer/pull/252) fixed a potential panic and an typo in an error message.
+
+
+### Added
+- [PR#198](https://github.com/rust-minidump/minidump-writer/pull/198), [PR#199](https://github.com/rust-minidump/minidump-writer/pull/199), [PR#200](https://github.com/rust-minidump/minidump-writer/pull/200), [PR#201](https://github.com/rust-minidump/minidump-writer/pull/201), [PR#202](https://github.com/rust-minidump/minidump-writer/pull/202), [PR#203](https://github.com/rust-minidump/minidump-writer/pull/203), [PR#216](https://github.com/rust-minidump/minidump-writer/pull/216), [PR#217](https://github.com/rust-minidump/minidump-writer/pull/217), [PR#218](https://github.com/rust-minidump/minidump-writer/pull/218), [PR#219](https://github.com/rust-minidump/minidump-writer/pull/219), [PR#238](https://github.com/rust-minidump/minidump-writer/pull/238) and [PR#248](https://github.com/rust-minidump/minidump-writer/pull/248) added remote dumping to enable isolated process support.
+- [PR#194](https://github.com/rust-minidump/minidump-writer/pull/194) and [PR#197](https://github.com/rust-minidump/minidump-writer/pull/197) Enable ARM64 Android emulator tests.
+- [PR#208](https://github.com/rust-minidump/minidump-writer/pull/208) added tests covering the module list.
+- [PR#212](https://github.com/rust-minidump/minidump-writer/pull/212), [PR#215](https://github.com/rust-minidump/minidump-writer/pull/215), [PR#220](https://github.com/rust-minidump/minidump-writer/pull/220), [PR#221](https://github.com/rust-minidump/minidump-writer/pull/221), [PR#228](https://github.com/rust-minidump/minidump-writer/pull/228), [PR#234](https://github.com/rust-minidump/minidump-writer/pull/234) and [PR#235](https://github.com/rust-minidump/minidump-writer/pull/235) added support for retrieving the module list using the debugger rendez-vous.
+
 ## [0.13.0] - 2026-07-20
 ### Changed
 - [PR#174](https://github.com/rust-minidump/minidump-writer/pull/174) and [PR#175](https://github.com/rust-minidump/minidump-writer/pull/175) refactored `src/linux/thread_info`.
