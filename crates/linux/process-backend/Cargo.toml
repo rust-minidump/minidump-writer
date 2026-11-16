@@ -3,7 +3,6 @@ name = "process-backend"
 version = "0.2.0"
 description = "Providers helpers for reading process memory specialized for minidump-writer"
 repository.workspace = true
-homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
