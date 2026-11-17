@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.14.0] - 2026-11-17
 ### Changed
 - [PR#210](https://github.com/rust-minidump/minidump-writer/pull/210) changed several APIs to take module addresses instead of indexes in the module list.
 - [PR#240](https://github.com/rust-minidump/minidump-writer/pull/240) bumped the MSRV to 1.90.
@@ -226,7 +227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release, including basic support for `x86_64-unknown-linux-gnu/musl` and `x86_64-pc-windows-msvc`
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.13.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/0.14.0...HEAD
+[0.14.0]: https://github.com/rust-minidump/minidump-writer/compare/0.13.0...0.14.0
 [0.13.0]: https://github.com/rust-minidump/minidump-writer/compare/0.12.0...0.13.0
 [0.12.0]: https://github.com/rust-minidump/minidump-writer/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/rust-minidump/minidump-writer/compare/0.10.2...0.11.0
