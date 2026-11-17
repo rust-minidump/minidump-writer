@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
+## [0.2.0] - 2026-11-17
 ### Changed
 - Breaking changes to several APIs
 
@@ -16,5 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release.
 
 <!-- next-url -->
-[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/process-backend-0.1.0...HEAD
+[Unreleased]: https://github.com/rust-minidump/minidump-writer/compare/process-backend-0.2.0...HEAD
+[0.2.0]: https://github.com/rust-minidump/minidump-writer/compare/process-backend-0.1.0...process-backend-0.2.0
 [0.1.0]: https://github.com/rust-minidump/minidump-writer/releases/tag/process-backend-0.1.0
